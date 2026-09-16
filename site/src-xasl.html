@@ -1,0 +1,109 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>src/xasl — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html">모듈 경계</a></li>
+<li><a href="measurement.html">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html" class="cur"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>src/xasl</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 3건</p>
+<blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
+<h3>1. 소스 목적 및 사용처 (함수별)</h3>
+<p>파서(클라이언트)와 실행기(서버)가 공유하는 XASL 플랜 타입 정의 — 헤더 중심 모듈. <code>xasl_predicate.hpp</code>(<code>PRED_EXPR</code>, <code>COMP_EVAL_TERM</code>), <code>xasl_aggregate.hpp</code>, <code>xasl_analytic.hpp</code>, <code>xasl_stream.hpp</code>(직렬화 포맷 상수), <code>xasl_unpack_info.hpp</code>(역직렬화 컨텍스트), <code>xasl_sp.hpp</code>. 파이프라인: parser/가 XASL_NODE 트리 생성 → <code>query/xasl_to_stream.c</code>로 직렬화 → <code>query/stream_to_xasl.c</code>로 역직렬화 → <code>query/query_executor.c</code>가 실행. 직렬화/역직렬화 진입점은 query 모듈에 있지만 이 모듈의 타입·스트림 유틸이 그 경계를 정의하므로 함께 표에 둔다.</p>
+<div class="tbl"><table><thead><tr><th>함수</th><th>파일</th><th>목적</th><th>주요 사용처(호출자)</th></tr></thead><tbody>
+<tr><td><code>xts_map_xasl_to_stream</code></td><td>query/xasl_to_stream.c:278</td><td>XASL 트리 → 바이트 스트림 직렬화(클라이언트)</td><td>query/execute_statement.c:9147·:9999·:10843</td></tr>
+<tr><td><code>xts_map_filter_pred_to_stream</code></td><td>query/xasl_to_stream.c:380</td><td>필터 인덱스 술어 직렬화</td><td>query/execute_schema.c:3422·:15913</td></tr>
+<tr><td><code>stx_map_stream_to_xasl</code></td><td>query/stream_to_xasl.c:212</td><td>바이트 스트림 → XASL 역직렬화(서버)</td><td>query/query_manager.c:1214, query/xasl_cache.c:1133, parallel/px_scan/px_scan_task.cpp:597</td></tr>
+<tr><td><code>stx_map_stream_to_xasl_node_header</code></td><td>query/stream_to_xasl.c:176</td><td>스트림에서 XASL 노드 헤더만 역직렬화</td><td>query/list_file.c:1145</td></tr>
+<tr><td><code>stx_map_stream_to_filter_pred</code></td><td>query/stream_to_xasl.c:291</td><td>필터 인덱스 술어 역직렬화</td><td>query/filter_pred_cache.c:409, storage/btree_load.c:957·:1147</td></tr>
+<tr><td><code>stx_init_xasl_unpack_info</code></td><td>xasl_stream.cpp:74</td><td>역직렬화 컨텍스트(XASL_UNPACK_INFO) 초기화</td><td>stream_to_xasl.c 진입 경로</td></tr>
+<tr><td><code>stx_alloc_struct</code></td><td>xasl_stream.cpp:221</td><td>unpack 버퍼 내 구조체 할당(개별 free 없음)</td><td>stream_to_xasl.c 전역</td></tr>
+<tr><td><code>stx_mark_struct_visited</code> / <code>stx_get_struct_visited_ptr</code></td><td>xasl_stream.cpp:119 / :167</td><td>공유 노드 중복 역직렬화 방지(방문 표시/조회)</td><td>stream_to_xasl.c 전역</td></tr>
+<tr><td><code>stx_build_db_value</code> / <code>stx_build_string</code></td><td>xasl_stream.cpp:279 / :287</td><td>기본 타입 역직렬화 유틸</td><td>stream_to_xasl.c</td></tr>
+<tr><td><code>get_xasl_unpack_info_ptr</code> / <code>set_xasl_unpack_info_ptr</code></td><td>xasl_unpack_info.cpp:37 / :52</td><td>스레드별 unpack info 컨텍스트 접근</td><td>stream_to_xasl.c, xasl_stream.cpp</td></tr>
+<tr><td><code>free_xasl_unpack_info</code></td><td>xasl_unpack_info.cpp:69</td><td>unpack 버퍼 일괄 해제</td><td>query_manager, xasl_cache 클론 해제 경로</td></tr>
+<tr><td><code>cubxasl::pred_expr::clear_xasl</code></td><td>xasl_predicate.cpp:32</td><td>술어 트리 내 DB_VALUE 정리(재귀)</td><td>query/regu_var.cpp:155, qexec_clear_pred 계열</td></tr>
+<tr><td><code>cubxasl::spawner::spawn</code> (오버로드 다수)</td><td>xasl_spawner.cpp:37~</td><td>병렬 실행용 PRED_EXPR/REGU_VARIABLE 깊은 복제</td><td>parallel/px_hash_join/px_hash_join_spawn_manager.cpp:132~146</td></tr>
+<tr><td><code>cubxasl::iterate_xasl_tree</code> / <code>iterate_regu_var</code></td><td>xasl_iteration.hpp:32 / :34</td><td>XASL 트리/REGU 트리 순회 유틸(std::function)</td><td>parallel/px_query_execute/px_query_executor.cpp:319·:357</td></tr>
+<tr><td><code>analytic_list_node::init</code></td><td>xasl_analytic.cpp:32</td><td>분석 함수 노드 초기화</td><td>query_analytic 실행 경로</td></tr>
+</tbody></table></div>
+<h3>2. 분석 내용 (함수별)</h3>
+<blockquote>항목은 함수 단위로 기술한다 — 각 항목의 제목/선두가 함수·파일명이다. 새 분석도 함수명을 앞세워 추가할 것.</blockquote>
+<h4>모듈 일반</h4>
+<ul>
+<li>CS_MODE와 SERVER_MODE가 공유 — <strong>모드별 가드 사용 불가</strong>.</li>
+<li><code>REGU_VARIABLE</code>이 가장 복잡한 타입 — 깊이 중첩된 union.</li>
+<li>여기 변경은 보통 <code>parser/xasl_generation.c</code>, <code>query/xasl_to_stream.c</code>, <code>query/stream_to_xasl.c</code>의 연쇄 수정을 요구한다.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span><code>#if defined(SERVER_MODE)</code> 류 모드 가드가 이 모듈에 들어오지 않았는가?</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>union 멤버 접근이 해당 노드 타입과 일치하는가?</li>
+</ul>
+<p>(원본: src/xasl/AGENTS.md)</p>
+<h4>xts_map_xasl_to_stream / stx_map_stream_to_xasl (query/xasl_to_stream.c:278 / query/stream_to_xasl.c:212)</h4>
+<ul>
+<li>구조체는 클라이언트(직렬화기)와 서버(역직렬화기) 간 일치 필수. <strong>XASL 구조체에 필드를 추가하면 직렬화 그리고 역직렬화 양쪽을 갱신해야 한다 — 불일치는 크래시</strong>(스트림 오프셋이 밀려 이후 필드 전체가 오염된다). 버전 불일치도 같은 이유로 크래시.</li>
+<li>필터 술어 경로(<code>xts_map_filter_pred_to_stream</code> / <code>stx_map_stream_to_filter_pred</code>)도 같은 대칭 규약을 따른다 — 술어 타입(<code>xasl_predicate.hpp</code>) 변경 시 함께 볼 것.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>필드 추가/변경이 xasl_generation·xasl_to_stream·stream_to_xasl 3곳에 모두 반영됐는가?</li>
+</ul>
+<h3>3. 예비 이슈 사항</h3>
+<blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
+<ul>
+<li>(현재 등록된 예비 이슈 없음)</li>
+</ul>
+<h3>4. 진행중인 작업</h3>
+<blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
+<h4>.50</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.51</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.52</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>

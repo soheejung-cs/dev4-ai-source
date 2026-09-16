@@ -1,0 +1,83 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>모듈 경계 — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html" class="cur">모듈 경계</a></li>
+<li><a href="measurement.html">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>모듈 경계</h1>
+<h4>통계 객체 dangling은 CBRD-27039(동시 fetch 견고성)와 동일 결함군</h4>
+<p>히스토그램 borrow 포인터 dangling 결함은 CBRD-27039(통계 동시 fetch 견고성)와 같은 결함군으로 분류된다. 공통 패턴은 "통계 객체를 여러 주체가 동시에 fetch/무효화하는데 참조자가 소유권을 갖지 않는다"이며, reservoir 브랜치의 histogram gaps(eqjoinsel/IN/correlation/mergejoinscansel/LIKE-prefix/min-max 미비) 전반과 함께 봐야 한다. 개별 크래시로 취급하면 같은 패턴이 다른 경로에서 재발한다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>통계 fetch/무효화 관련 수정 리뷰 시 CBRD-27039 계열의 동시성·소유권 패턴을 함께 점검할 것.</li>
+</ul>
+<h4>해시조인 크래시 노출 조건 — 자동 선택 + probe 측 페이지 초과 튜플 + 병렬 실행</h4>
+<p>이 크래시는 세 조건이 겹칠 때만 노출된다: (1) 해시조인이 선택됨 — PR#6782 이후 USE_HASH 힌트 없이도 해시조인 플랜이 생성된다, (2) probe 스트림에 페이지를 넘는 큰 튜플이 존재(JOB 7c의 <code>person_info.info</code> 전기문), (3) 병렬 해시조인으로 실행. 옵티마이저 로직과 무관한 실행기(executor) 버그이며 develop에서 USE_HASH 힌트로 재현 가능할 것으로 판단된다(2026-07-03 코어 덤프). 옵티마이저 변경으로 해시조인 채택률이 오르면 이 실행기 결함의 노출면이 그대로 넓어진다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>해시조인 회귀 테스트에 큰 LOB/긴 문자열 컬럼이 probe 측에 오는 케이스를 반드시 포함할 것.</li>
+</ul>
+<h4>BUILDLIST(GROUP BY) 집계 operand는 전부 TYPE_CONSTANT — 식은 xasl_generation이 스캔으로 옮긴다</h4>
+<p>GROUP BY가 있는 BUILDLIST 플랜에서는 집계 함수 operand가 전부 <code>TYPE_CONSTANT</code>다. 식이 <code>xasl_generation</code>(파서 단계)에서 스캔 쪽으로 이동하기 때문이며, 실제 산술 노드(INARITH)는 BUILDVALUE 플랜에서만 나타난다. 이를 몰라서 커밋1의 Q1 측정(-2.6%)은 실제로는 프로그램이 비활성인 no-op 측정이었고, 대응으로 <code>expr_prog_compile_roots</code>(feature/expression-compile 기준 <code>src/query/expr_compile.c:2052</code>)에 <code>allow_wired_only</code> 인자를 추가해 집계 훅만 wired-only를 허용한다(<code>src/query/query_aggregate.cpp:1006</code>). 커널 0개·스텝 0개면 <code>expr_compile.c:2132</code>의 <code>if (n_roots == 0 || (!compiled_something &amp;&amp; !allow_wired_only))</code>에서 프로그램을 폐기한다. 설계문서 9.1절 참조. (심볼은 feature/expression-compile 브랜치에만 존재 — develop/CBRD-27094에는 없음)</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>집계/식 최적화 성능 측정 전에 플랜이 BUILDLIST인지 BUILDVALUE인지 확인하고, <code>;trace</code>의 EXPR_COMPILE 덤프로 프로그램 발화 여부부터 검증할 것.</li>
+</ul>
+<h4>leaf deforming — 디코딩 플랜 캐시 + 레코드 레이아웃 1회 유도 + 타입 고정 readval 커널</h4>
+<p>스캔 리프의 값 디코딩도 컴파일 대상이며 세 커밋으로 나뉜다: <code>3c451fedd</code>(디코딩 플랜 캐시 — 타입 핸들러·고정폭 디스크 크기·해제 필요 여부를 표현(representation)당 1회 해석), <code>bed97db8f</code>(오브젝트 헤더 크기·가변 오프셋 폭·고정영역 시작·bound-bit를 레코드당 1회 유도), <code>eeab664c2</code>(타입 고정 readval 커널 INT/BIGINT/SHORT/FLOAT/DOUBLE/DATE/NUMERIC을 <code>heap_attrvalue_resolve_plan()</code>의 함수 포인터 <code>value-&gt;rd_readval</code>에 저장 — <code>src/storage/heap_file.c:10613</code>). lazy 경로는 arm 시 <code>heap_rec_layout_init (&amp;attr_info-&gt;lazy_layout, …)</code>(<code>heap_file.c:10995</code>)로 1회 유도한 레이아웃을 <code>heap_attrvalue_peek_lazy()</code>(<code>heap_file.c:11325</code>)와 공유한다. q1 17.78→16.25s, 17.97→16.45s 등의 효과.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>캐시 무효화가 "디스크립터(표현) 불일치 시 재구축" 하나에만 의존하므로, 스키마 변경·가변 오프셋·NULL 비트맵 변화가 이 조건으로 전부 잡히는지와 arm 이후 <code>lazy_recdes</code> 수명 동안 레이아웃이 변할 여지가 없는지 확인할 것.</li>
+</ul>
+<h4>q21/q1 "회귀"의 진짜 원인 — 행당 연산 감소가 px 워커의 pgbuf 래치·futex 경합을 앞당긴다</h4>
+<p>q21 +3.3%(병렬도 6 한정, 교차 A/B에서 실재: dev 50.26~50.80 vs feat 51.10~53.22)와 리베이스 후 q1 +1.5s는 코드 결함이 아니다. 직렬 웜 전체쿼리는 피처가 우세하고(226.57 vs 229.50s, 명령어 −2.5%, 사이클 −1.4%, LLC 미스 −42%), q1은 명령어·사이클 ±1% 동일에 L1i 미스는 오히려 −21%다. 원인은 행당 연산이 줄어 px 워커가 페이지 래치/큐에 더 빨리 도달해 futex 수면/기상이 늘어난 것으로, 병렬 프로파일에서 <code>native_queued_spin_lock</code> 0.49→3.39%, futex_wake/try_to_wake_up 증가에 유저 심볼은 전부 감소했다(HEAD <code>bed97db8f</code> / <code>dbc84e2d2</code> 교차 A/B). 즉 진짜 병목은 엔진 쪽 pgbuf 래치 경합이며, 식 평가를 빠르게 할수록 이 경합이 드러난다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>식/스캔 최적화 후 병렬 쿼리가 느려지면 유저 심볼 프로파일부터 보고(전부 감소면 코드 회귀 아님) 래치·futex로 옮겨간 것인지 판정하되, 병렬 단일런 수치로 회귀를 판정하지 말 것.</li>
+</ul>
+<h4>조인 순서를 PG와 완전히 맞춰도 남는 ~3.2배 엔진 상수 갭</h4>
+<p>JOB 17c/17d는 플랜이 PG와 동등한데도 15.4초 vs 4.8초로 약 3.2배 차이가 났다. 즉 조인 순서를 전부 맞춰도 PG 시간에 도달하지 못하며, 남는 갭은 옵티마이저 밖(실행 엔진 상수, 스캔·프로브 실제 처리 비용) 문제다. 옵티마이저 변경의 목표치를 잡을 때 이 상수항을 빼고 계산해야 한다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>"플랜이 같은데 여전히 3배 느림"을 옵티마이저 실패로 오판하지 말고, 플랜 동등성부터 확인한 뒤 동등하면 실행 엔진 쪽으로 원인을 넘길 것.</li>
+</ul>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>

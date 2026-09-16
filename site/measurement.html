@@ -1,0 +1,63 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>측정 방법론 — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html">모듈 경계</a></li>
+<li><a href="measurement.html" class="cur">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>측정 방법론</h1>
+<ul>
+<li>컨테이너 ps/top은 컨테이너 시야, /proc/stat·loadavg만 호스트. 측정 전 게이트 필수(동일 빌드 17% 흔들림 실증).</li>
+<li>질의당 min-of-N은 run 오염 못 잡음 → run 반복 median + rep별 host_idle 기록.</li>
+<li>판정 임계는 range 아닌 MAD(range는 n↑시 임계 확대 — median-of-10이 5보다 둔감해짐, 판정 1건 뒤집힘 검산).</li>
+<li>전 질의 "무변화"여도 부호검정 + 순서 반전 필수 — CBRD-27284의 9/9 p=0.0039이 순서 효과였음.</li>
+</ul>
+<p><strong><span class="chip c51">.51 — 범위·난수 일반</span></strong></p>
+<ul>
+<li><code>drand48()*N</code>을 인덱스로 캐스팅하면 [0,N-1]이지만 <strong>경계 포함 의도라면 off-by-one</strong> — 샘플링 코드 리뷰 시 범위 의도(포함/배제)를 주석과 대조. (PR #7463 리뷰에서 실제 지적)</li>
+</ul>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>

@@ -1,0 +1,112 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>src/connection — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html">모듈 경계</a></li>
+<li><a href="measurement.html">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html" class="cur"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>src/connection</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 3건</p>
+<blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
+<h3>1. 소스 목적 및 사용처 (함수별)</h3>
+<p>TCP 네트워킹, CSS(CUBRID Server/client Support) 프로토콜, HA 하트비트. <code>connection_sr.c</code>(서버 측)/<code>connection_cl.cpp</code>(클라이언트 측), <code>tcp.c</code>(소켓 연산), <code>heartbeat.c</code>(HA), <code>server_support.c</code>(서버 요청 디스패치)/<code>client_support.cpp</code>, <code>connection_support.cpp</code>(공용 송수신), <code>connection_defs.h</code>(<code>CSS_CONN_ENTRY</code>). develop 기준 클라이언트 측 다수 파일이 .cpp/클래스화(<code>connection_cl::</code>, <code>client_support::</code>)돼 있다.</p>
+<div class="tbl"><table><thead><tr><th>함수</th><th>파일</th><th>목적</th><th>주요 사용처(호출자)</th></tr></thead><tbody>
+<tr><td><code>css_send_data</code></td><td><code>connection_support.cpp:1619</code></td><td>응답 데이터 송신(CSS 헤더 포함)</td><td>서버 핸들러(<code>network_interface_sr.cpp</code>), 클라 지원층</td></tr>
+<tr><td><code>css_net_send</code> / <code>css_net_recv</code></td><td><code>connection_support.cpp:1150</code> / <code>:603</code></td><td>저수준 송신/수신(부분 전송 루프 포함)</td><td><code>css_send_*</code>/<code>css_receive_*</code> 계열 내부</td></tr>
+<tr><td><code>css_receive_data</code></td><td><code>connection_sr.c:1487</code></td><td>서버 측 요청 데이터 수신(타임아웃 지원)</td><td>서버 요청 처리 경로(<code>xs_receive_data_from_client</code> 등)</td></tr>
+<tr><td><code>css_connect_to_master_server</code></td><td><code>connection_sr.c:1066</code></td><td>서버가 마스터에 자신을 등록·연결</td><td>서버 부트(<code>css_init</code> 경로)</td></tr>
+<tr><td><code>css_init</code></td><td><code>server_support.c:553</code></td><td>서버 연결 서브시스템 초기화·요청 루프 진입</td><td><code>src/communication/network_sr.c:1154</code>(<code>net_server_start</code>)</td></tr>
+<tr><td><code>connection_cl::css_connect_to_cubrid_server</code></td><td><code>connection_cl.cpp:1093</code> (<code>connection_cl.h:80</code>)</td><td>클라이언트→서버 연결 수립</td><td><code>client_support.cpp:170/:201</code></td></tr>
+<tr><td><code>client_support::css_client_init</code></td><td><code>client_support.cpp:158</code> (<code>client_support.h:55</code>)</td><td>클라이언트 연결 초기화(마스터 경유 서버 접속)</td><td><code>src/communication/network_cl.c:3625</code>(<code>net_client_init</code>)</td></tr>
+<tr><td><code>css_tcp_client_open</code></td><td><code>tcp.c:166</code></td><td>TCP 클라이언트 소켓 열기</td><td>마스터/서버 접속 경로</td></tr>
+<tr><td><code>css_tcp_master_open</code></td><td><code>tcp.c:651</code></td><td>마스터 리슨 소켓 열기</td><td><code>cub_master</code> 기동</td></tr>
+<tr><td><code>hb_process_init</code></td><td><code>heartbeat.c:691</code></td><td>HA 프로세스(서버/copylogdb 등)의 하트비트 등록</td><td>HA 구성 프로세스 기동 경로</td></tr>
+</tbody></table></div>
+<h3>2. 분석 내용 (함수별)</h3>
+<blockquote>항목은 함수 단위로 기술한다 — 각 항목의 제목/선두가 함수·파일명이다. 새 분석도 함수명을 앞세워 추가할 것.</blockquote>
+<blockquote>(아래 주의점·리뷰 체크포인트의 원본: src/connection/AGENTS.md 증류)</blockquote>
+<h4>모듈 일반</h4>
+<ul>
+<li>SA_MODE에서도 <code>connection_cl.c</code>, <code>connection_less.c</code>, <code>connection_globals.c</code>, <code>connection_list_cl.c</code>, <code>connection_support.c</code>가 컴파일·링크된다 — TCP 연결은 없지만 파일은 빌드됨. (develop 기준 실제 확장자는 <code>connection_cl.cpp</code>/<code>connection_less.cpp</code>/<code>connection_list_cl.cpp</code>/ <code>connection_support.cpp</code>.)</li>
+<li>접두사 <code>css_</code>(CSS 프로토콜), <code>net_</code>(네트워크 층). 서버 파일은 SERVER_MODE, 클라 파일은 CS_MODE.</li>
+<li>서버 연결은 고정 크기 배열 <code>css_Conn_array</code>로 추적.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>SA 빌드에서도 컴파일되는 파일에 CS 전용 가정을 넣지 않았는가?</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>고정 크기 <code>css_Conn_array</code> 한도를 넘는 시나리오를 고려했는가?</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>요청-응답 프로토콜 변경이 클라·서버 양쪽에 대칭 반영됐는가?</li>
+</ul>
+<h4>css_send_data / css_receive_data (connection_support.cpp, connection_sr.c)</h4>
+<ul>
+<li><code>css_send_data()</code> / <code>css_receive_data()</code>는 부분 송수신 가능 — <strong>short read/write 처리 필수</strong>.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>송수신 코드가 부분 전송/수신을 루프로 처리하는가?</li>
+</ul>
+<h4>css_connect_to_cubrid_server (connection_cl.cpp)</h4>
+<ul>
+<li>클라이언트 연결 순서: <code>css_connect_to_master()</code> → <code>css_connect_to_cubrid_server()</code>.</li>
+</ul>
+<h4>hb_process_init (heartbeat.c)</h4>
+<ul>
+<li><code>heartbeat.c</code>는 HA 전용 — 복제 구성에서만 활성.</li>
+</ul>
+<h3>3. 예비 이슈 사항</h3>
+<blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
+<ul>
+<li>(현재 등록된 예비 이슈 없음)</li>
+</ul>
+<h3>4. 진행중인 작업</h3>
+<blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
+<h4>.50</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.51</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.52</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>

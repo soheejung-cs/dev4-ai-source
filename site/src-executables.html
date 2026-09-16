@@ -1,0 +1,115 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>src/executables — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html">모듈 경계</a></li>
+<li><a href="measurement.html">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html" class="cur"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>src/executables</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 3건</p>
+<blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
+<h3>1. 소스 목적 및 사용처 (함수별)</h3>
+<p>모든 CUBRID 바이너리의 진입점. <code>server.c</code>(<code>cub_server</code>), <code>csql.c</code>/<code>csql_launcher.c</code>(csql 셸), <code>master.c</code>(<code>cub_master</code> — 호스트의 서버 프로세스 관리)·<code>master_heartbeat.c</code>(HA), <code>util_service.c</code>(<code>cubrid</code> 서비스 명령), <code>util_admin.c</code>(관리 유틸 디스패치), <code>unloaddb.c</code>, <code>compactdb.c</code>, <code>util_common.c</code>(공용 헬퍼).</p>
+<div class="tbl"><table><thead><tr><th>함수</th><th>파일</th><th>목적</th><th>주요 사용처(호출자)</th></tr></thead><tbody>
+<tr><td><code>main</code></td><td><code>server.c:276</code></td><td><code>cub_server</code> 진입점 — <code>net_server_start()</code> 호출(:325)</td><td>OS 프로세스 기동</td></tr>
+<tr><td><code>main</code></td><td><code>master.c:1244</code></td><td><code>cub_master</code> 진입점 — HA 시 <code>hb_master_init()</code>(:1340)</td><td>OS 프로세스 기동</td></tr>
+<tr><td><code>main</code></td><td><code>util_service.c:534</code></td><td><code>cubrid</code> 서비스 명령 진입점</td><td>OS; 내부 디스패치 <code>process_service</code>(:1263)/<code>process_server</code>(:1628)</td></tr>
+<tr><td><code>main</code></td><td><code>util_admin.c:1095</code></td><td>관리 유틸리티(<code>cubrid &lt;util&gt;</code>) 디스패치 진입점</td><td><code>ua_Utility_Map[]</code>(:968)에서 유틸 검색 후 실행</td></tr>
+<tr><td><code>ua_Utility_Map[]</code></td><td><code>util_admin.c:968</code></td><td>유틸 이름→함수·인자맵 등록 테이블(<code>UTIL_MAP</code>)</td><td><code>util_admin.c</code> main/디스패치(:1115, :1136, :1223)</td></tr>
+<tr><td><code>main</code></td><td><code>csql_launcher.c:114</code></td><td>csql 실행 파일 진입점 — CS/SA 라이브러리에서 <code>csql</code> 심볼을 동적 로드(<code>DSO_HANDLE</code>) 후 호출</td><td>OS 프로세스 기동</td></tr>
+<tr><td><code>csql</code></td><td><code>csql.c:3230</code></td><td>csql 본체 진입(인자 구조체 <code>CSQL_ARGUMENT</code>) — <code>start_csql()</code>(:713) 호출(:3492)</td><td><code>csql_launcher.c</code>(동적 로드)</td></tr>
+<tr><td><code>start_csql</code></td><td><code>csql.c:713</code></td><td>csql 메인 루프(입력 읽기·세션 명령·실행)</td><td><code>csql()</code></td></tr>
+<tr><td><code>csql_execute_statements</code></td><td><code>csql.c:2183</code></td><td>입력 스트림의 SQL 문장 배치 실행</td><td><code>start_csql</code> 경로</td></tr>
+<tr><td><code>csql_do_session_cmd</code></td><td><code>csql.c:1084</code></td><td><code>;</code>로 시작하는 세션 명령 처리</td><td><code>start_csql</code> 입력 루프</td></tr>
+<tr><td><code>utility_initialize</code></td><td><code>util_common.c:72</code></td><td>유틸리티 공통 초기화(메시지 카탈로그 등)</td><td>각 유틸 진입점</td></tr>
+<tr><td><code>unloaddb</code></td><td><code>unloaddb.c:116</code></td><td><code>unloaddb</code> 유틸 본체(<code>UTIL_FUNCTION_ARG</code>)</td><td><code>ua_Utility_Map[]</code> 경유 디스패치</td></tr>
+<tr><td><code>compactdb</code></td><td><code>compactdb.c:98</code>(SA) / <code>compactdb_cl.c:787</code>(CS)</td><td><code>compactdb</code> 유틸 본체 — SA/CS 두 구현</td><td><code>ua_Utility_Map[]</code> 경유 디스패치</td></tr>
+<tr><td><code>hb_master_init</code></td><td><code>master_heartbeat.c:5250</code></td><td>마스터 프로세스 HA 하트비트 초기화</td><td><code>master.c:1340</code></td></tr>
+<tr><td><code>hb_reload_config</code></td><td><code>master_heartbeat.c:5576</code></td><td>HA 설정 리로드</td><td><code>cubrid heartbeat reconfig</code> 경로</td></tr>
+</tbody></table></div>
+<h3>2. 분석 내용 (함수별)</h3>
+<blockquote>항목은 함수 단위로 기술한다 — 각 항목의 제목/선두가 함수·파일명이다. 새 분석도 함수명을 앞세워 추가할 것.</blockquote>
+<blockquote>(아래 주의점·리뷰 체크포인트의 원본: src/executables/AGENTS.md 증류)</blockquote>
+<h4>모듈 일반</h4>
+<ul>
+<li>링크 대상 구분: 독립형 유틸(<code>loaddb</code>/<code>unloaddb</code>/<code>compactdb</code>)은 <code>cubridsa</code>(SA_MODE), 클라-서버 유틸은 <code>cubridcs</code>(CS_MODE).</li>
+<li>새 유틸리티 추가는 진입점 생성 + CMakeLists.txt 등록 + <code>util_common.c</code> 서브커맨드 등록.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>새/변경 유틸리티가 올바른 라이브러리(SA vs CS)에 링크되는가?</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>서브커맨드 등록(<code>util_common.c</code>)과 CMake 타깃이 함께 갱신됐는가?</li>
+</ul>
+<h4>loaddb 진입 (util_admin.c → src/loaddb/load_db.c)</h4>
+<ul>
+<li><code>loaddb</code>는 standalone/client-server 두 모드 — 코드 경로가 다르다. (실제 본체 <code>loaddb_dba</code>/<code>loaddb_user</code>는 <code>src/loaddb/load_db.c:953/:966</code>에 있고, <code>util_admin.c:989</code>의 <code>ua_Utility_Map[]</code>에 <code>loaddb_user</code>로 등록된다.)</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>loaddb 관련 수정이 두 실행 모드 모두에서 검토됐는가?</li>
+</ul>
+<h4>main (master.c)</h4>
+<ul>
+<li><code>master.c</code>는 데이터베이스 서버가 아니라 서버 프로세스들의 관리자.</li>
+</ul>
+<h4>csql / start_csql (csql.c)</h4>
+<ul>
+<li>csql은 자체 미니 프레임워크(session, result display, input handling) — 함수 접두사 <code>csql_</code>.</li>
+</ul>
+<h3>3. 예비 이슈 사항</h3>
+<blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
+<ul>
+<li>(현재 등록된 예비 이슈 없음)</li>
+</ul>
+<h3>4. 진행중인 작업</h3>
+<blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
+<h4>.50</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.51</h4>
+<ul>
+<li>PR#7561 (CBRD-27126): <code>cubrid calibratedb</code> 신설(util_sa.c, SA 전용) — O_DIRECT 마이크로벤치 + 스크래치 테이블 캘리브레이션으로 비용 파라미터 권장값 보고. 구현 완료, 사용자 검토 대기.</li>
+</ul>
+<h4>.52</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>

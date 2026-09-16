@@ -1,0 +1,63 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CUBRID 소스 노트 — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html" class="cur">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html">모듈 경계</a></li>
+<li><a href="measurement.html">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>CUBRID 소스 노트</h1><p class="lede">AGENTS.md 증류 + 컨테이너(.50/.51/.52) 축적 지식 — 모듈별 목적·분석·예비 이슈. git이 정본, 이 사이트는 웹 뷰.</p>
+<p><code>cubrid-source-notes</code>(@<code>8e22c700d</code>)를 2026-09-16 에 통째로 이관했다. <strong>소스 분석에 관한 것은 전부 여기에</strong> 쓴다. 리뷰 방식은 <code>dev4-review-workspace</code>, 일하는 방식·프로젝트 문서는 <code>claude-workspace</code>.</p>
+<pre><code>
+skills/source-learning/SKILL.md   소스 학습·기록 규약 — 어디에(§1~§4/대기소), 무엇을(검증 기준), 어떤 형식으로
+staging/환류대기.md               아직 모듈에 반영하지 않은 검증된 사실 (하루 1회 배치)
+modules/src-*.md                  모듈별 4부: §1 목적·사용처 / §2 분석 / §3 예비 이슈 / §4 진행 중
+common.md · cross.md · measurement.md · build-link.md   모듈 횡단 주제
+tools/gen_site.py                 site/ 정적 뷰 생성 (.51 이 http://192.168.6.51:8825/ 로 호스팅)
+README-source-notes-원본.md       이관 전 리포의 README (구조 설명·기여 규약)
+</code></pre>
+<p>소스 *구조* 는 엔진 리포 <code>AGENTS.md</code> 가 1차 정본 — 거기 있는 것은 여기 적지 않는다. 각 컨테이너: <code>git clone https://github.com/soheejung-cs/dev4-ai-source ~/dev/docs/dev4-ai-source</code>.</p><h2>공통 문서</h2><div class="cards"><a class="card" href="common.html"><span class="nm">공통</span><div class="st"><span>전 모듈 규칙</span></div></a><a class="card" href="build-link.html"><span class="nm">빌드·링크 구성</span><div class="st"><span>모듈 횡단</span></div></a><a class="card" href="cross.html"><span class="nm">모듈 경계</span><div class="st"><span>cross</span></div></a><a class="card" href="measurement.html"><span class="nm">측정 방법론</span><div class="st"><span>성능 검증 필수</span></div></a></div><h2>모듈</h2><div class="cards"><a class="card" href="src-base.html"><span class="nm">src/base</span><div class="st"><span>축적 7</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-storage.html"><span class="nm">src/storage</span><div class="st"><span>축적 20</span><span class="iss">⚠ 17</span></div></a><a class="card" href="src-transaction.html"><span class="nm">src/transaction</span><div class="st"><span>축적 6</span><span class="iss">⚠ 4</span></div></a><a class="card" href="src-query.html"><span class="nm">src/query</span><div class="st"><span>축적 21</span><span class="iss">⚠ 16</span></div></a><a class="card" href="src-xasl.html"><span class="nm">src/xasl</span><div class="st"><span>축적 2</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-optimizer.html"><span class="nm">src/optimizer</span><div class="st"><span>축적 24</span><span class="iss">⚠ 22</span></div></a><a class="card" href="src-parser.html"><span class="nm">src/parser</span><div class="st"><span>축적 4</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-compat.html"><span class="nm">src/compat</span><div class="st"><span>축적 4</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-object.html"><span class="nm">src/object</span><div class="st"><span>축적 5</span><span class="iss">⚠ 5</span></div></a><a class="card" href="src-executables.html"><span class="nm">src/executables</span><div class="st"><span>축적 4</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-loaddb.html"><span class="nm">src/loaddb</span><div class="st"><span>축적 6</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-method.html"><span class="nm">src/method</span><div class="st"><span>축적 3</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-sp.html"><span class="nm">src/sp</span><div class="st"><span>축적 4</span><span class="iss">⚠ 3</span></div></a><a class="card" href="pl_engine.html"><span class="nm">pl_engine</span><div class="st"><span>축적 2</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-broker.html"><span class="nm">src/broker</span><div class="st"><span>축적 4</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-connection.html"><span class="nm">src/connection</span><div class="st"><span>축적 4</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-communication.html"><span class="nm">src/communication</span><div class="st"><span>축적 3</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-thread.html"><span class="nm">src/thread</span><div class="st"><span>축적 3</span><span class="iss">⚠ 3</span></div></a><a class="card" href="src-monitor.html"><span class="nm">src/monitor</span><div class="st"><span>축적 3</span><span class="iss">⚠ 3</span></div></a><a class="card" href="unit_tests.html"><span class="nm">unit_tests</span><div class="st"><span>축적 2</span><span class="iss">⚠ 3</span></div></a></div>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>

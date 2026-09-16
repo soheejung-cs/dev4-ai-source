@@ -1,0 +1,130 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>src/loaddb — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html">모듈 경계</a></li>
+<li><a href="measurement.html">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html" class="cur"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>src/loaddb</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 3건</p>
+<blockquote>기준: upstream/develop 5f3a30d09 (2026-09-02)</blockquote>
+<h3>1. 소스 목적 및 사용처 (함수별)</h3>
+<p>bison/flex 문법 기반 대량 적재기. <code>load_grammar.yy</code> + <code>load_lexer.l</code>(입력 포맷 파싱), <code>load_driver.cpp</code>(오케스트레이션), <code>load_session.cpp</code>(배치), <code>load_worker_manager.cpp</code>(병렬 워커), <code>load_server_loader.cpp</code>(서버 측 직접 힙/인덱스 삽입), <code>load_sa_loader.cpp</code>(SA 모드 클라이언트 로더), <code>load_db_value_converter.cpp</code>(문자열→DB_VALUE), <code>load_db.c</code>(유틸 진입점).</p>
+<div class="tbl"><table><thead><tr><th>함수</th><th>파일</th><th>목적</th><th>주요 사용처(호출자)</th></tr></thead><tbody>
+<tr><td><code>loaddb_dba</code> / <code>loaddb_user</code></td><td><code>load_db.c:953</code> / <code>:966</code></td><td><code>loaddb</code> 유틸 진입점(DBA/일반)</td><td><code>src/executables/util_admin.c:989</code>(<code>ua_Utility_Map[]</code> 등록)</td></tr>
+<tr><td><code>ldr_sa_load</code></td><td><code>load_sa_loader.cpp</code> (<code>load_sa_loader.hpp:62</code>)</td><td>SA 모드 적재 본체</td><td><code>load_db.c</code>(SA 경로)</td></tr>
+<tr><td><code>cubload::driver::parse</code></td><td><code>load_driver.cpp:85</code></td><td>입력 스트림 파싱 구동(lexer+grammar)</td><td>서버 로더·SA 로더의 배치 파싱</td></tr>
+<tr><td><code>cubload::session::install_class</code></td><td><code>load_session.cpp:541</code></td><td><code>%class</code> 배치 처리(대상 클래스 설치)</td><td><code>sloaddb_install_class</code>(<code>network_interface_sr.cpp:10866</code>)</td></tr>
+<tr><td><code>cubload::session::load_batch</code></td><td><code>load_session.cpp:582</code></td><td>데이터 배치 적재(워커에 태스크 분배)</td><td><code>sloaddb_load_batch</code>(<code>network_interface_sr.cpp:10922</code>)</td></tr>
+<tr><td><code>cubload::worker_manager_try_task</code></td><td><code>load_worker_manager.cpp</code> (<code>load_worker_manager.hpp:38</code>)</td><td>로드 태스크를 워커 풀에 제출</td><td><code>load_session.cpp</code></td></tr>
+<tr><td><code>cubload::worker_manager_register_session</code> / <code>_unregister_session</code></td><td><code>load_worker_manager.cpp</code> (<code>load_worker_manager.hpp:41-42</code>)</td><td>세션의 워커 풀 등록/해제</td><td><code>load_session.cpp</code> 세션 수명주기</td></tr>
+<tr><td><code>cubload::server_object_loader::process_line</code></td><td><code>load_server_loader.cpp:633</code></td><td>파싱된 한 행을 힙/인덱스에 직접 삽입</td><td>grammar 액션 → 로더 콜백</td></tr>
+<tr><td><code>cubload::get_conv_func</code></td><td><code>load_db_value_converter.cpp:195</code></td><td>(ldr_type, DB_TYPE)별 문자열→DB_VALUE 변환 함수 선택</td><td><code>load_server_loader.cpp:906/:948</code>, SA 로더</td></tr>
+<tr><td><code>ldr_update_statistics</code></td><td><code>load_sa_loader.cpp:6654</code></td><td>SA 적재 마지막 커밋 뒤 로드된 클래스마다 통계 갱신 (CBRD-26230 이후 <code>do_update_class_statistics()</code> — 통계+히스토그램)</td><td><code>ldr_sa_load</code> 종료부(:6545), 성공 시 caller 가 커밋</td></tr>
+<tr><td><code>loaddb_update_stats</code></td><td><code>src/communication/network_interface_cl.c:11114</code></td><td>CS 적재 후: 서버(<code>sloaddb_update_stats</code>)가 준 로드 클래스 OID 목록마다 통계 갱신 (CBRD-26230 이후 <code>do_update_class_statistics()</code>)</td><td><code>ldr_server_load</code>(<code>load_db.c:1471</code>)</td></tr>
+<tr><td><code>do_update_class_statistics</code></td><td><code>src/query/execute_schema.c</code> (helper 바로 뒤)</td><td><strong>한 클래스의 통계+히스토그램을 단일 힙 스캔으로 갱신하는 공용 진입점</strong> — <code>UPDATE STATISTICS ON t</code>(<code>do_update_stats</code>)·loaddb SA·loaddb CS 가 공유. <code>no_histogram</code>/히스토그램 불가(<code>ER_OBJ_INVALID_ARGUMENTS</code>)면 <code>sm_update_statistics</code> 폴백</td><td>PR#7855(.52, 7df4dbc1a) — develop 미머지</td></tr>
+<tr><td><code>sloaddb_init</code> 등 서버 핸들러</td><td><code>src/communication/network_interface_sr.cpp:10842~</code></td><td>CS 모드 loaddb 네트워크 요청 처리(<code>sloaddb_install_class</code>/<code>_load_batch</code>/<code>_fetch_status</code>/<code>_destroy</code>/<code>_interrupt</code>/<code>_update_stats</code>)</td><td><code>net_Requests[]</code> 디스패치</td></tr>
+</tbody></table></div>
+<h3>2. 분석 내용 (함수별)</h3>
+<blockquote>항목은 함수 단위로 기술한다 — 각 항목의 제목/선두가 함수·파일명이다. 새 분석도 함수명을 앞세워 추가할 것.</blockquote>
+<blockquote>(아래 주의점·리뷰 체크포인트의 원본: src/loaddb/AGENTS.md 증류)</blockquote>
+<h4>모듈 일반</h4>
+<ul>
+<li>두 모드: SA_MODE(직접 파일 접근, 단일 프로세스) vs CS_MODE(네트워크 전송, 병렬 워커).</li>
+<li>유닛 테스트 <code>LOADDB</code> 모듈은 컴파일 문제로 비활성.</li>
+<li>접두사 <code>load_</code>/<code>ldr_</code>, C++는 <code>cubload</code> 네임스페이스. 행은 배치로 모아 벌크 삽입.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>SA와 CS 두 경로 모두에서 동작이 검증됐는가?</li>
+</ul>
+<h4>server_object_loader::process_line (load_server_loader.cpp)</h4>
+<ul>
+<li>서버 측 로더는 일반 INSERT 경로를 <strong>우회</strong>하고 힙/인덱스를 직접 조작한다.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>서버 측 직접 삽입 경로가 인덱스/힙 일관성(일반 INSERT가 보장하던 것)을 유지하는가?</li>
+</ul>
+<h4>driver::parse (load_driver.cpp) / load_grammar.yy</h4>
+<ul>
+<li><code>load_grammar.yy</code> 수정은 bison 재생성 필요.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>문법 변경 시 bison 재생성 산출물까지 반영됐는가?</li>
+</ul>
+<h4>session::load_batch / worker_manager_* (load_session.cpp, load_worker_manager.cpp)</h4>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>병렬 워커 수 관련 변경이 배치 처리와 정합하는가?</li>
+</ul>
+<h4>ldr_update_statistics / loaddb_update_stats — 적재 후 통계 갱신 경로 (.52, develop 5f3a30d09 기준)</h4>
+<ul>
+<li><strong>develop 은 loaddb 적재 후 클래스 통계만 갱신하고 히스토그램은 만들지 않는다</strong> — SA <code>sm_update_statistics(class, STATS_WITH_SAMPLING)</code>, CS <code>stats_update_statistics(classop, STATS_WITH_SAMPLING)</code>. <code>UPDATE STATISTICS ON t</code>/<code>ON ALL CLASSES</code>/<code>optimizedb</code>(전체)는 모두 히스토그램을 함께 만든다. <code>unloaddb</code> 는 <code>_db_histogram</code> 을 덤프 대상에서 제외(<code>unload_object.c:142</code>)하므로 이관 직후 DB 는 히스토그램 0개. → CBRD-26230(.52) 에서 두 경로를 <code>do_update_class_statistics()</code> 로 통일 + <code>--no-histogram</code> 추가 (develop 미머지 상태면 §4 참조).</li>
+<li><strong>CS 경로는 통계 실패 반환값을 버린다</strong>(develop <code>network_interface_cl.c</code> <code>stats_update_statistics (...)</code> 반환 미검사) — 통계 실패가 exit status 에 안 잡힌다. CBRD-26230 에서 전파로 수정.</li>
+<li><strong>CS 경로의 커밋</strong>: <code>ldr_server_load</code> 는 통계 갱신 뒤 명시 커밋이 없고 <code>db_shutdown()</code> 은 <code>commit_on_shutdown</code>(기본 false)일 때만 커밋한다 (<code>boot_cl.c</code> <code>tran_is_active_and_has_updated</code> 분기). 히스토그램은 클라이언트 객체 계층으로 <code>_db_histogram</code> 을 쓰므로(<code>smt_add_histogram</code>) 명시 커밋이 필요 — CBRD-26230 에서 <code>db_commit_transaction()</code> 추가. 실측(.52 2026-09-02): 추가 후 CS 도 SA 와 동일하게 53 행 저장.</li>
+<li><strong>히스토그램 빌드는 클라이언트 오케스트레이션</strong>이다(사전설계문서 1.2): <code>update_or_drop_histogram_helper</code> → <code>analyze_classes_multi_by_reservoir</code> (서버 sampler 요청 1회) → <code>sm_update_statistics(obj, fullscan, &amp;ndv)</code> → <code>store_collected_histograms</code>. 서버측 <code>sloaddb_update_stats</code> 안에서는 만들 수 없다 — CS 모드에서도 cub_admin(loaddb) 프로세스가 수행한다.</li>
+<li><strong><code>PRM_ID_UPDATE_STATISTICS_UPDATE_HISTOGRAM</code>(<code>update_statistics_update_histogram</code>)은 <code>PRM_DEPRECATED</code> 이고 소비자가 없다</strong> — 새 코드에서 쓰지 말 것.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>적재 후 통계 경로를 바꾸면 SA·CS 두 모드에서 <code>_db_histogram</code> 행 수와 플랜 card 를 같이 확인할 것 (demodb <code>athlete.gender='M'</code>: 히스토그램 4087 / NDV 균등 3338 / 통계 없음 0).</li>
+<li>적재 시간 영향(.52 실측 2026-09-02, 5M행×5컬럼 231MB <code>loaddb -S</code>, release): 히스토그램 포함 vs <code>--no-histogram</code> 차이는 측정 결과표 <code>projects/CBRD-26230/설계문서.md</code> 참조.</li>
+</ul>
+<h4>동시 DDL/DML 과 CS 적재 후 통계의 락 타이밍 (.52, CBRD-26230 PR#7855 aa6ec813e 기준)</h4>
+<ul>
+<li><strong>CS 적재 후 통계 API 교체가 동시성 테스트의 인터리빙을 바꾼다.</strong> develop 은 <code>loaddb_update_stats</code> 에서 경량 <code>stats_update_statistics()</code>(요청만 전송)을 쓰지만, CBRD-26230 은 <code>do_update_class_statistics()</code>→<code>sm_update_statistics()</code> (<code>locator_flush_all_instances</code> + 스키마매니저 SCH 락) + 명시적 <code>db_commit_transaction()</code> 으로 바꾼다. 적재 후 단계의 소요·락 타이밍이 달라져, <code>with_dml_1/2</code>·<code>with_ddl_2</code>(loaddb -C 백그라운드 + 고정 +2초 시점 동시 DML/DDL)에서 동시 DML 이 develop 에선 데드락 희생자로 abort(답지)되지만 PR 에선 정상 인터리브·커밋된다(999,999행, 서버 err 에 deadlock/abort 없음, 정합성 정상). <strong>답지가 develop 의 인터리빙을 봉인한 타이밍 의존 테스트</strong>이며 코드 결함이 아니다. 1M행 로드가 ≈2.6초로 빨라 DML 발사 시점(+2초)이 적재 종료 직전에 걸리는 것이 관건.</li>
+<li><strong>CS 통계 실패는 best-effort 여야 한다</strong>(aa6ec813e): 통계는 객체·인덱스·트리거 커밋 뒤 부가 작업이므로 실패 시 <code>exit_status=3</code> 로 적재 전체를 실패 처리하면 안 된다(일시적 SCH 락 경합 NOTIFICATION 포함). 로그 + 통계 txn 롤백 후 계속(SA <code>ldr_update_statistics</code> 와 동일). 통계 단계(<code>ldr_server_load</code> 끝)는 인덱스/트리거(같은 함수 앞부분) 뒤라 스킵 없음.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>loaddb 적재 후 통계 경로를 바꾸면 (1) 동시 DDL/DML 테스트(_35_cherry with_dml/with_ddl)의 답지가 락 타이밍에 의존함을 인지하고 재기준 판단은 소유자에게, (2) 통계 실패가 적재 exit code 를 오염시키지 않는지 확인.</li>
+</ul>
+<h3>3. 예비 이슈 사항</h3>
+<blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
+<ul>
+<li>(현재 등록된 예비 이슈 없음)</li>
+</ul>
+<h3>4. 진행중인 작업</h3>
+<blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
+<h4>.50</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.51</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.52</h4>
+<ul>
+<li><strong>CBRD-26230</strong> loaddb 적재 후 통계 갱신에 히스토그램 통합(SA/CS) + <code>--no-histogram</code> — <strong>PR#7855</strong> (커밋 7df4dbc1a → 257ed59ae 뷰 제외 게이트 → aa6ec813e CS best-effort). 2026-09-08 CI 실패 53건 전수 분석 완료(뷰가 적재 목록에 들어 sampler → 인덱스 적재 생략; 동시성 3건은 타이밍 답지 이슈). 미결: CI 재실행 확인, 동시성 3건 답지 재기준(TC 소유자), 매뉴얼 PR(cubrid-manual <code>CBRD-26230</code> cec6f2b, <strong>로컬만, 미push</strong>), shell TC PR. 세션 01ACsuD7 종료.</li>
+</ul>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>

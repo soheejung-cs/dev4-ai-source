@@ -1,0 +1,119 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>src/parser — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html">모듈 경계</a></li>
+<li><a href="measurement.html">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html" class="cur"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>src/parser</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 3건</p>
+<blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
+<h3>1. 소스 목적 및 사용처 (함수별)</h3>
+<p>SQL 파싱·분석, 클라이언트 전용(<code>#if !defined(SERVER_MODE)</code>). 파이프라인: SQL 텍스트 → <code>csql_lexer.l</code> → <code>csql_grammar.y</code>(646KB bison) → PT_NODE 트리 → <code>name_resolution.c</code> → <code>semantic_check.c</code> → <code>type_checking.c</code> → <code>xasl_generation.c</code> → XASL_NODE.</p>
+<div class="tbl"><table><thead><tr><th>함수</th><th>파일</th><th>목적</th><th>주요 사용처(호출자)</th></tr></thead><tbody>
+<tr><td><code>parser_create_parser</code> / <code>parser_free_parser</code></td><td>parse_tree.c:1172/1253</td><td>PARSER_CONTEXT 생성/파괴(파괴 시 parser_alloc 메모리 일괄 해제)</td><td>compat/db_vdb.c(db_open_buffer), executables/unload_schema.c</td></tr>
+<tr><td><code>parser_parse_string</code> (+<code>_with_escapes</code>, <code>_use_sys_charset</code>)</td><td>parse_tree_cl.c:1961/1974/1943</td><td>SQL 문자열→PT_NODE 문장 리스트</td><td>compat/db_vdb.c:477·4499, object/trigger_description.cpp</td></tr>
+<tr><td><code>parser_new_node</code></td><td>parse_tree_cl.c:2447</td><td>PT_NODE 할당+node_type 초기화</td><td>문법 액션·트리 변환 전반</td></tr>
+<tr><td><code>parser_alloc</code></td><td>parse_tree.c:954</td><td>파서 수명 메모리 할당</td><td>parser 내부 전반, pt_append_string</td></tr>
+<tr><td><code>pt_append_string</code></td><td>parse_tree.c:983</td><td>파서 수명 문자열 이어붙이기/복제</td><td>이름 조작·SQL 재생성 경로</td></tr>
+<tr><td><code>parser_walk_tree</code></td><td>parse_tree_cl.c:1207</td><td>pre/post 콜백 트리 순회</td><td>parser·optimizer 전반 (수동 재귀 대신 필수)</td></tr>
+<tr><td><code>parser_copy_tree</code> / <code>parser_free_tree</code></td><td>parse_tree_cl.c:1370/1699</td><td>트리 복사/해제</td><td>view_transform, xasl_generation 등</td></tr>
+<tr><td><code>parser_append_node</code></td><td>parse_tree_cl.c:3589</td><td>next 리스트에 노드 추가</td><td>문법 액션·리스트 조립 전반</td></tr>
+<tr><td><code>pt_compile</code></td><td>compile.c:382</td><td>문장 컴파일 오케스트레이션(현재는 pt_semantic_check 래퍼)</td><td>compat/db_vdb.c(db_compile_statement_local), query/execute_schema.c</td></tr>
+<tr><td><code>pt_resolve_names</code></td><td>name_resolution.c:9319</td><td>식별자→스키마 객체 해석</td><td>compat/db_vdb.c, query/execute_schema.c</td></tr>
+<tr><td><code>pt_semantic_check</code></td><td>semantic_check.c:12775</td><td>의미 분석·검증(타입 검사 포함)</td><td>pt_compile, query/execute_schema.c</td></tr>
+<tr><td><code>pt_semantic_type</code></td><td>type_checking.c:19327</td><td>식 타입 추론·함수 시그니처 해석</td><td>semantic_check 경로</td></tr>
+<tr><td><code>mq_translate</code></td><td>view_transform.c:9525</td><td>뷰 확장·질의 재작성</td><td>compat/db_vdb.c, query/execute_statement.c</td></tr>
+<tr><td><code>parser_generate_xasl</code></td><td>xasl_generation.c:23556</td><td>PT_NODE 트리→XASL_NODE 트리</td><td>query/execute_statement.c</td></tr>
+</tbody></table></div>
+<h3>2. 분석 내용 (함수별)</h3>
+<blockquote>항목은 함수 단위로 기술한다. 새 분석도 함수명을 앞세워 추가할 것.</blockquote>
+<h4>모듈 일반</h4>
+<ul>
+<li><code>csql_grammar.y</code>는 최대급 bison 문법 — 수정에 극도 주의, bison 재생성이 느림. 문법 변경 후 <code>y.output</code>으로 shift/reduce 충돌 확인.</li>
+<li>클라이언트 측 — <code>THREAD_ENTRY *</code> 없음, 서버 측 API 사용 불가.</li>
+<li><code>PT_NODE</code>는 union 기반 연결 리스트(<code>node_type</code> + <code>info</code> union + <code>next</code>) — 잘못된 <code>info</code> 멤버 접근은 미정의 동작.</li>
+<li>식별자 비교는 전부 <code>intl_identifier_casecmp()</code>(대소문자 무시, base/intl_support.c).</li>
+<li><strong>빌드/검증 관점</strong>: <strong>csql은 클라이언트 코드를 정적 포함</strong>한다(ldd에 libcubridcs 없음) — parser/db_vdb 수정 검증 시 so 교체로는 반영 안 됨, csql 재링크 필요. cub_cas는 동적이지만 RPATH가 빌드트리 <code>_install</code>을 가리킴.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span><code>node_type</code>과 접근하는 <code>info</code> union 멤버가 일치하는가?</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>식별자 비교에 <code>strcmp</code>류 대신 <code>intl_identifier_casecmp()</code>를 쓰는가?</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>문법 변경 후 shift/reduce 충돌이 늘지 않았는가(<code>y.output</code>)?</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>서버 전용 헤더/API 의존이 새로 생기지 않았는가?</li>
+</ul>
+<h4>parser_alloc / pt_append_string (parse_tree.c)</h4>
+<ul>
+<li>파서 메모리는 <code>parser_alloc(parser, size)</code> — 파서 파괴 시 일괄 해제, <strong>수동 해제 금지</strong>. 문자열 복제는 <code>pt_append_string()</code> 또는 <code>parser_alloc</code> + 복사.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span><code>parser_alloc</code> 메모리를 free하거나, 반대로 malloc 메모리를 파서에 맡기지 않는가?</li>
+</ul>
+<h4>parser_walk_tree (parse_tree_cl.c)</h4>
+<ul>
+<li>트리 순회는 수동 재귀가 아니라 항상 <code>parser_walk_tree()</code>(pre/post 콜백).</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>트리 순회가 <code>parser_walk_tree()</code>를 쓰는가?</li>
+</ul>
+<h4>pt_compile (compile.c)</h4>
+<ul>
+<li>95b79e7ed 기준 본문은 <code>PT_SET_JMP_ENV</code> 가드 안에서 <code>pt_semantic_check()</code>를 호출하는 얇은 래퍼 (next 링크를 떼었다 복원). 이름 해석·뷰 변환은 호출자 경로(db_vdb.c 등)에서 별도 단계로 수행된다.</li>
+</ul>
+<h3>3. 예비 이슈 사항</h3>
+<blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
+<ul>
+<li>(현재 등록된 예비 이슈 없음)</li>
+</ul>
+<h3>4. 진행중인 작업</h3>
+<blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
+<h4>.50</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.51</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.52</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>

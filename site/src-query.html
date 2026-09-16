@@ -1,0 +1,393 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>src/query — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html">모듈 경계</a></li>
+<li><a href="measurement.html">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html" class="cur"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>src/query</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 16건</p>
+<blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
+<h3>1. 소스 목적 및 사용처 (함수별)</h3>
+<p>서버 측. 역직렬화된 XASL 플랜 실행. 핵심: <code>query_executor.c</code>(~27K, XASL 트리 워커), <code>scan_manager.c</code>(힙·인덱스·리스트·셋·메서드 스캔), <code>fetch.c</code>(REGU_VARIABLE 평가), <code>string_opfunc.c</code>(~28K)·<code>arithmetic.c</code>·<code>query_opfunc.c</code>(함수·집계 구현), <code>xasl_to_stream.c</code>(클라: 직렬화)/<code>stream_to_xasl.c</code>(서버: 역직렬화), <code>list_file.c</code>(중간 결과 임시 파일), <code>xasl_cache.c</code>(XASL 캐시), <code>vacuum.c</code>(MVCC GC). <code>parallel/</code> 하위에 병렬 실행(px 스캔·해시조인·쿼리실행·정렬, 코어는 <code>px_parallel.hpp</code>·<code>px_worker_manager.hpp</code>).</p>
+<div class="tbl"><table><thead><tr><th>함수</th><th>파일</th><th>목적</th><th>주요 사용처(호출자)</th></tr></thead><tbody>
+<tr><td><code>qexec_execute_query</code></td><td>query_executor.c:17097</td><td>쿼리 실행 최상위 진입점 — XASL 트리 + 호스트변수 → 결과 리스트 파일</td><td>query_manager.c:1232</td></tr>
+<tr><td><code>qexec_execute_mainblock</code></td><td>query_executor.c:15664</td><td>XASL 트리 워커 — PROC 타입별(BUILDLIST/BUILDVALUE/UNION/SCAN…) 디스패치</td><td>qexec_execute_query, px_query_task.cpp:136, xasl.h:588 매크로</td></tr>
+<tr><td><code>qexec_execute_scan</code></td><td>query_executor.c:8483</td><td>현재 spec의 스캔을 1스텝 진행하고 조인/술어 판정</td><td>query_executor.c:8456(qexec_next_scan_block 계열), 조인 루프 재귀</td></tr>
+<tr><td><code>scan_open_heap_scan</code> / <code>scan_open_index_scan</code></td><td>scan_manager.c:3242 / :3457</td><td>힙/인덱스 스캔 오픈(SCAN_ID 초기화)</td><td>query_executor.c:7528·:7553, px_scan_task.cpp:201·:224</td></tr>
+<tr><td><code>scan_next_scan</code></td><td>scan_manager.c:7833</td><td>스캔 커서 전진(타입별 next 디스패치)</td><td>query_executor.c:8522·:9416·:10473 등</td></tr>
+<tr><td><code>eval_pred</code></td><td>query_evaluator.c:1666</td><td>PRED_EXPR 제네릭 재귀 평가</td><td>query_executor.c(after_join_pred :8589 / if_pred :8604), fetch.c:2584, px_scan_task.cpp:671·:691</td></tr>
+<tr><td><code>eval_fnc</code></td><td>query_evaluator.c:2590</td><td>술어 형태별 특수화 커널(PR_EVAL_FNC) 선택</td><td>scan_manager.c:3283·:3342·:3633 등(호출부 전부 scan_manager 계열)</td></tr>
+<tr><td><code>eval_data_filter</code></td><td>query_evaluator.c:2907</td><td>힙 행 데이터 필터 평가(attr 읽기+술어)</td><td>scan_manager.c, px_scan_slot_iterator.cpp:121</td></tr>
+<tr><td><code>fetch_peek_dbval</code></td><td>fetch.h:56(inline)/fetch.c</td><td>REGU_VARIABLE 값 페치(빌린 포인터 반환)</td><td>실행기 전 경로</td></tr>
+<tr><td><code>fetch_peek_arith</code></td><td>fetch.c:85</td><td>산술식 REGU 평가 — T_* 434-case 스위치, 행마다 재귀</td><td>fetch_peek_dbval 경유 전 실행 경로</td></tr>
+<tr><td><code>qdata_add_dbval</code></td><td>query_opfunc.c:2438</td><td>덧셈/SUM 누산(타입쌍 스위치)</td><td>query_aggregate.cpp, fetch.c</td></tr>
+<tr><td><code>qdata_generate_tuple_desc_for_valptr_list</code></td><td>query_opfunc.c:625</td><td>출력 리스트용 튜플 디스크립터 생성</td><td>query_executor.c:976, px_scan_result_handler.cpp:883</td></tr>
+<tr><td><code>qdata_copy_db_value_to_tuple_value</code></td><td>query_opfunc.c:356</td><td>DB_VALUE → 튜플 값 기록</td><td>list_file.c:1705·:3291, query_executor.c:3882</td></tr>
+<tr><td><code>qfile_open_list</code></td><td>list_file.c:1207</td><td>리스트 파일(중간 결과) 생성</td><td>호출부 41곳 — query_executor, px_hash_join.cpp:333, px_scan_result_handler.cpp:246 등</td></tr>
+<tr><td><code>qfile_generate_tuple_into_list</code></td><td>list_file.c:1852</td><td>튜플 디스크립터 내용으로 리스트 파일에 튜플 생성</td><td>query_executor.c:1237, query_aggregate.cpp:2541, px_scan_result_handler.cpp:961</td></tr>
+<tr><td><code>mht_get_hash_number</code></td><td>base/memory_hash.c:2339 (모듈 외부지만 query 해시 경로 핵심)</td><td>DB_VALUE 해시값 계산</td><td>memoize.cpp:673, query_aggregate.cpp:2316, query_hash_scan.c:297, subquery_cache.c:236, partition.c:1254</td></tr>
+<tr><td><code>xcache_find_xasl_id_for_execute</code></td><td>xasl_cache.c:969</td><td>실행 시 XASL_ID로 캐시 엔트리+클론 확보</td><td>query_manager.c:1380, px_scan_task.cpp:579</td></tr>
+<tr><td><code>xcache_insert</code></td><td>xasl_cache.c:1465</td><td>prepare 결과 스트림을 캐시에 등록</td><td>query_manager.c:1116</td></tr>
+<tr><td><code>hjoin_merge_tuple</code> / <code>hjoin_merge_tuple_to_list_id</code></td><td>query_hash_join.c:4313 / :4247</td><td>해시조인 outer+inner 튜플 병합 후 결과 리스트에 기록</td><td>query_hash_join.c, px_hash_join_task_manager.cpp:1129·:1384·:1505·:1563</td></tr>
+<tr><td><code>parallel_query::compute_parallel_degree</code></td><td>parallel/px_parallel.cpp:36</td><td>페이지 수/타입 기반 병렬도 결정</td><td>query_executor.c:16249, px_scan.cpp:418·:883, optimizer/histogram/histogram_sampler_sr.cpp:1031</td></tr>
+<tr><td><code>parallel_query::worker_manager::try_reserve_workers</code></td><td>parallel/px_worker_manager.cpp</td><td>워커 풀 예약(실패 시 nullptr → 직렬 폴백)</td><td>query_executor.c:16260, px_scan.cpp:427·:892·:1415</td></tr>
+<tr><td><code>parallel_query::make_parallel_query_executor_recursively</code></td><td>parallel/px_query_execute/px_query_executor.cpp</td><td>서브쿼리 병렬 실행기 구성</td><td>query_executor.c:16261 부근</td></tr>
+<tr><td><code>new_memoize_storage</code></td><td>memoize.cpp:1044</td><td>XASL 노드에 memoize 스토리지 부착</td><td>px_scan_task.cpp:364</td></tr>
+</tbody></table></div>
+<h3>2. 분석 내용 (함수별)</h3>
+<blockquote>항목은 함수 단위로 기술한다 — 각 항목의 제목/선두가 함수·파일명이다. 새 분석도 함수명을 앞세워 추가할 것.</blockquote>
+<h4>모듈 일반</h4>
+<ul>
+<li>XASL 직렬화는 클라이언트/서버 간 <strong>정확히 일치</strong>해야 함 — 버전 불일치는 크래시. XASL 구조 변경 시 <code>xasl_to_stream.c</code>와 <code>stream_to_xasl.c</code>가 대칭으로 수정됐는지 볼 것.</li>
+<li>리스트 파일 I/O가 주요 병목이 될 수 있음 — 큰 결과는 임시 파일이 디스크를 친다.</li>
+<li>새 함수 추가는 <code>string_opfunc.c</code> 또는 <code>arithmetic.c</code> 구현 + <code>fetch.c</code> 배선.</li>
+<li><code>THREAD_ENTRY *thread_p</code> 첫 파라미터, 접두사 <code>qexec_</code>/<code>scan_</code>/<code>qfile_</code>.</li>
+<li>함수 구현은 <code>DB_VALUE *</code> 인자를 받아 <code>DB_VALUE *</code>에 결과를 쓴다. 집계 상태는 XASL 노드의 <code>AGGREGATE_TYPE</code> 연결 리스트.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>스캔 open/next/close가 짝을 이루고 에러 경로에서도 close되는가?</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>함수 결과 <code>DB_VALUE</code>의 정리(need_clear) 책임이 명확한가?</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>대량 결과 경로에서 불필요한 리스트 파일 materialize를 만들지 않는가?</li>
+</ul>
+<p>(원본: src/query/AGENTS.md)</p>
+<ul>
+<li>구현 불필요 판정 2건: order by 식의 컴파일은 이미 발화함을 <code>;trace</code>로 확인해 불필요 판정, 리스트 간 프로그램 공유는 XASL position 공유와 tuple descriptor의 <code>pr_share_value</code>(develop query_executor.c:4672·:4781, fetch.c:4922)가 이미 존재해 중복 평가가 발생하지 않아 불필요 판정.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>'식이 두 번 평가된다'는 의심이 들면 XASL position 공유 / tpldesc <code>pr_share_value</code>가 이미 처리하는 경우인지부터 <code>;trace</code>로 확인할 것.</li>
+</ul>
+<h4>qexec_execute_mainblock (query_executor.c:15664)</h4>
+<ul>
+<li>진입 직후 <code>static int max_recursion_sql_depth = prm_get_integer_value(...)</code>(:15673) — PRM_USER_CHANGE 파라미터를 프로세스 수명 동안 캐시(경미). <code>eval_pred</code>(query_evaluator.c:1676)와 동일 패턴이고, scan_manager.c:4968·:6626도 같은 static-PRM 캐시 관용구다(그쪽은 PRM_ID_MAX_PAGES_IN_TEMP_FILE_CACHE — develop 확인).</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>재귀 평가 경로에 깊이 제한/스택 고려가 있는가?</li>
+</ul>
+<h4>qexec_execute_scan (query_executor.c:8483)</h4>
+<ul>
+<li>플랜상수 XASL 필드 11개(6캐시라인, 1320B)를 행마다 재로드 — PLT 호출이 CSE를 차단(디스어셈블 확인).</li>
+<li>after_join_pred(:8589)·if_pred(:8604)는 행마다 <strong>제네릭 <code>eval_pred</code></strong>를 탄다(실측 2.84%, 특수화 커널 적용 시 프로파일은 부재) — 아래 eval_fnc 절 참조.</li>
+</ul>
+<h4>eval_pred / eval_fnc (query_evaluator.c:1666 / :2590)</h4>
+<ul>
+<li>eval_pred 특수화 미적용: <code>eval_fnc()</code>가 고르는 특수화 커널(PR_EVAL_FNC)의 호출부 17개는 전부 scan_manager 계열 — query_executor.c의 after_join_pred/if_pred는 행마다 제네릭 <code>eval_pred</code> (실측 2.84%, 특수화 커널은 프로파일 부재).</li>
+<li>eval_pred :1676: <code>static int max_recursion_sql_depth</code> — PRM_USER_CHANGE 파라미터를 프로세스 수명 캐시(경미). scan_manager.c:4968·:6626 동일 패턴.</li>
+<li><code>REGU_VARIABLE</code>/PRED_EXPR 평가는 재귀 — 깊은 식은 스택 오버플로 가능.</li>
+</ul>
+<h4>fetch_peek_dbval / fetch_peek_arith (fetch.c)</h4>
+<ul>
+<li>행당 식 평가 병목의 실체 ①: <code>fetch_peek_arith()</code>(fetch.c:85)가 T_* 케이스 434개짜리 스위치를 <strong>행마다 재귀적으로</strong> 타는 구조. TPC-H Q1 30.9s 중 ~27s가 집계·식 평가였고 스캔 자체는 q6 기준 3.3s — 즉 스캔이 아니라 식 평가가 지배한다. (설계문서 <code>/home/cubrid/dev/expr-compile-design.md</code>)</li>
+<li>컴파일이 얹힐 수 있는 기존 XASL 지형: <code>ARITH_TYPE.value</code>는 노드별 결과 슬롯이 이미 존재하고, <code>original_domain</code> 필드는 <strong>clone 실행 시 도메인이 재확정된다는 증거</strong>다. regu 트리 순회 워커는 <code>regu_variable_node::map_regu()</code>(regu_var.hpp:213, <code>map_regu_and_xasl()</code>은 :215)이고, <code>REGU_VARIABLE_FAST_PEEK</code>(regu_var.hpp:174 정의 — "inline fetch_peek_dbval () may return its value pointer directly", 설정은 fetch.c:4635)는 같은 방향의 선행 흔적이다. (원 메모의 fetch.c:4597은 행 번호 확인 필요 — 현재 소스와 불일치)</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>regu 트리를 새로 순회·변형하는 코드가 <code>map_regu()</code>를 재사용했는지, 결과를 <code>ARITH_TYPE.value</code> 외 임시 슬롯에 쓰면서 소유권이 흐려지지 않았는지 확인할 것.</li>
+</ul>
+<h4>qdata_add_dbval (query_opfunc.c:2438)</h4>
+<ul>
+<li>행당 식 평가 병목의 실체 ②: 행마다 타입조회 → ENUM 특례 → <code>prm_get_bool_value(PRM_ID_PLUS_AS_CONCAT)</code> 파라미터 조회(:2501) → NULL 검사 → 피연산자 순서 행렬 → cast 준비 → 타입쌍 스위치를 전부 반복하는 구조.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>행당 경로(<code>fetch_peek_arith</code> / <code>qdata_*</code>)에 파라미터 조회·타입 재판정·cast 준비 같은 '매행 반복 가능한 준비 작업'이 새로 들어가지 않았는지 확인할 것.</li>
+</ul>
+<h4>qdata_generate_tuple_desc_for_valptr_list / qdata_copy_db_value_to_tuple_value (query_opfunc.c:625 / :356)</h4>
+<ul>
+<li>튜플 크기 2회 계산(~2.75%): <code>qdata_generate_tuple_desc_for_valptr_list</code>(:625)가 계산한 크기를 버림 → <code>qdata_copy_db_value_to_tuple_value</code>(:356)+<code>pr_data_writeval_disk_size</code>가 재계산. <code>QFILE_TUPLE_DESCRIPTOR</code>에 f_size 배열이면 끝.</li>
+</ul>
+<h4>mht_get_hash_number (base/memory_hash.c:2339)</h4>
+<ul>
+<li><code>key % ht_size</code>가 div 4개. 실측 당시 호출부 10곳이 UINT_MAX(항등)로 호출 — 단 전부는 아님: subquery_cache·query_aggregate·partition 쪽은 실제 버킷 수를 넘긴다. JOB 0.40%, TPC-H에서 유의미.</li>
+<li>develop 95b79e7ed 확인: src 전체 호출부 6곳 — UINT_MAX는 memoize.cpp:673 1곳, subquery_cache.c:236 · query_aggregate.cpp:2316(<code>qdata_hash_agg_hkey</code>, "hash table size (in buckets)") · query_hash_scan.c:297(<code>qdata_hash_scan_key</code>) · partition.c:1254·:1305는 실제 버킷 수. (원 메모의 subquery_cache.c:227 · query_aggregate.cpp:2306은 행 번호 확인 필요 — 현재 소스와 불일치)</li>
+</ul>
+<h4>resolve_domains_on_list_scan (scan_manager.c:8216)</h4>
+<ul>
+<li>구조상 행마다 재순회지만 JOB 실측 0.00% — list scan 비임계.</li>
+</ul>
+<h4>xcache 계열 — xcache_find_sha1 / xcache_insert (xasl_cache.c:872 / :1465)</h4>
+<ul>
+<li>통계·히스토그램을 갱신해도 <strong>기존 캐시 플랜을 계속 사용</strong> — 플랜 A/B 비교는 서버 재시작 또는 쿼리 텍스트 변형으로. 주석은 캐시 키에서 정규화로 제거되므로 <strong>주석 변경으로는 캐시를 우회할 수 없다</strong>(별칭을 바꿔야 함).</li>
+</ul>
+<h4>hjoin_merge_tuple (query_hash_join.c:4313)</h4>
+<ul>
+<li>소스/목적지 비중첩을 암묵 전제로 한다(self-overwrite + realloc UAF). 진입점은 <code>hjoin_merge_tuple_to_list_id</code>(:4247 → :4281). 소스 튜플의 컬럼을 순차로 읽어가며 목적지 버퍼에 <code>memcpy</code>한다(:4398). 소스와 목적지가 같은 메모리면 아직 읽지 않은 소스 컬럼 헤더가 덮여 깨지고 value 길이 체인 워크가 튜플 끝을 넘어간다(코어 시점: pos_index=3, value_index=4, offset=72). 게다가 :4387-4390에서 <code>qfile_reallocate_tuple</code>로 목적지 버퍼가 realloc되면 소스 포인터가 dangling되어 use-after-free까지 난다 — 주석은 "overflow_record is managed and cleaned up by the caller."로만 적혀 있고 비중첩 요구는 명시돼 있지 않다. (원 메모의 :4229, :4221은 행 번호 확인 필요 — 현재 소스와 불일치)</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>이 계열 호출부는 소스/목적지 버퍼 비중첩을 호출 규약으로 명시·검증하고, realloc 이후 소스 포인터를 재사용하는 코드가 없는지 함께 볼 것.</li>
+<li>증상 매핑: release 빌드 <code>ER_TF_BUFFER_OVERFLOW</code>("Object buffer overflow while writing"), debug 빌드 그 직전 <code>assert (false)</code>로 cub_server abort — 현재 소스 :4371(assert)·:4372(에러 설정), 주석 <code>/* impossible case */</code>(원 메모의 :4202/:4203은 행 번호 확인 필요 — 현재 소스와 불일치). 실제 원인은 그 지점이 아니라 앞서 손상된 튜플 헤더 때문에 value 길이 워크가 튜플 경계를 넘은 것.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>이 에러가 보고되면 버퍼 크기 계산을 키우는 식으로 덮지 말고 소스 튜플이 이미 손상됐는지(버퍼 앨리어싱)부터 확인할 것.</li>
+</ul>
+<h4>px_hash_join probe/merge overflow (parallel/px_hash_join/px_hash_join_task_manager.cpp)</h4>
+<ul>
+<li>probe overflow 버퍼 앨리어싱 — 원인과 수정 형태(현재 소스에는 수정 반영됨): probe 태스크가 overflow 튜플을 조립한 <code>QFILE_TUPLE_RECORD</code>를 그대로 merge 결과용 스크래치 버퍼로도 넘겨 merge의 소스와 목적지가 같은 메모리가 되는 버그(코어 덤프로 확정: <code>outer_record-&gt;tpl == overflow_record.tpl == 0x1338a510</code>). 수정은 <strong>버퍼 분리</strong> — 현재 소스는 <code>probe_overflow_record</code>(조립용)와 <code>overflow_record</code>(merge 스크래치)를 별도 선언한다 (:898-899·:1193-1194, 조립 :993/:1291, 대입 :1001/:1299, merge 호출 :1129/:1384/:1505/:1563, 해제 :1176-1183/:1604-1611). 수정 커밋 <code>5795b1ab6</code>([CBRD-26900] PR#7269)이 현재 HEAD에 포함. (원 메모의 :1104-1119, :1217은 행 번호 확인 필요 — 현재 소스와 불일치)</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>해시조인 경로에서 <code>QFILE_TUPLE_RECORD</code>를 넘길 때 소스로 쓰이는 레코드와 결과/스크래치로 쓰이는 레코드가 같은 인스턴스가 아닌지 확인할 것.</li>
+<li>overflow 튜플 대입 시 <code>tuple_record.size</code>가 0으로 남는 부분 초기화 상태: probe 경로는 <code>probe-&gt;tuple_record.tpl = probe_overflow_record.tpl</code>처럼 <strong><code>tpl</code> 포인터만 대입하고 <code>size</code>는 갱신하지 않는다</strong>(:1001, :1299; 비병렬 대응 관용구는 :289). 코어에서 <code>outer_record.size == 0</code>이 정상 경로로 흘러가는 것이 확인됐고, build(inner) 튜플은 size 정상(56B)이었다. 따라서 <code>QFILE_TUPLE_RECORD.size</code>를 버퍼 용량이나 튜플 길이로 신뢰하는 코드는 overflow 경로에서 오동작한다.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span><code>size</code>를 용량 판단(예: realloc 필요 여부)에 쓰는 코드가 overflow 조립 경로에서 size=0으로 들어올 수 있는지 확인하고, 포인터만 대입하는 관용구가 보이면 size 동기화 누락을 의심할 것.</li>
+<li>옵티마이저 변경이 새 해시조인 플랜 형태를 만들면 실행기 버그를 밟을 수 있다(JOB 7c 사례): <code>qo_iscan_cost</code> fanout 수정(<code>c31d3b2f6</code> [CBRD-26936])으로 JOB 7c가 "Object buffer overflow while writing"으로 <strong>실행 실패</strong>. 트리거는 새 해시조인 플랜 형태(빌드 측 = movie_link, 프로브 측 = 깊은 NL 체인)였고 옵티마이저 결함이 아니라 위 probe overflow 버퍼 앨리어싱이라는 실행기 버그였다 — 당시 develop 머지(<code>5dc7be6f8</code>) 후에도 7c는 ERR로 남아 있었으며, 근본 수정은 이후 <code>5795b1ab6</code>에서 들어갔다.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>옵티마이저 변경이 새로운 조인 플랜 형태를 만들면 실행 오류(ERR) 쿼리가 늘지 않았는지 반드시 확인하고, 'Object buffer overflow while writing'이 나오면 옵티마이저가 아니라 해시조인 버퍼 취급을 의심할 것.</li>
+</ul>
+<h4>px_scan_slot_iterator (parallel/px_scan/px_scan_slot_iterator.cpp)</h4>
+<ul>
+<li><strong>버그(미수정)</strong>: <code>qualified_rows++</code>가 <code>if (ev_res != V_TRUE) continue</code>(:138) <strong>앞</strong>에 있어(원 메모 :124; develop 95b79e7ed에서 :125로 확인) 병렬 heap 스캔의 qualified==read가 항상 성립 → SET TRACE ON 선택도가 무의미(비용모델이 읽는 데이터). 직렬(scan_manager.c:6173)·병렬 LIST(px_scan_slot_iterator_list.cpp:170; 원 메모 :168)는 정상.</li>
+</ul>
+<h4>result_handler (parallel/px_scan/px_scan_result_handler.hpp / .cpp)</h4>
+<ul>
+<li><strong>의심(작성자 확인 필요)</strong>: <code>is_list_id_domain_resolved</code>(hpp:97; 원 메모 :96) — 워커 공유 플래그가 워커 전용 <code>tl.writer_result_p</code> 도메인 보정을 가드(cpp:885-888). A가 뒤집으면 B가 자기 보정을 건너뜀.</li>
+<li>TLS 폭풍: <code>result_handler&lt;MERGEABLE_LIST&gt;::write</code> 행당 TLS init 가드 47 + <code>__tls_get_addr</code> 9. 원인: <code>thread_local static tls tl</code>(hpp:81)의 동적 초기화. 진입 시 참조 1회로 47→1.</li>
+</ul>
+<h4>memoize::storage::get (memoize.cpp)</h4>
+<ul>
+<li>외부 행마다 <code>storage::get()</code>이 get_entry×4 + heap 전환×3 + 키 할당/해제 1쌍(memoize.cpp:812-890). per-worker 분리 → 병렬화 시 예산 N배 + 히트율 희석 → 1000프로브 후 히트율&lt;0.5면 영구 자기비활성(원 메모 L907; develop에서 자기비활성 분기는 :900대 초반으로 확인). 직렬 기준 캘리브레이션이라 병렬에서 조용히 꺼질 수 있음. TRACE hit/miss로 확인.</li>
+</ul>
+<h4>px_scan_task (parallel/px_scan/px_scan_task.cpp)</h4>
+<ul>
+<li>인터럽트 검사는 페이지 단위로 올바름(:840). <code>shared_ptr</code>는 src/query 전체 0건.</li>
+</ul>
+<h4>expr_compile 계열 (develop에 없음 — feature/expression-compile 브랜치 한정)</h4>
+<blockquote>아래 항목의 심볼(<code>expr_compile.c</code>/<code>.h</code>, <code>expr_scan_pred_compile</code>, <code>expr_k_fallback</code>,</blockquote>
+<blockquote><code>EXPR_ARG_ENCODE</code>, 캐리어 필드 <code>eval_prog</code>/<code>operand_prog</code>/<code>scan_prog</code>/<code>acc_kernel</code>/<code>sum_state</code>,</blockquote>
+<blockquote><code>qdata_numeric_sum_flush</code>, <code>EXPR_COMPILE</code> trace 덤프)은 <strong>develop 95b79e7ed에 존재하지 않는다</strong></blockquote>
+<blockquote>(git grep 0건 확인). PR#7658 / CBRD-27215의 식 컴파일 작업은</blockquote>
+<blockquote><code>feature/expression-compile</code>(당시 head <code>3dad3ba82</code>)에만 있다. 행번호·수치는 기준: CBRD-27094</blockquote>
+<blockquote>@ faf5a3b2a(행번호 재검증됨) 또는 해당 브랜치.</blockquote>
+<h5>브랜치 한정 지형</h5>
+<p>브랜치 diff는 신규 <code>src/query/expr_compile.c</code>(3,006 LOC) + <code>src/query/expr_compile.h</code>(243 LOC)에 기존 18파일 수정, 총 20파일 +4,876/−53이며, 부수적으로 <code>src/storage/heap_file.c</code>(+417)와 <code>src/query/numeric_opfunc.c</code>(+186)까지 건드린다. <code>expr_compile</code>는 <code>cubrid/</code>(SERVER)와 <code>sa/</code> CMakeLists에만 등록되고 <code>cs/</code>에는 없다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>이 모듈 관련 지적을 받으면 먼저 어느 브랜치 기준인지 확인할 것 — develop 기준 리뷰라면 해당 코드 자체가 없다.</li>
+</ul>
+<h5>커널은 인터프리트 원본과 <strong>coercion mode</strong>까지 맞춰야 한다 (.50 실측 2026-08-27)</h5>
+<p>식 컴파일 커널이 인터프리트 경로를 "미러링"할 때, 같은 이름의 함수를 부르는 것만으로는 부족하다. <code>tp_value_cast()</code> / <code>tp_value_cast_force()</code>처럼 <strong>모드만 다른 쌍</strong>이 있고, 어느 쪽을 쓰느냐가 결과를 바꾼다.</p>
+<ul>
+<li><code>object_domain.c:10081</code> <code>tp_value_cast()</code> = <code>TP_EXPLICIT_COERCION</code></li>
+<li><code>object_domain.c:10090</code> <code>tp_value_cast_force()</code> = <code>TP_FORCE_COERCION</code></li>
+<li>갈리는 지점은 <strong>절단(truncation)</strong> 하나다. <code>object_domain.c:9097 / :9162 / :9198</code> 세 곳 모두 <code>data_stat == DATA_STATUS_TRUNCATED &amp;&amp; coercion_mode != TP_FORCE_COERCION &amp;&amp; (…)</code> → <code>DOMAIN_OVERFLOW</code> → <code>object_domain.c:11612</code>에서 <code>ER_IT_DATA_OVERFLOW (-427)</code>. FORCE면 조용히 자르고 끝난다.</li>
+</ul>
+<p>인터프리트 원본(<code>fetch.c</code> T_CAST / T_CAST_WRAP arm)의 규칙:</p>
+<pre><code>
+if (REGU_VARIABLE_IS_FLAGED (regu_var, REGU_VARIABLE_STRICT_TYPE_CAST)
+    &amp;&amp; arithptr-&gt;opcode == T_CAST_WRAP)
+  dom_status = tp_value_cast (…);          /* 이 한 조합만 비-force */
+else
+  dom_status = tp_value_cast_force (…);    /* 사용자가 쓴 명시적 CAST는 항상 이쪽 */
+</code></pre>
+<p>즉 <strong>비-force는 <code>STRICT_TYPE_CAST</code>가 붙은 <code>T_CAST_WRAP</code> 전용</strong>이고, 그 opcode는 애초에 컴파일 대상이 아니다(컴파일러의 T_CAST arm은 <code>opcode == T_CAST</code>만 받는다).</p>
+<p>실제 사고: <code>expr_k_cast()</code>가 <code>tp_value_cast()</code>를 불러 <strong>잘리는 CAST 전부</strong>가 -427로 깨졌다. BIT 한정처럼 보였으나(<code>cast('00001111' as bit(8))</code>) 실제로는 축소 VARCHAR/CHAR (<code>cast('abcdef' as char(2))</code>, ENUM→CHAR 절단)도 같이 깨진 광범위한 회귀였다. 안 잘리는 CAST(<code>bit(64)</code> 등)는 두 모드가 같은 값을 내 정상으로 보여 증상이 좁아 보였다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>커널이 인터프리트 경로를 미러링한다고 주장하면, 호출 함수 이름이 같은지가 아니라 <strong>인터프리트 쪽의 분기 조건 전체</strong>(플래그·opcode)를 옮겼는지 확인할 것. 특히 <code>_force</code> 접미사 쌍은 실패 모드가 "에러 vs 조용한 절단"으로 갈려 정상 케이스 테스트를 통과한다.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>"잘리지 않는 입력"만 테스트하면 이 부류는 안 잡힌다. CAST 커널 검증에는 <strong>타깃 도메인보다 긴 입력</strong>을 반드시 넣을 것.</li>
+<li>⚠ <strong>같은 arm의 미러링 갭 2건 (미수정, 현재는 결과 동일)</strong>: ① <code>fetch.c</code>는 <code>REGU_VARIABLE_APPLY_COLLATION</code>이 서면 CAST를 <strong>하지 않고</strong> <code>pr_clone_value()</code> + <code>db_string_put_cs_and_collation()</code>만 하는데, 컴파일 쪽은 이 플래그를 검사하지 않는다. ② 도메인 출처가 인터프리트는 <code>arithptr-&gt;domain</code>, 커널은 <code>regu-&gt;domain</code>이다.</li>
+</ul>
+<h5>엔진 쪽 훅은 전부 동일한 3-상태 lazy 패턴 (컴파일 실패 = 영구 인터프리터 폴백)</h5>
+<p>프로그램 상태는 <code>0 = untried / 1 = active / 2 = disabled</code>이고, 컴파일에 실패하면 <code>state = 2</code>로 두어 이후 영구히 인터프리터로 떨어진다(재시도 없음). 훅 위치는 <code>query_evaluator.c:2964-2976</code>(scan filter, <code>expr_scan_pred_compile</code>/<code>expr_scan_pred_eval</code>), <code>query_opfunc.c:493-517</code>(프로젝션 <code>qdata_valptr_prog_ensure</code>), <code>query_aggregate.cpp:1074-1078</code> (집계 operand), <code>px_scan_result_handler.cpp:1971-1989</code>(병렬 BUILDVALUE), 해제는 <code>query_executor.c:1784</code>(scan_prog)와 <code>:2303</code>(operand_prog) 두 곳, 덤프는 <code>query_dump.c:3761-3821</code>이다. 단 예외가 하나 있다 — 호스트변수 도메인 시그니처가 어긋나면 (<code>expr_prog_signature_ok</code>) <code>state</code>를 0으로 되돌려 <strong>1회 재컴파일</strong>한다(<code>query_opfunc.c:507-513</code>, <code>px_scan_result_handler.cpp:1978-1986</code>).</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>새 훅이 추가되면 실패→state=2 영구 폴백인지, 시그니처 불일치→state=0 1회 재컴파일인지 두 전이를 구분해 보고, <code>query_executor.c</code>의 해제 경로가 짝을 이루는지 확인할 것.</li>
+</ul>
+<h5>컴파일 산출물 캐리어 필드는 전부 <code>void*</code>라 XASL 헤더에 의존이 생기지 않는다</h5>
+<p><code>regu_var.hpp</code>의 <code>void *eval_prog</code> / <code>int *eval_prog_idx</code> / <code>int eval_prog_state</code>, <code>xasl_aggregate.hpp</code>의 <code>void *operand_prog</code> / <code>operand_prog_idx</code> / <code>operand_prog_state</code> / <code>operand_prog_base</code> / <code>void *acc_kernel</code> / <code>void *sum_state</code>, <code>xasl_predicate.hpp</code>의 <code>void *scan_prog</code> / <code>int scan_prog_state</code>가 모두 <code>void*</code>로 선언되어 세 헤더가 <code>expr_compile.h</code>를 include하지 않는다. 주석에 "server-side runtime state, never serialized"가 명시돼 있듯 직렬화 대상이 아니다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>캐리어 필드를 구체 타입으로 바꾸는 변경이 오면 XASL 헤더 3종에 새 헤더 의존이 생기는지, 직렬화(<code>xasl_to_stream</code>/<code>stream_to_xasl</code>)에 실려 들어가지 않는지 확인할 것.</li>
+</ul>
+<h5>expr_compile.c는 엔진 표준 할당자를 쓰지 않아 restrack 가시성 밖이다</h5>
+<p><code>expr_compile.c</code>에는 <code>db_private_alloc</code> 호출이 0회이고 raw <code>malloc</code> 15회, <code>posix_memalign</code> 1회(slot 배열 캐시라인 정렬)를 쓴다. 즉 이 모듈의 할당은 엔진 자원 추적기(restrack)가 잡아주지 않으므로 누수·이중해제를 자동 검출에 기댈 수 없다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>엔진 코드에서 raw malloc/posix_memalign을 쓰는 신규 모듈은 (a) 왜 <code>db_private_alloc</code>이 아닌지 근거, (b) 해제 경로가 전부 짝지어졌는지를 수동으로 대조할 것.</li>
+</ul>
+<h5>컴파일된 경로는 엔진 인터프리터로 역방향 재진입한다 (단방향 호출이 아님)</h5>
+<p><code>expr_compile.c</code>는 폴백 스텝과 미커버 술어 항에서 <code>fetch_peek_dbval</code>(4곳) / <code>fetch_peek_arith</code>(3곳) / <code>eval_pred</code>·<code>eval_pred_comp0/1/3</code>(20여 곳, 상당수는 미러링 설명 주석) 계열을 다시 호출한다. 대표 지점은 <code>expr_compile.c:1012</code>(comp 리프)과 <code>:1031-1035</code>(<code>expr_k_fallback</code>)이다. 따라서 컴파일된 경로 안에서도 인터프리터의 peek 수명(빌린 포인터)과 thread/스캔 컨텍스트 전제가 그대로 적용된다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>재진입 지점마다 peek 반환값을 컴파일 프로그램 슬롯에 저장·재사용하며 수명을 넘기지 않는지 확인할 것.</li>
+</ul>
+<h5>컴파일 시점과 수명: XASL clone 첫 실행 lazy, decache 시 해제</h5>
+<p>프로그램은 <strong>XASL clone의 첫 실행 시점에 lazy로</strong> 컴파일된다 — 호스트 변수 타입이 확정된 뒤여야 한다는 게 설계의 핵심 제약이다. 술어 프로그램(<code>pred_root-&gt;scan_prog</code>)은 클론당 1회 지연 생성되고, 해제는 <code>qexec_clear_pred()</code>의 <code>is_final || XASL_IS_FLAGED (xasl_p, XASL_DECACHE_CLONE)</code> 분기에서만 한다(브랜치 query_executor.c:1784, 주석: "a clone kept cached keeps its compiled tree"). 캐시에 남는 클론은 컴파일 트리를 유지하는 게 의도된 동작이다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>컴파일 산출물 해제가 clone decache / <code>qexec_clear_pred(is_final||DECACHE)</code> 경로에 빠짐없이 걸려 있는지, 호스트변수 타입이 바뀐 재실행에서 옛 프로그램이 재사용되지 않는지 확인할 것.</li>
+</ul>
+<h5>안전장치는 프로그램 전체 포기가 아니라 노드 단위 폴백(<code>k_fallback</code>)</h5>
+<p>컴파일 화이트리스트 밖 노드는 프로그램을 통째로 버리지 않고 <code>expr_k_fallback</code> (<code>expr_compile.c:1031</code>) 스텝이 기존 <code>fetch_peek_dbval</code> 경로를 호출한다. 프로젝션에서는 커버되지 않는 컬럼의 <code>eval_prog_idx</code> 항목을 −1로 두어 그 컬럼만 인터프리트로 돌린다(<code>regu_var.hpp</code> 주석). 술어도 같은 모델로 미커버 항을 interp 리프(<code>eval_pred_comp0</code>/<code>eval_pred</code>)로 항 단위 폴백한다. 온오프 시스템 파라미터 게이트는 두지 않기로 결정됐다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>새 노드 타입을 화이트리스트에 넣을 때 폴백 스텝이 여전히 결과 슬롯·도메인 규약을 컴파일 스텝과 동일하게 지키는지 확인할 것.</li>
+</ul>
+<h5>cell-0 인코딩 크래시: <code>EXPR_ARG_ENCODE</code>는 1-based여야 한다</h5>
+<p>커밋1에 잠복해 있던 크래시로, materialize 단계의 NULL 가드가 cell 0을 미변환 상태로 통과시켜 커널이 NULL을 역참조하고 cub_server가 죽었다(재현식 <code>sum(b+b)</code>, BUILDVALUE 플랜). 원인은 인자 인코딩이 0을 유효 인덱스와 '미설정' sentinel로 동시에 쓴 것이고, 현재 브랜치 소스는 <code>#define EXPR_ARG_ENCODE(cell_idx) ((DB_VALUE **) (intptr_t) ((cell_idx) + 1))</code> (<code>expr_compile.c:63</code>)로 1-based다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>인덱스 인코딩에 0을 sentinel과 유효값으로 겸용하는 곳이 없는지, materialize/NULL 가드가 모든 cell을 빠짐없이 변환하는지 확인할 것.</li>
+</ul>
+<h5>Codex 봇 P1 2건: 서브쿼리 TYPE_CONSTANT 배선 금지, SA_MODE 집계 필드 미초기화</h5>
+<p>커밋 <code>a045e6c88</code>("review: exclude linked-subquery constants; init SA aggregate fields")이 두 건을 함께 고쳤다. ① 서브쿼리 결과가 담기는 <code>TYPE_CONSTANT</code>를 컴파일 타임 wired 상수로 배선하면 실행 시 채워지는 값을 반영하지 못하므로 컴파일 대상에서 제외했다. ② SA_MODE 경로에서 집계 관련 필드가 초기화되지 않은 채 사용되어 <code>regu_init</code>을 추가했다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span><code>TYPE_CONSTANT</code>를 '값이 고정된 상수'로 취급하는 코드가 서브쿼리/외부 참조 유래 상수까지 삼키지 않는지, 서버 모드에서만 초기화되는 필드가 SA_MODE(csql -S, loaddb)에도 초기화되는지 확인할 것.</li>
+</ul>
+<h5>NUMERIC 중간 도메인은 컴파일 시점 고정 — 정합 기준은 TPC-H 22종 결과 byte 동일</h5>
+<p>NUMERIC 연산의 중간 도메인(정밀도/스케일)을 컴파일 시점에 확정하는 설계라 인터프리트 경로와 중간 도메인이 어긋나면 결과가 미세하게 달라질 수 있다. 그래서 정합 판정을 '값 근사'가 아니라 <strong>TPC-H 22종 결과 byte 동일</strong>로 잡았고(<code>/home/cubrid/dev/q22_pass.sh</code>, <code>/home/cubrid/dev/q22_compiled/</code>·<code>q22_develop/</code>), 불일치 패턴이 나오면 그 패턴을 폴백시키는 방침이다. 22/22 byte 동일이 여러 차례 재검증됐다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>NUMERIC이 섞인 식의 중간 도메인 결정 로직을 바꿨다면 22종 byte 동일 재검증 없이는 통과시키지 말 것.</li>
+</ul>
+<h5>P1(식 스텝 엔진)만으로는 이득이 안 난다 — 지배 비용은 operand당 <code>pr_clone_value</code>와 행당 <code>qdata_add_dbval</code></h5>
+<p>커밋1만으로 Q1은 중립(−2.6%)이었고, 게다가 BUILDLIST의 operand가 <code>TYPE_CONSTANT</code>라 wired-only 허용이 없어 사실상 no-op 측정이었다. 남는 지배 비용은 ① operand마다 <code>pr_clone_value</code>(Q1 기준 7회/행, db_values 벡터로) ② accumulator 가산이 행마다 다시 <code>qdata_add_dbval</code>을 타는 것(집계 8개/행)이었다. 그래서 P3(accumulate 타입 커널 + 포인터 직결)가 본게임이었고, acc 커널 4종(generic/sum_bigint/sum_double/sum_numeric) + <code>acc_kernel</code> 필드 + resolve + 스플라이스로 Q1 31.87→25.58s(−19.7%, byte 동일)를 얻었다(WIP <code>8580b0466</code>).</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>집계 경로 변경 시 커널이 붙었는데도 operand 복사(<code>pr_clone_value</code>)나 행당 <code>qdata_add_dbval</code>이 남아 이득을 상쇄하지 않는지 확인할 것.</li>
+</ul>
+<h5>P1 빠른 개선 2가지: 프롤로그 리터럴 coerce 승격, 에필로그 coerce 스킵</h5>
+<p>① 리터럴 상수를 프롤로그에서 1회만 coerce한다(예: <code>1 - l_discount</code>의 INT 1이 행마다 numeric으로 변환되던 것을 컴파일 타임으로 승격). ② 결과 도메인이 이미 일치하면 에필로그 coerce를 스킵한다 — INT/BIGINT/DOUBLE은 정적 판정 가능, NUMERIC은 제외. <code>tp_value_cast</code>가 동일 타입이면 즉시 리턴한다는 점은 실측 검증됐으므로 스킵 이득은 호출 오버헤드 제거 수준이다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>상수 피연산자가 행당 변환되는 자리가 남았는지, 에필로그 coerce 스킵 조건이 NUMERIC까지 잘못 포함하지 않는지 확인할 것.</li>
+</ul>
+<h5>커밋2 범위: CASE/IF 지연 분기, 3치 Kleene 비교, T_PREDICATE, IFNULL/COALESCE</h5>
+<p>커밋 <code>04ebb8706</code>("commit2 WIP: CASE-family and comparison-predicate kernels")에서 CASE/IF의 <strong>지연 분기</strong>(선택되지 않은 분기를 평가하지 않는 가드 패턴), 비교 6종의 3치 Kleene 논리, T_PREDICATE, IFNULL/COALESCE를 지원했다. 소스에도 규약이 주석으로 남아 있다 — <code>expr_compile.c:621</code>("a NULL side is V_UNKNOWN before any comparison"), <code>:834</code>("Kleene AND with immediate exit on V_FALSE/V_ERROR"), <code>:927</code>("V_FALSE and V_UNKNOWN both select the ELSE side, as in fetch_peek_arith ()"). TPC-H 시간은 예상대로 중립인데 q8/q12의 CASE 식이 스캔으로 이동해 프로젝션 훅 영역에 속하기 때문이다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>CASE/IF 스텝이 미선택 분기를 평가하지 않는지(부작용·에러 발생 차이), 비교의 NULL 처리가 인터프리트 경로와 동일한 3치 논리인지 확인할 것.</li>
+</ul>
+<h5>스캔 필터 술어 컴파일의 2대 함정: TYPE_POS_VALUE 자동 파라미터화, DATE 리프 부재</h5>
+<p>커밋 <code>99cf8d90b</code>("compile scan-filter predicates once per clone")은 PRED_EXPR → 컴파일 술어 트리를 클론당 1회 생성하고 (타입×연산자) 리프로 디스패치하며, 호스트변수 쪽만 런타임 타입 가드를 둔다. 1차 시도에서 걸린 함정 둘: ① <strong>자동 파라미터화된 리터럴은 <code>TYPE_POS_VALUE</code></strong>라서 이를 제외하면 술어 커버리지가 전멸한다, ② <strong>DATE 리프가 없으면 q12가 +10% 순회귀</strong> — 폴백 오버헤드가 이득을 넘긴다. 미커버 항은 interp 리프(<code>eval_pred_comp0</code>/<code>eval_pred</code>)로 항 단위 폴백하며, 소스 주석에도 "IS NULL / EXISTS / NULLSAFE / set and list relations keep eval_pred ()" (<code>expr_compile.c:1357</code>), "linked subqueries evaluate through eval_pred_comp3 (); interpreted" (<code>:1363</code>)로 남아 있다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>술어에 새 타입/연산자를 넣을 때 (타입×연산자) 조합에 구멍이 생겨 자주 쓰이는 술어가 폴백으로 떨어지지 않는지 확인할 것 — 부분 커버리지는 오히려 회귀를 만든다.</li>
+</ul>
+<h5>p2 백로그 4커밋: EXTRACT/NULLIF/DECODE, px BUILDVALUE_OPT 훅, exec-prologue, NUMERIC fixed64</h5>
+<p><code>c009c3c5e</code>(LIKE) 이후 ff-머지된 4커밋: <code>05a792536</code>(EXTRACT over TIME/DATETIME/TIMESTAMP + NULLIF/DECODE, TORDER 술어 포함), <code>33687714a</code>(px BUILDVALUE_OPT 훅 — 병렬 실행 경로의 공백 해소), <code>221a3a11e</code>(<strong>exec-prologue = 호스트변수 관련 준비를 실행당 1회</strong>로), <code>dcc4c98d2</code>(NUMERIC 곱셈 single-word/fixed64 경로). 검증은 22/22 byte ×4패스, demodb 벤치 md5 5/5 ×2. TPC-H는 중립이나 demodb 합성벤치(GROUP BY 없는 형태)에서 Q1 −29% / Q2 −15%로 px 공백 해소가 실증됐다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>exec-prologue에 올린 작업이 정말 실행당 불변인지(호스트변수 재바인딩·재실행 시 갱신되는지), NUMERIC fixed64 경로가 오버플로/스케일 경계에서 기존 경로와 결과가 같은지 확인할 것.</li>
+</ul>
+<h5>감사 잔여분: 죽은 필드 arg3p, <code>EXPR_BUILD_CTX</code> 20KB 스택 프레임, px gather alloc 실패</h5>
+<p>커밋 <code>3dad3ba82</code>("audit leftovers: dead step field, oversized stack frame, alloc check")에서 ① 죽은 필드 <code>arg3p</code> 제거, ② <code>EXPR_BUILD_CTX</code>를 약 20KB 스택 프레임에서 힙으로 이전, ③ px gather 버퍼 alloc 실패 시 size=0으로 자가치유하도록 수정했다. 한편 ALLOC-08(문자열 CAST 결과 슬롯)은 재검토 결과 per-row clear + <code>prog_free</code> 시 슬롯 클리어로 인터프리트 경로와 동일한 소유권 모델이라 조치 불요로 판정됐다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>빌드/컴파일 컨텍스트 구조체를 수 KB 이상 스택에 잡지 말 것, 가변 길이 결과 슬롯은 per-row clear + prog_free 클리어 규약을 지키는지 확인할 것.</li>
+</ul>
+<h5>px 미완 과제 3건 — acc 커널 배선 시 <code>write_finalize</code> 앞에 <code>qdata_numeric_sum_flush</code>가 선행돼야 한다</h5>
+<p>남은 병렬 실행 과제: ① acc 커널을 px에 배선하려면 <code>result_handler&lt;&gt;::write_finalize</code>(원 메모 px_scan_result_handler.cpp:342; develop에서는 :361 — 행 번호 확인 필요) <strong>앞에</strong> <code>qdata_numeric_sum_flush</code>(브랜치 query_aggregate.cpp:644)가 선행돼야 한다 — NUMERIC 누산기의 지연 캐리를 비워야 부분 결과가 올바르다. ② px가 thread_local을 반복 조회해 ~2.8%를 소모하므로 핸들러에 ctx를 전달하는 구조 개편이 필요하다. ③ px 래치/gather 경합(q21, q18 84s)은 설계 논의가 필요하다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>px 부분 집계 결과를 내보내는 자리에서 NUMERIC 누산기 flush가 선행하는지, thread_local 조회가 행당/호출당 반복되지 않는지 확인할 것.</li>
+</ul>
+<h5>지연 캐리(<code>sum_state</code>)는 value 대신 pending sum을 들고 있다 — 모든 소비자가 flush 후 읽어야 한다</h5>
+<p>CBRD-27178의 지연 캐리 NUMERIC 누산이 브랜치에 통합돼 <code>xasl_aggregate.hpp</code>에 <code>void *sum_state</code>가 추가됐고, 주석에 규약이 명시돼 있다 — "While non-NULL it holds the pending sum INSTEAD of value; every consumer of value materializes it first through <code>qdata_numeric_sum_flush ()</code> (finalize, accumulator merge, hash spill, clear)". 실제로 브랜치 <code>query_aggregate.cpp:214</code>(merge), <code>:791</code>/<code>:832</code>, <code>:1803</code>(finalize), <code>:2947</code>/<code>:3024</code>(hash spill·clear)에서 flush가 호출된다. 필드가 <code>curr_cnt</code> 옆에 배치된 것도 acc 커널이 value/curr_cnt/sum_state를 한 캐시라인에서 읽게 하려는 의도다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span><code>accumulator.value</code>를 새로 읽는 코드를 추가하면 그 앞에 <code>qdata_numeric_sum_flush</code>가 있는지 반드시 확인할 것.</li>
+</ul>
+<h5>디버그 빌드 restrack abort — 컴파일된 집계 피연산자의 에러 이탈 경로가 1순위 용의자</h5>
+<p>PR#7658 head(<code>dc2a93b4e</code>, 로컬 미보유)의 <code>/run all</code>에서 cub_server가 <code>src/base/resource_tracker.hpp:455</code>의 <code>assert (cond)</code>(restrack_assert 본체)로 반복 abort했다 — test_medium 608실패 / test_sql 433실패 / test_shell 199실패 + core 87개. 첫 abort 지점이 <code>_07_aggregate_functions/_02_var_pop/cases/example.sql</code> 직전인데 var_pop 계열은 CHAR/BIT 등 비수치 컬럼을 집계해 <strong>타입 에러를 유발</strong>하는 케이스다. 1순위 가설은 컴파일된 집계 피연산자 프로그램이 에러로 이탈할 때 page fix나 추적 할당을 해제하지 않고 빠져나간다는 것이며, 같은 시기 타 PR 기준선은 전부 녹색이라 환경 탓이 아니다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>식/술어 커널의 <strong>에러 리턴 경로</strong>마다 그 시점까지 잡은 page fix·추적 할당이 해제되는지 한 줄씩 대조할 것 — 정상 경로만 보면 놓친다.</li>
+</ul>
+<h5>컴파일 여부·폴백 판정은 추측하지 말고 <code>;trace</code>의 EXPR_COMPILE 덤프로 확인한다</h5>
+<p>브랜치의 <code>query_dump.c</code>가 <code>;trace</code>에 컴파일 상태를 찍는다 — <code>"EXPR_COMPILE (aggregate operands): active / interpreted (not covered)"</code>(<code>:3765</code>, <code>:3769</code>), <code>"EXPR_COMPILE (data filter): active|interpreted"</code>(<code>:3793</code>), 프로젝션은 <code>"EXPR_COMPILE (%s): active, columns covered %d/%d"</code> (<code>:3819</code>)로 커버 컬럼 수까지 나온다. 누수 실증도 완료돼 RECOMPILE 400회 반복에서 RSS가 안정이었다.</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>'이 식이 컴파일됐다/폴백했다'는 주장은 <code>;trace</code> 덤프 근거를 요구할 것, 재컴파일 반복에서 RSS 증가가 없는지 회귀 확인할 것.</li>
+</ul>
+<h5><code>NULLIF(expr, NULL)</code> 항등 래핑 A/B 기법은 p2 이후 무효화됐을 수 있다</h5>
+<p>같은 빌드에서 비컴파일 경로를 강제하려고 <code>NULLIF(expr, NULL)</code> 항등 래핑을 A/B 대조군으로 썼는데(래핑 자체 오버헤드가 있어 <strong>상한 대조군</strong>), p2 커밋 <code>05a792536</code>이 NULLIF/DECODE를 컴파일 지원 목록에 넣었으므로 이 래핑이 더 이상 인터프리트를 강제하지 못할 수 있다. 순정 대조는 stash + 재빌드가 정확한 방법이다(<code>/home/cubrid/dev/p3_verify.sh</code>).</p>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>'컴파일 off' 대조군을 만들 때 그 구문이 지금도 화이트리스트 밖인지 <code>;trace</code>로 확인할 것 — 화이트리스트가 넓어지면 옛 A/B 트릭이 조용히 무효가 된다.</li>
+</ul>
+<h5>프로그램 상한·지연 영역·타입 가드 — 2026-09-03 리뷰 대응 후의 컴파일러 계약 (expr_compile.c, 브랜치 <code>65c0ea90d</code>)</h5>
+<blockquote><strong>지연 영역 서술은 09-08 <code>afeda4806</code>에서 점프 스텝으로 대체됐다</strong> — 아래 "조건부 평가 — 지연 영역에서 점프 스텝으로" 절이 현재 계약. 상한·타입 가드·T_MUL 미러 항목은 유효.</blockquote>
+<p>[출처 .50, feature/expression-compile <code>4aeeae07b</code>→<code>65c0ea90d</code>, PR#7658 HyunukLee 리뷰 5건]</p>
+<ul>
+<li><strong>스텝/셀 상한 <code>EXPR_MAX_STEPS</code>(128)</strong>: 스텝과 셀은 <code>expr_new_step_with_cell()</code>로 <strong>함께</strong> 확보한다(셀 먼저, 스텝 실패 시 셀 반납). 루트가 중간에 거절되면(<code>expr_compile_node()</code> &lt; 0) 루트 루프가 <code>expr_build_rewind()</code>로 steps/cells/cse/slots를 스냅샷으로 되감고 스텝 소유 pred를 해제한다 — 이전에는 <code>cell &lt; 0 || step == NULL</code> 검사 순서 때문에 커널만 바인드된 반초기화 스텝이 남아 materialize가 <code>&amp;cells[-1]</code>에 쓰고 커널이 NULL 역참조로 죽었다(64+ 표현식 컬럼 SIGSEGV). 상한을 넘은 루트는 fallback 스텝(인터프리트) 또는 프로그램 전체 포기.</li>
+<li><strong>지연 영역은 이제 중첩된다</strong>: <code>EXPR_STEP.region_depth</code>(0 = 메인 루프, n = n중 영역 안). <code>expr_run_region(prog,start,n,ctx,depth)</code>는 자기 depth의 스텝만 실행하고 안쪽 영역은 그 소유 커널이 돈다. CASE 분기는 <code>region_depth+1</code>로 실행.</li>
+<li><strong>rhs 지연(fetch_peek_arith 단락 미러)</strong>: 이항 산술(ADD/SUB/MUL/DIV)·NULLIF의 rhs는 lhs가 NULL이면, NVL/IFNULL/COALESCE의 rhs는 lhs가 NULL일 때만 평가된다. 컴파일러는 rhs 서브트리에 <strong>실패 가능 스텝</strong>(<code>expr_kernel_may_fail()</code>: leaf_fetch·hostvar· coerce_numeric·nvl·extract_* 이외 전부)이 있을 때만 <code>expr_make_rhs_lazy()</code>로 그 스텝들을 한 단계 깊은 영역으로 밀고 prologue 호이스팅을 끄고 CSE 엔트리를 버린 뒤, 노드 커널을 래퍼 <code>expr_k_lazy_arith / _nullif / _nvl</code>(영역 [t_start,t_start+t_n) 실행 후 <code>step-&gt;inner</code> 호출)로 바꾼다. rhs가 리프/호스트변수/coerce만이면 eager 그대로(결과 동일, 호이스팅 유지) — <code>a + b</code>, <code>n1 * ?</code> 는 변화 없음, <code>a + b/c</code>, <code>l_extendedprice * (1 - l_discount)</code> 류는 지연. <strong>AND/OR rhs 항</strong>은 피연산자 스텝에 실패 가능 스텝이 있으면 술어 전체를 거절(인터프리트)한다 — 컴파일된 술어 트리는 피연산자 지연 평가가 없다. 트레이스: <code>[D n] …</code> + 노드 줄 <code>lazy rhs=[a..b)</code>.</li>
+<li><strong>T_MUL NUMERIC 미러</strong>: 인터프리트 <code>qdata_multiply_numeric_to_dbval()</code>은 SHORT/INT/BIGINT 쪽을 <code>qdata_multiply_numeric()</code>(coerce → <strong>plain</strong> <code>numeric_db_value_mul</code>)으로, NUMERIC×NUMERIC만 <code>float_numeric_db_value_mul()</code>로 보낸다(이 함수는 non-NUMERIC 인자를 <code>ER_OBJ_INVALID_ARGUMENTS</code>로 거절). 컴파일러도 혼합이면 coerce 스텝 + <code>expr_k_mul_numeric_plain</code>, 순수면 <code>expr_k_mul_numeric</code>(fixed64 fast path 포함). 예전 "곱셈은 모든 조합에서 float, raw 정수 투입" 주석은 틀렸었다(<code>SUM(n1 * ?)</code> INT 바인드가 OVERFLOW 에러).</li>
+<li><strong>타입 드리프트 가드</strong>: 산술 커널의 <code>EXPR_ARITH_REQUIRE_TYPE</code>와 같은 검사를 비교 리프(<code>EXPR_PRED_CMP_LEAF(name,get,op,dbtype)</code> → 어긋나면 <code>expr_pred_cmp_values()</code> generic), <code>R_EQ_TORDER</code> fast path, EXTRACT 커널(<code>EXPR_EXTRACT_PROLOGUE(src,dbtype)</code> → 행 단위 <code>expr_arith_row_interp</code>)에 둔다. 근거: 재귀 CTE 앵커/재귀 분기 타입 불일치(<code>aa82c07d1</code>).</li>
+<li><strong><code>REGU_VARIABLE_APPLY_COLLATION</code></strong> 플래그가 있는 노드는 <code>expr_compile_node()</code> 진입에서 거절 — 인터프리트는 cast 대신 <code>pr_clone_value</code> + <code>db_string_put_cs_and_collation</code>을 한다(fetch.c T_CAST arm, <code>fetch_peek_dbval</code> 후처리).</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>새 arm을 추가하면 ① <code>expr_new_step_with_cell()</code>만 쓰고 ② rhs가 있으면 lhs→(lhs coerce)→rhs→(rhs coerce) 순서로 emit해 rhs 범위가 연속되게 하고 <code>expr_make_rhs_lazy()</code>를 거치고 ③ 새 커널을 <code>expr_kernel_may_fail()</code> 화이트리스트 관점에서 분류하고 ④ 커널 이름 표(<code>expr_kernel_name</code>)에 넣을 것(빠지면 트레이스에 <code>?</code>).</li>
+</ul>
+<h4>식 컴파일(expr_compile.c) 리뷰 2차에서 확정된 사실 (.52, PR#7658 be75c0b3a 기준)</h4>
+<ul>
+<li><strong><code>TYPE_CONSTANT</code> 는 plan 상수가 아니다</strong> — 다른 블록 value list 의 <code>dbvalptr</code>(fetch.c 에서 <code>REGU_VARIABLE_FETCH_NOT_CONST</code>). 재귀 CTE 는 앵커 도메인(INTEGER) 슬롯을 count() 의 BIGINT 로 다시 채우므로, 타입을 컴파일 시점에 고정하는 코드는 <code>TYPE_CONSTANT</code>/<code>TYPE_POSITION</code>/<code>TYPE_POS_VALUE</code> 피연산자에 런타임 타입 가드를 둬야 한다. <code>TYPE_ATTR_ID</code>·<code>TYPE_DBVAL</code> 만 고정.</li>
+<li><strong>정렬 GROUP BY 는 집계 리스트를 <code>memcpy</code> 로 차원별 복사</strong>(<code>qexec_gby_init_group_dim</code>) — AGGREGATE_TYPE 에 런타임 소유 포인터를 추가하면 복사 직후 초기화 + <code>qexec_gby_clear_group_dim</code> 해제를 같이 넣어야 한다(해시→정렬 하이브리드는 헤드가 이미 컴파일된 상태로 복사됨).</li>
+<li><strong>컴파일 산출물 수명은 실행당 1회</strong>: 모든 <code>qexec_clear_xasl()</code> 호출자가 <code>is_final=true</code> 라 <code>XASL_DECACHE_CLONE</code> 조건은 dead. 준비문 2000회 반복 벤치에서 실행당 컴파일 비용은 측정 한계 이하(1행 형상에서도 PR 이 더 빠름).</li>
+<li><strong><code>eval_pred()</code> 의 fetch 순서</strong>: 비교 항은 좌항 NULL 이면 우항 미fetch(R_EQ_TORDER·NULLSAFE_EQ 제외), LIKE 는 src NULL 이면 pattern/escape 미fetch, AND/OR 는 단락. 컴파일 경로가 이를 미러하려면 우항 스텝이 실패 가능할 때 거절/지연해야 한다.</li>
+<li><strong>디스크 NUMERIC 헤더 상수 <code>NUMERIC_HEADER_SIZE</code>(3)</strong> 는 object_primitive.h 로 export 됨 — heap 디코드 커널과 공유.</li>
+<li>인터프리터 <code>qdata_add_int/_bigint</code>·<code>qdata_subtract_int/_bigint</code> 는 wrap-then-check(UB)였고 <code>OR_ADD/SUB_OVERFLOW</code> builtin 으로 전환됨.</li>
+</ul>
+<h4>식 컴파일 후속 — 가드 태그 CSE·리터럴 값 CSE·px trace (.52, 2026-09-08, <code>beedad3e4</code> 로컬 커밋, PR#7658 미푸시)</h4>
+<ul>
+<li><strong>CSE는 두 곳에서 새고 있었다.</strong> ① 리터럴 CSE 키가 <code>&amp;regu-&gt;value.dbval</code> 주소라, 플랜에 등장 위치마다 따로 있는 <code>TYPE_DBVAL</code> 노드(<code>1 - disc</code>, <code>1 + tax</code>의 <code>1</code>)가 매번 새 셀이었다 → 그 위에 얹힌 모든 서브식이 CSE 미스. ② <code>expr_build_defer_region()</code>이 지연 영역의 CSE 엔트리를 <code>n_cse = cse_mark</code>로 버렸다. TPC-H q1 출력 리스트에서 <code>ep*(1-disc)</code>가 두 번(6스텝) 계산된 원인. 수정: 정확 타입 리터럴(SHORT/INT/BIGINT/FLOAT/DOUBLE/ NUMERIC 동일 p,s/DATE/TIME/TIMESTAMP/DATETIME, NULL 제외)은 <code>EXPR_CSE_LITERAL</code>(opcode −3) 엔트리로 <strong>값 비트 비교</strong> 공유; CSE 엔트리에 <code>guard</code> 필드(0 = 무조건 유효, n = <code>guards[n-1]</code> = (parent, lhs cell, kind) 트라이 id)를 두고 <code>expr_cse_find()</code>는 <code>guard == 0 || guard == cur_guard</code>만 매칭. rhs 컴파일은 <code>expr_rhs_begin()</code>/<code>expr_rhs_end()</code>로 감싸고(kind: <code>EXPR_GUARD_LHS_NOT_NULL</code> 산술·NULLIF, <code>EXPR_GUARD_LHS_NULL</code> NVL), eager로 남은 rhs의 엔트리는 둘러싼 가드로 재태깅. 결과 q1 4스텝, root[1]의 lhs = root[0]의 결과 셀. 안전 근거: 같은 가드의 영역은 정확히 같은 행에서 돌고 생산자가 스텝 순서상 앞. CASE 분기는 종전대로 <code>n_cse</code> 리셋(분기 간 공유 없음).</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>CSE 엔트리를 새로 만드는 arm은 <code>guard</code>를 넘겨야 한다 — 와이어드 셀(상수·호스트변수)은 0, 스텝 결과는 <code>bctx-&gt;cur_guard</code>. 가드 테이블이 가득 차면(<code>expr_rhs_begin() &lt; 0</code>) 노드를 거절한다.</li>
+<li>**float NUMERIC <code>+ - *</code>는 실질적으로 실패하지 않는다** — <code>float_numeric_check_overflow_and_adjust_scale()</code>은 정밀도 &gt; 40이면 스케일을 줄이고 <code>scale &lt; DB_MIN_NUMERIC_SCALE(−214)</code>일 때만 에러, <code>float_numeric_round_and_pack()</code>도 같은 조건. 기본 정밀도(<code>DB_DEFAULT_NUMERIC_PRECISION</code>=40) 도메인으로의 coerce는 <code>numeric_coerce_num_to_num()</code>이 값을 그대로 둔다. 38자리 × 38자리 × 38자리도 에러 없이 값(스케일 음수)이 나온다(TC <code>cbrd_27215_numeric_eager_rhs</code>). 따라서 lazy 영역의 실질 효용은 나눗셈·정수 오버플로·CAST 쪽이다. "오버플로 불가 증명으로 eager 전환" 안은 서버측 컬럼 참조가 <code>TYPE_CONSTANT</code> (드리프트 가능)라 채택하지 않았다.</li>
+<li><strong>px 실행의 <code>;trace</code>에는 EXPR_COMPILE 절이 없었다</strong> — 프로그램은 워커 클론 소유·해제라 코디네이터 XASL은 state 0. 수정: <code>px_scan_task.cpp</code>의 on_trace 블록(<code>merge_xasl_tree</code> 직후, <code>qexec_clear_xasl</code> 전)에서 <code>trace_handler::add_expr_compile_dump(m_xasl)</code> → <code>open_memstream</code> + <code>qdump_print_expr_compile_text(fp, xasl, 0, " [px worker]")</code> (query_dump.c에서 export, tag 인자 추가) → 첫 워커 것만 보관 → <code>accumulative_trace_storage::add_stats</code>가 복사 → <code>dump_stats_text</code>가 "(parallel workers …)" 줄 아래 같은 indent로 출력, JSON은 <code>expr_compile</code> 문자열. 워커 프로그램 포인터를 코디네이터로 옮기는 방식은 불가 — 셀이 워커 클론 메모리(<code>dbvalptr</code>)에 배선돼 있어 클론 해제 후 dangling.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>병렬 플랜의 컴파일 여부 판정은 <code>[px worker]</code> 태그 절로 한다. 절이 없으면 워커가 0행이었거나 trace off.</li>
+</ul>
+<h4>스캔 필터 확장 — 피연산자 스텝 컴파일·리터럴 고정·필터→소비자 공유 (.52, 2026-09-08, <code>f97766b6f</code>)</h4>
+<ul>
+<li><strong>필터 트리가 프로그램을 소유한다</strong>: <code>expr_scan_pred_compile(thread, pr, vd)</code>(vd 인자 추가)가 <code>EXPR_BUILD_CTX</code>를 만들어 <code>expr_scan_pred_build(bctx, …, shareable)</code>로 트리를 짓고, 비교 리프의 산술 쪽은 <code>expr_scan_side_compile()</code>이 <code>expr_compile_node()</code>로 컴파일한 뒤 <code>expr_build_defer_region()</code>으로 <strong>리프별 지연 영역</strong>(가드 <code>EXPR_GUARD_SCAN_SIDE</code>, 키 <code>-(++scan_side_seq)</code> → 리프 간 CSE 없음)으로 만든다. <code>expr_prog_finish(bctx, roots, n_roots, vd, extra_pred)</code>가 compile_roots_impl에서 분리돼 루트 0개 프로그램을 만들고 <code>expr_pred_materialize(pred, prog, remap)</code>로 리프의 <code>lhs/rhs_start</code>를 remap한다. 평가는 <code>expr_scan_pred_eval()</code> → <code>expr_prog_prepare()</code>(프롤로그만) → 리프에서 <code>expr_scan_side_value()</code>가 <code>expr_run_region(depth 1)</code> 또는 기존 fetch. 해제 <code>expr_scan_pred_free()</code>가 prog·share 해제.</li>
+<li><strong>리터럴 고정(<code>rhs_pinned</code>/<code>pinned_rhs</code>)</strong>: <code>t1 != t2</code>이고 우항이 non-NULL <code>TYPE_DBVAL</code>이면 <code>eval_value_rel_cmp()</code>의 상수측 규칙(수치×수치 &amp; <code>tp_more_general_type(t1,t2) &gt; 0</code> → <code>tp_domain_resolve_default(t1)</code>; 날짜형 vs 문자열 → 좌항 날짜형)을 컴파일 시 <code>tp_value_coerce()</code>로 1회 적용, <code>fetched2 = &amp;pinned_rhs</code>. 해석 경로는 첫 행에 리터럴 DB_VALUE를 <strong>in-place</strong>로 바꾸는데 그 노드는 등장마다 별개라 관측 차이 없음. 좌항이 덜 일반적(INT vs NUMERIC 리터럴)·문자열 vs 수치는 종전대로 해석.</li>
+<li><strong>공유 레지스트리</strong>: <code>EXPR_PRED.share[]</code>(regu, slot) — <code>expr_scan_pred_share_build()</code>가 AND/NOT 경로(<code>shareable</code> 전파: AND 자식·NOT 자식은 유지, OR 자식은 false)의 리프에서 컴파일된 <strong>슬롯 소유 노드</strong>(<code>bctx-&gt;node_cells[]</code>에 기록, <code>out != NULL</code>)만 등록. 소비자: <code>expr_prog_compile_roots(…, share_spec)</code>에 <code>ACCESS_SPEC_TYPE*</code>를 넘기면 <code>expr_share_attach()</code>가 <code>where_pred-&gt;scan_prog</code>(state 1, n_share&gt;0)를 붙이고, <code>expr_compile_node()</code> 래퍼가 INARITH 노드마다 <code>expr_share_find()</code> → <code>expr_share_same()</code>(구조 비교; <code>TYPE_CONSTANT</code>↔<code>TYPE_ATTR_ID</code>는 <code>expr_share_slot_attr()</code>이 spec의 <code>cls_regu_list_pred/rest</code>에서 <code>vfetch_to == dbvalptr</code>인 ATTR_ID의 id로 대응)로 히트하면 필터 슬롯 주소로 <strong>와이어드 셀</strong> (<code>cell_shared[]</code>, <code>prog-&gt;n_shared</code>). <code>only_compute_roots</code>의 has_compute와 <code>qdata_valptr_prog_compile</code>의 <code>n_compute==0</code> 폐기 조건이 shared를 계산으로 인정.</li>
+<li><strong>spec 전달</strong>: 캐리어 필드 <code>valptr_list_node.eval_prog_share_spec</code>, <code>aggregate_list_node.operand_prog_share_spec</code>(헤드). <code>qexec_set_expr_share_spec(xasl, spec)</code>(query_executor.c, export)이 <code>xasl-&gt;spec_list == spec &amp;&amp; spec-&gt;next == NULL &amp;&amp; scan_ptr == NULL &amp;&amp; TARGET_CLASS &amp;&amp; where_pred</code> 일 때 BUILDLIST→<code>outptr_list</code>, BUILDVALUE→<code>agg_list</code>에 세팅. 호출: <code>qexec_open_scan()</code> 진입부, px <code>px_scan_task.cpp</code> 클론 셋업(<code>m_scan_id</code> 직후). <strong>BUILDVALUE의 outptr_list는 제외</strong>(스캔 후 평가라 마지막 행 값이 됨).</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>공유 셀의 유효성은 "통과 행은 AND/NOT 경로 리프를 전부 평가했다"에만 기댄다 — 필터를 우회해 행이 소비자에 도달하는 경로(예: where_pred가 key filter로 옮겨진 커버링 인덱스)가 생기면 <code>qexec_set_expr_share_spec</code> 조건을 다시 봐야 한다. 검증: 이전 head와 54문장 결과·에러 위치 동일, TPC-H q1/q6/q14/q19 동일(상수는 자동 파라미터화돼 필터 프로그램은 비어 있음).</li>
+</ul>
+<h4>조건부 평가 — 지연 영역에서 점프 스텝으로 (.52, 2026-09-08, <code>afeda4806</code>; 09-03 절의 "지연 영역" 서술을 대체)</h4>
+<ul>
+<li><strong>단일 루프 <code>expr_run_range(prog, start, end, ctx)</code></strong>: <code>steps[i].kernel()</code>이 <code>EXPR_JUMPED</code>(=1)를 돌려주면 <code>i = ctx-&gt;jump</code>, 아니면 <code>i++</code>. <code>expr_prog_eval()</code>은 <code>[row_start, n_steps)</code>를, 스캔 필터 리프는 자기 피연산자 구간을 같은 함수로 돈다. 점프는 <strong>앞으로만</strong> 간다.</li>
+<li><strong>스텝 필드</strong>: <code>t_start/t_n/f_start/f_n/deferred/region_depth/inner</code> 삭제, <code>jump_to</code>(구간 경계 인덱스)·<code>alias_of</code>(결과 슬롯을 빌려 올 스텝 인덱스) 추가. <code>expr_prog_finish()</code>의 alias 패스가 <code>steps[i].out = steps[alias_of].out</code>으로 슬롯을 공유시킨다.</li>
+<li><strong>점프 커널</strong>: <code>expr_k_jump_null_arith / _nullif</code>(lhs NULL → <code>alias_of</code> 슬롯을 NULL로 발행, <code>jump_to</code>로), <code>expr_k_jump_notnull_nvl</code> (lhs non-NULL → lhs 발행, rhs 구간 건너뜀), <code>expr_k_case_branch</code>(<code>step-&gt;pred</code> 평가, TRUE 아니면 ELSE 시작으로), <code>expr_k_jump</code>(무조건), <code>expr_k_case_pub_select / _cast</code>(분기 결과를 공통 슬롯으로 발행). trace 표기 <code>jump_null c0 -&gt; c4 (slot) (slot of [2]) else -&gt; [3]</code>.</li>
+<li><strong>끼워 넣기 <code>expr_build_insert_step(bctx, pos, kernel, cell)</code></strong>: 산술 arm은 자식을 다 emit한 뒤 rhs 시작 위치에 검사 스텝을 끼운다. 기존 스텝의 인덱스가 밀리므로 <code>jump_to</code>는 <strong><code>&gt; pos</code></strong>일 때만 +1(<code>== pos</code>는 "끼운 스텝 앞까지" 경계라 끼운 스텝을 포함해야 함), <code>alias_of</code>는 <strong><code>&gt;= pos</code></strong>면 +1(밀려난 스텝 자신). 이 둘을 같은 규칙으로 하면 바깥 산술의 NULL 점프가 안쪽 산술의 검사 스텝을 뛰어넘는다 — <code>(a*(1-b))*(1+c)</code>, a NULL 행에서 실측. TC <code>cbrd_27215_lazy_chain</code>. P/E/행 재배열 뒤 <code>jump_to</code>·<code>alias_of</code>를 remap, 배열 끝을 넘는 <code>jump_to</code>는 <code>n_steps</code>.</li>
+<li><strong>CASE 배치</strong>: <code>case_branch(pred, jump_to=ELSE)</code> / THEN 스텝 / <code>case_pub(alias 없음, 슬롯 소유)</code> / <code>jump(jump_to=END)</code> / ELSE 스텝 / <code>case_pub(alias_of=THEN pub)</code>. 분기 안 CASE 중첩 거절(<code>in_branch</code>)은 그대로.</li>
+<li><strong>가드 CSE와의 관계</strong>: 가드 id 트라이(<code>parent, lhs cell, kind</code>)는 그대로다 — 가드는 "이 구간이 도는 조건"이지 실행 방식이 아니므로 점프 모델에서도 같은 가드 아래 rhs만 재사용한다. <code>n_compute</code>는 점프 스텝을 세지 않는다(Q1: <code>steps: 6 … compute: 4</code>).</li>
+<li><strong>검증</strong>: 이전 head 대비 54+12문장 결과·에러 위치 동일, TPC-H q1/q6/q14/q19 동일, CTP <code>cbrd_27215_*</code> 14/14 + <code>lazy_chain</code>.</li>
+</ul>
+<h3>3. 예비 이슈 사항</h3>
+<blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
+<ul>
+<li><strong>[해소됨 — 662729b67, .50]</strong> <code>expr_scan_pred_build()</code>(expr_compile.c)가 트리 깊이를 세지 않고 컴파일해, 인터프리트 <code>eval_pred()</code>/<code>fetch_peek_arith()</code>가 하는 <code>max_recursion_sql_depth</code> 카운팅을 우회했다 — 400 중첩 제한을 거부해야 할 질의가 컴파일 경로에서 그냥 실행됨(shell TC bug_bts_14100 회귀). 수정: 빌드 중 depth가 한도를 넘으면 컴파일 전체를 거절(NULL) → 인터프리트 폴백으로 기존 -1137(<code>ER_MAX_RECURSION_SQL_DEPTH</code>) 유지. feature/expression-compile 브랜치 한정 결함이었다.</li>
+<li><strong>[해소됨 — 75ea97b7f, .50]</strong> 컴파일된 정수 나눗셈 커널 <code>expr_k_div_int</code>/<code>expr_k_div_bigint</code> (expr_compile.c)가 0-divide만 검사하고 <code>INT_MIN / -1</code>의 오버플로 가드가 없어 기계 나눗셈이 SIGFPE로 서버를 죽였다(shell TC cbrd_27229 — CBRD-27229가 develop 인터프리트 경로 <code>qdata_divide_int/bigint</code>에 넣은 <code>OR_CHECK_INT/BIGINT_DIV_OVERFLOW</code> 가드가 컴파일 커널 신설 시 누락). 수정: 두 커널에 동일 가드 추가(→ <code>ER_QPROC_OVERFLOW_DIVISION</code>). NUMERIC 나눗셈은 develop 함수 호출이라 원래 안전, DOUBLE 나눗셈은 컴파일 대상이 아님.</li>
+</ul>
+<ul>
+<li><strong>[해소됨 — 4aeeae07b, .50]</strong> 표현식 컬럼 64개 이상(스텝/셀 128 상한) SELECT·집계에서 반초기화 스텝 잔존으로 cub_server SIGSEGV (PR#7658 리뷰). 루트 거절 시 스냅샷 되감기 + 스텝·셀 동시 확보. TC <code>_13_issues/_26_2h/cbrd_27215_step_limit</code>.</li>
+<li><strong>[해소됨 — 4aeeae07b, .50]</strong> <code>SUM(numeric_col * ?)</code> 정수 바인드가 "Overflow occurred in multiplication context" — T_MUL만 coerce 생략 + float 커널에 raw INTEGER 투입. 혼합은 coerce + plain 커널. TC <code>cbrd_27215_mul_hostvar</code>.</li>
+<li><strong>[해소됨 — 4c71a5c8a, .50]</strong> 컴파일 경로가 인터프리트 단락(산술 lhs NULL·NVL·NULLIF·AND/OR)을 무시해 <code>a + b/c</code>가 NULL 대신 divide-by-zero — rhs 지연 영역 + AND/OR 거절(§2 항목). TC <code>cbrd_27215_short_circuit</code>. 남은 갭: AND/OR rhs 피연산자는 지연이 아니라 거절이라 <code>CASE WHEN a&gt;0 AND b/c&gt;1 …</code> 류 술어는 컴파일되지 않는다(성능만 영향).</li>
+<li><strong>[해소됨 — 4aeeae07b, .50]</strong> 비교 리프·TORDER·EXTRACT 커널의 타입 드리프트 가드 부재(BIGINT를 <code>db_get_int</code>로 읽으면 하위 32비트 비교) — 가드 추가. 실제 드리프트 재현 형상은 재귀 CTE <code>count()</code> 케이스만 확인됨.</li>
+<li><strong>[해소됨 — 4aeeae07b, .50]</strong> <code>REGU_VARIABLE_APPLY_COLLATION</code> 미확인 — 거절로 폴백. TC <code>cbrd_27215_collate</code>.</li>
+<li><strong>[미수정 버그]</strong> <code>px_scan_slot_iterator.cpp</code> — <code>qualified_rows++</code>가 필터 판정(<code>ev_res != V_TRUE</code> continue) 앞이라 병렬 heap 스캔의 SET TRACE ON 선택도가 무의미. develop 95b79e7ed에서 :125로 잔존 확인(원 메모 :124). 직렬·병렬 LIST는 정상.</li>
+<li><strong>[의심 — 작성자 확인 필요]</strong> <code>px_scan_result_handler.hpp:97</code>(원 메모 :96) <code>is_list_id_domain_resolved</code>: 워커 공유 플래그가 워커 전용 도메인 보정을 가드(cpp:885-888). develop 95b79e7ed 잔존 확인.</li>
+<li>eval_pred 특수화 커널(eval_fnc)이 query_executor.c의 after_join_pred(:8589)/if_pred(:8604)에 미적용 — 행마다 제네릭 경로(실측 2.84%). develop 95b79e7ed 잔존 확인.</li>
+<li>튜플 크기 2회 계산(~2.75%) — <code>qdata_generate_tuple_desc_for_valptr_list</code> 계산 후 버림, <code>qdata_copy_db_value_to_tuple_value</code>+<code>pr_data_writeval_disk_size</code> 재계산. <code>QFILE_TUPLE_DESCRIPTOR</code>에 f_size 배열이면 해소.</li>
+<li>memoize가 직렬 기준 캘리브레이션(1000프로브 후 히트율&lt;0.5 영구 자기비활성)이라 병렬에서 조용히 자기비활성 가능. develop 95b79e7ed 잔존 확인(memoize.cpp:900대).</li>
+</ul>
+<h3>4. 진행중인 작업</h3>
+<blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
+<h4>.50</h4>
+<ul>
+<li>PR#7658(CBRD-27215) 리뷰 5건 대응 커밋 3개(<code>4aeeae07b</code>·<code>4c71a5c8a</code>·<code>65c0ea90d</code>) — CTP 전체 sql·TPC-H SSOT A/B 후 push 예정 (2026-09-03).</li>
+</ul>
+<h4>.51</h4>
+<ul>
+<li>PR#7622 검증에서 query 실행 경로 회귀 분류 완료(재블레스 8/보류 19), 후속은 optimizer 쪽 수정 대기.</li>
+</ul>
+<h4>.52</h4>
+<ul>
+<li><strong>CBRD-27215 / PR#7658</strong> 식 컴파일 리뷰 대응(.50 → .52 인계): 1차 5건 <code>0acc72bfb</code>(09-04), 2차 12건 <code>be75c0b3a</code>(09-08) + TC 12건(tc/pr-7658 <code>a887e6c3e</code>). 미결: <strong>T6 지연 캐리 NUMERIC SUM 유지 여부 리뷰어 결정</strong> → 확정 후 T7 px BUILDVALUE_OPT sum_state 통일 후속, CI 재실행. 확정 코드 사실은 §2 "식 컴파일 리뷰 2차" 참조. 세션 01ACsuD7 종료.</li>
+</ul>
+<h4>.52</h4>
+<ul>
+<li>병렬 스캔(px_*) 계열 분석·버그 제보(qualified_rows, is_list_id_domain_resolved) — 작성자 확인 대기.</li>
+</ul>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>

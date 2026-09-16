@@ -1,0 +1,109 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>src/communication — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html">모듈 경계</a></li>
+<li><a href="measurement.html">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html" class="cur"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>src/communication</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 3건</p>
+<blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
+<h3>1. 소스 목적 및 사용처 (함수별)</h3>
+<p>네트워크 인터페이스 층: 요청 패킹/언패킹, 서버 디스패치 테이블, method/xs 콜백 글루, 클라이언트 히스토그램. <code>network.h</code>(<code>NET_SERVER_REQUEST_LIST</code>·요청 상수), <code>network_sr.c</code>(<code>net_server_init()</code>, <code>net_Requests[]</code> 디스패치 테이블), <code>network_interface_sr.cpp</code>(서버 핸들러; develop 기준 .cpp), <code>network_interface_cl.c</code>(클라이언트 인터페이스), <code>network_callback_cl.cpp</code>/<code>network_callback_sr.cpp</code>.</p>
+<div class="tbl"><table><thead><tr><th>함수</th><th>파일</th><th>목적</th><th>주요 사용처(호출자)</th></tr></thead><tbody>
+<tr><td><code>net_server_init</code></td><td><code>network_sr.c:75</code></td><td><code>net_Requests[]</code> 디스패치 테이블 구성(핸들러+<code>action_attribute</code>)</td><td><code>net_server_start</code> 초기화 경로</td></tr>
+<tr><td><code>net_server_request</code></td><td><code>network_sr.c:796</code></td><td>서버 요청 메인 디스패처(권한/트랜잭션 속성 검사 후 핸들러 호출)</td><td><code>css_initialize_server_interfaces(net_server_request)</code>(:1143)로 등록 → css 워커 스레드</td></tr>
+<tr><td><code>net_server_start</code></td><td><code>network_sr.c:1064</code></td><td>서버 기동 총괄(er/스레드/파라미터 init → <code>css_init</code>(:1154))</td><td><code>src/executables/server.c:325</code></td></tr>
+<tr><td><code>net_server_conn_down</code></td><td><code>network_sr.c:1046</code></td><td>연결 다운 시 트랜잭션 정리 훅</td><td>css 연결 종료 경로</td></tr>
+<tr><td><code>net_client_request</code></td><td><code>network_cl.c:579</code></td><td>클라이언트 요청 송신+응답 수신의 공통 본체</td><td><code>network_interface_cl.c</code>(약 180회 사용)</td></tr>
+<tr><td><code>net_client_init</code></td><td><code>network_cl.c:3619</code></td><td>클라이언트 네트워크 초기화(<code>css_client_init</code> 경유 :3625)</td><td><code>boot_cl.c</code> 접속 경로</td></tr>
+<tr><td><code>get_net_request_name</code></td><td><code>network_common.cpp:42</code></td><td>요청 인덱스→이름 문자열(로깅/히스토그램)</td><td><code>net_server_request</code> 디버그 로그, 히스토그램</td></tr>
+<tr><td><code>xs_callback_send</code> / <code>xs_callback_receive</code></td><td><code>network_callback_sr.cpp:35/:60</code>(서버) · <code>:90/:96</code>(비서버 변형)</td><td>서버→클라이언트 method/xs 콜백 송수신</td><td><code>xs_receive_data_from_client</code>(<code>network_interface_sr.cpp:7191</code>) 등</td></tr>
+<tr><td><code>xs_queue_send</code></td><td><code>network_callback_cl.cpp:68</code></td><td>클라이언트 측 콜백 응답 큐잉</td><td>method 콜백 처리(<code>src/method/query_method.cpp</code> 경로)</td></tr>
+<tr><td><code>net_histo_ctx</code></td><td><code>network_histogram.hpp:46</code></td><td>클라이언트 요청별 히스토그램 수집(<code>NET_SERVER_REQUEST_END</code> 크기 배열)</td><td>CS/SA 클라이언트 perf 덤프</td></tr>
+<tr><td><code>spl_call</code></td><td><code>network_interface_sr.cpp</code> (grep <code>spl_call</code>)</td><td>SP 호출 서버 핸들러 — <code>cubpl::executor</code> 생성·실행(:11209 부근)</td><td><code>net_Requests[]</code> 디스패치</td></tr>
+<tr><td><code>sloaddb_*</code> 핸들러</td><td><code>network_interface_sr.cpp:10842~11089</code></td><td>loaddb CS 모드 요청 핸들러 묶음</td><td><code>net_Requests[]</code> 디스패치</td></tr>
+</tbody></table></div>
+<h3>2. 분석 내용 (함수별)</h3>
+<blockquote>항목은 함수 단위로 기술한다 — 각 항목의 제목/선두가 함수·파일명이다. 새 분석도 함수명을 앞세워 추가할 것.</blockquote>
+<blockquote>(아래 주의점·리뷰 체크포인트의 원본: src/communication/AGENTS.md 증류)</blockquote>
+<h4>모듈 일반</h4>
+<ul>
+<li><code>_cl</code> = CS/SA, <code>_sr</code> = SERVER/SA. <code>network_request_def.hpp</code>는 <code>#error</code>로 SERVER_MODE를 강제.</li>
+<li>빌드 타깃별 파일 포함이 다르다(예: <code>network_common.cpp</code>는 서버·CS만, <code>network_callback_sr.cpp</code>는 서버·SA, <code>network_histogram.cpp</code>는 CS·SA만) — 표 확인 필요.</li>
+<li><code>memory_wrapper.hpp</code> 마지막 include 규칙 준수.</li>
+<li>접두사: <code>net_</code>, <code>net_client_*</code>, <code>net_server_*</code>, <code>css_*</code>, <code>sboot_*</code>(부트 핸들러), <code>stran_*</code>(트랜잭션 핸들러), <code>xs_*</code>(method/xs 콜백).</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>파일이 올바른 빌드 타깃(cubrid/cs/sa CMakeLists)에 들어가는가?</li>
+</ul>
+<h4>net_server_init / net_Requests[] (network_sr.c)</h4>
+<ul>
+<li>새 서버 요청 추가는 3곳 세트: <code>network.h</code>(요청 리스트) + <code>network_sr.c</code>(<code>net_Requests[]</code> 등록) + <code>network_interface_sr.c</code>(핸들러 구현).</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>새 요청이 network.h·net_Requests[]·핸들러 3곳에 모두 등록됐는가? <code>action_attribute</code> 플래그가 적절한가?</li>
+</ul>
+<h4>net_client_request (network_cl.c) ↔ 서버 핸들러 (network_interface_sr.cpp)</h4>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>클라이언트 호출(<code>network_interface_cl.c</code>)과 서버 핸들러의 패킹/언패킹이 대칭인가?</li>
+</ul>
+<h3>3. 예비 이슈 사항</h3>
+<blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
+<ul>
+<li>(현재 등록된 예비 이슈 없음)</li>
+</ul>
+<h3>4. 진행중인 작업</h3>
+<blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
+<h4>.50</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.51</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.52</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>

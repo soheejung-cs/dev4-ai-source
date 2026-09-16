@@ -1,0 +1,116 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>src/broker — CUBRID 소스 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="shell">
+<header class="top"><a class="home" href="index.html">CUBRID 소스 노트</a>
+<span class="meta">upstream/develop 95b79e7ed · git: soheejung-cs/cubrid-source-notes</span></header>
+<div class="layout">
+<nav class="rail" aria-label="목차">
+<input id="q" type="search" placeholder="이 페이지에서 검색" aria-label="검색">
+<ul><li><a href="index.html">개요</a></li>
+<li class="grp">공통 문서</li>
+<li><a href="common.html">공통</a></li>
+<li><a href="build-link.html">빌드·링크 구성</a></li>
+<li><a href="cross.html">모듈 경계</a></li>
+<li><a href="measurement.html">측정 방법론</a></li>
+<li class="grp">모듈</li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-broker.html" class="cur"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
+</nav>
+<main>
+<h1>src/broker</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 3건</p>
+<blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
+<h3>1. 소스 목적 및 사용처 (함수별)</h3>
+<p>별도 프로세스 아키텍처: 브로커가 CAS(Common Application Server) 워커 프로세스를 생성·관리. <code>broker.c</code>(포트 리슨·디스패치), <code>cas.c</code>(클라이언트 세션당 1 프로세스), <code>cas_execute.c</code>(CAS 내 SQL 실행), <code>cas_function.c</code>(프로토콜 함수 디스패치), <code>broker_shm.c</code>(브로커↔CAS 공유 메모리 IPC: <code>T_SHM_BROKER</code>, <code>T_SHM_APPL_SERVER</code>), <code>broker_config.c</code>(<code>cubrid_broker.conf</code>), <code>shard_metadata.c</code>/<code>shard_proxy.c</code>(샤딩).</p>
+<div class="tbl"><table><thead><tr><th>함수</th><th>파일</th><th>목적</th><th>주요 사용처(호출자)</th></tr></thead><tbody>
+<tr><td><code>main</code></td><td><code>broker.c:461</code></td><td>브로커 프로세스 진입점 — <code>broker_init_shm()</code>(:482) 후 리슨/디스패치</td><td>OS 프로세스 기동(<code>cub_broker</code>)</td></tr>
+<tr><td><code>broker_init_shm</code></td><td><code>broker.c:2909</code></td><td>브로커 공유 메모리 부착·초기화</td><td><code>broker.c</code> main(:482)</td></tr>
+<tr><td><code>main</code> / <code>cas_main</code></td><td><code>cas.c:209</code> / <code>:262</code></td><td>CAS 워커 프로세스 진입점(샤드 모드는 <code>shard_cas_main</code> :251 분기)</td><td>브로커가 fork/exec</td></tr>
+<tr><td><code>process_request</code></td><td><code>cas.c:836</code></td><td>CAS의 클라이언트 요청 1건 처리 루프 본체</td><td><code>cas_main</code> 루프 (게이트웨이 변형: <code>cas_cgw.c:476</code>)</td></tr>
+<tr><td><code>fn_prepare</code> / <code>fn_execute</code></td><td><code>cas_function.c:216</code> / <code>:330</code></td><td>프로토콜 함수 테이블의 prepare/execute 핸들러</td><td><code>process_request</code> 디스패치</td></tr>
+<tr><td><code>ux_prepare</code></td><td><code>cas_execute.c:621</code></td><td>SQL prepare 실제 구현(스키마 정보 응답 구성)</td><td><code>fn_prepare</code></td></tr>
+<tr><td><code>ux_execute</code></td><td><code>cas_execute.c:995</code></td><td>SQL execute 실제 구현</td><td><code>fn_execute</code></td></tr>
+<tr><td><code>uw_shm_open</code> / <code>uw_shm_create</code></td><td><code>broker_shm.c:98/:208</code>(win: :142/:337)</td><td>공유 메모리 열기/생성</td><td>브로커·CAS·모니터링 유틸 전반</td></tr>
+<tr><td><code>broker_config_read</code></td><td><code>broker_config.c:1476</code></td><td><code>cubrid_broker.conf</code> 파싱 → <code>T_BROKER_INFO[]</code></td><td><code>broker.c</code>, <code>broker_admin.c</code>, <code>broker_monitor.c</code></td></tr>
+<tr><td><code>cas_error_log_write</code></td><td><code>cas_error_log.c:167</code></td><td>CAS 전용 에러 로그 기록</td><td>CAS 실행 경로 전반(<code>er_set()</code> 대신)</td></tr>
+<tr><td><code>main</code></td><td><code>broker_admin.c:77</code></td><td><code>cubrid broker</code> 관리 명령 진입점</td><td>OS(서비스 유틸 경유)</td></tr>
+<tr><td><code>main</code></td><td><code>broker_monitor.c:485</code></td><td><code>broker_monitor</code> 유틸 진입점</td><td>OS</td></tr>
+<tr><td><code>main</code></td><td><code>shard_proxy.c:165</code></td><td>샤드 프록시 프로세스 진입점</td><td>브로커(샤드 구성 시)</td></tr>
+<tr><td><code>shard_metadata_initialize</code></td><td><code>shard_metadata.c:434</code></td><td>샤드 라우팅 메타데이터 초기화</td><td><code>shard_shm.c:304</code></td></tr>
+</tbody></table></div>
+<h3>2. 분석 내용 (함수별)</h3>
+<blockquote>항목은 함수 단위로 기술한다 — 각 항목의 제목/선두가 함수·파일명이다. 새 분석도 함수명을 앞세워 추가할 것.</blockquote>
+<blockquote>(아래 주의점·리뷰 체크포인트의 원본: src/broker/AGENTS.md 증류)</blockquote>
+<h4>모듈 일반</h4>
+<ul>
+<li>브로커와 CAS는 별도 프로세스 — <strong>공유 메모리로만 통신</strong>. CAS는 브로커에서 fork — 공유 메모리 동기화에 신중해야 한다.</li>
+<li>최상위 <code>broker/</code>는 CMake 타깃일 뿐, 실제 코드는 <code>src/broker/</code>.</li>
+<li>샤드 코드(<code>shard_*.c</code>)는 이 모듈 내 상당한 서브시스템.</li>
+<li>접두사: <code>cas_</code>, <code>broker_</code>, <code>shm_</code>.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>fork 이후 공유 상태 접근에 동기화가 있는가?</li>
+</ul>
+<h4>uw_shm_open / uw_shm_create (broker_shm.c)</h4>
+<ul>
+<li><code>T_BROKER_INFO</code>, <code>T_APPL_SERVER_INFO</code>는 공유 메모리의 packed struct — <strong>정렬(alignment)이 중요</strong>.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>공유 메모리 구조체 변경이 packed 레이아웃/정렬을 깨지 않는가? 브로커·CAS 양쪽이 같은 레이아웃을 보는가?</li>
+</ul>
+<h4>cas_error_log_write (cas_error_log.c)</h4>
+<ul>
+<li>CAS는 자체 에러 처리 사용: <code>cas_error_log_write()</code> — <code>er_set()</code> 아님.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>CAS 코드에서 <code>er_set()</code> 대신 <code>cas_error_log_write()</code>를 쓰는가?</li>
+</ul>
+<h4>broker_config_read (broker_config.c)</h4>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>설정 항목 추가 시 <code>broker_config.c</code> 파싱이 갱신됐는가?</li>
+</ul>
+<h3>3. 예비 이슈 사항</h3>
+<blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
+<ul>
+<li>(현재 등록된 예비 이슈 없음)</li>
+</ul>
+<h3>4. 진행중인 작업</h3>
+<blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
+<h4>.50</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.51</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+<h4>.52</h4>
+<ul>
+<li>(해당 없음 또는 미기입)</li>
+</ul>
+</main></div></div>
+<script>
+(function(){var q=document.getElementById('q');if(!q)return;
+var items=[].slice.call(document.querySelectorAll('main h3, main h4, main li, main p'));var t;
+q.addEventListener('input',function(){clearTimeout(t);t=setTimeout(function(){
+var v=q.value.trim().toLowerCase();
+if(!v){items.forEach(function(e){e.classList.remove('hidden')});return}
+items.forEach(function(e){e.classList.toggle('hidden',e.textContent.toLowerCase().indexOf(v)<0)});},120);});
+})();
+</script></body></html>
