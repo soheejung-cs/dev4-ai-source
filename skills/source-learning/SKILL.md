@@ -39,6 +39,7 @@ python3 tools/gen_site.py → commit · push
 - 소스 노트 §3 에 "미수정" 으로 올라간 건은 **고쳐지면 그 항목부터 갱신**한다.
 
 ## 4. 적는 문장의 형
+- **번역하기 어려운 용어는 원문 그대로** — 함수·구조체·락 모드·MVCC/WAL 용어·PG/Oracle 고유 명칭은 영문 유지, 설명은 괄호로 (2026-09-16).
 - 주장은 **한 줄**, 뒤에 근거. "`heap_scancache_start(..., NULL)` 는 최신 커밋이 아니라 최신 물리 버전을 준다 —
   `heap_get_visible_version_internal()` 이 snapshot 없으면 가시성 검사와 `prev_version_lsa` 추적을 건너뛴다(.51, 8dbaf15f5)."
 - 함정은 **어떻게 잘못 판단하게 되는지**까지: "`with_fullscan` 은 기존 행 재빌드 때 갱신되지 않으므로 재빌드 신호로 쓰면 오판".
