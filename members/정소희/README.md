@@ -15,10 +15,13 @@ GitHub `soheejung-cs` · JIRA `soheejung` · 컨테이너 **.50 / .51 / .52** (h
 |---|---|---|
 | CBRD-27369 / PR#7900 — UPDATE STATISTICS 직렬화·무잠금 히스토그램 읽기 | 리뷰 라운드 2 대응 완료(`a910e8e6e`), Q1~Q4 결정 대기 | `staging/정소희-CBRD-27369.md` (10건) |
 | CBRD-27429 / PR#7957 — V0 통계 레이아웃 제거 | 진행 중 (보드 #98) | — |
-| CBRD-27215 / PR#7658 — 식 평가 컴파일 | 진행 중 (보드 #55) | — |
+| CBRD-27215 / PR#7658 — 식 평가 컴파일 | 진행 중 (보드 #55, head `9a13c297d`, D26~D28 완료) | `staging/정소희-CBRD-27215.md` (10건) |
 | CBRD-27126 / PR#7561 — 비용 상수 파라미터화 | 진행 중 (보드 #32) | — |
 프로젝트 문서는 `claude-workspace/projects/CBRD-*/`, 보드는 http://192.168.6.51:8826/.
 
 ## 담당
 - 하루 1회 `staging/*.md` → 모듈 §2·§3 환류 배치, `python3 tools/gen_site.py`, 8825 사이트 재생성(.51).
 - 다른 컨테이너/팀원의 모듈 노트 기여 병합.
+
+## 참조 DBMS 소스 위치 (.52 만)
+- `~/dev/database-reference/` — 다른 컨테이너에서 scp 로 들여온 참조 DBMS 소스 트리(헤더 중심, 실행기 `.cc` 부재). 비교 문서는 `reference-dbms/database-reference/`, 표기 규칙은 그 README(제품명 금지).
