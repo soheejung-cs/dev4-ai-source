@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>래치 락 MVCC 입문</title>
+<meta name="description" content="CUBRID 동시성 세 층의 구현과 문장별 락 — 신입 교육 덱 (develop 0d0809963)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #eef0f3;
+    --surface: #ffffff;
+    --surface-2: #f6f7f9;
+    --ink: #161a20;
+    --ink-2: #39414c;
+    --muted: #6b7684;
+    --line: #d5dae1;
+    --line-soft: #e4e8ed;
+    --gate: #14706b;
+    --gate-soft: #d9ebe9;
+    --contend: #a85b16;
+    --contend-soft: #f6e6d6;
+    --proof: #5b4b8a;
+    --proof-soft: #e7e3f2;
+    --f-display: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --f-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1218; --surface: #161b23; --surface-2: #1b2128;
+      --ink: #e7ebf0; --ink-2: #bcc5d1; --muted: #8a95a3;
+      --line: #2a323c; --line-soft: #222932;
+      --gate: #46b3a8; --gate-soft: #14312f;
+      --contend: #d98b45; --contend-soft: #33220f;
+      --proof: #a08fdc; --proof-soft: #241e39;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1218; --surface: #161b23; --surface-2: #1b2128;
+    --ink: #e7ebf0; --ink-2: #bcc5d1; --muted: #8a95a3;
+    --line: #2a323c; --line-soft: #222932;
+    --gate: #46b3a8; --gate-soft: #14312f;
+    --contend: #d98b45; --contend-soft: #33220f;
+    --proof: #a08fdc; --proof-soft: #241e39;
+  }
+
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-weight: 400; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+
+  .deck { scroll-snap-type: y proximity; overflow-y: auto; height: 100%; }
+  .slide {
+    scroll-snap-align: start; min-height: 92svh;
+    display: flex; flex-direction: column; justify-content: center; gap: 20px;
+    max-width: 1080px; margin-inline: auto; padding-block: 56px; padding-inline: 28px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .slide:last-child { border-bottom: 0; }
+
+  .rail { position: fixed; left: 14px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 9px; z-index: 5; }
+  .rail a { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--line); background: transparent; display: block; text-indent: -9999px; overflow: hidden; }
+  .rail a[aria-current="true"] { background: var(--gate); border-color: var(--gate); }
+  .rail a:focus-visible { outline: 2px solid var(--gate); outline-offset: 3px; }
+
+  .eyebrow { font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 12px; }
+  .eyebrow .num { color: var(--gate); font-weight: 600; }
+  .eyebrow .bar { flex: 1; height: 1px; background: var(--line); }
+
+  h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(30px, 5.4vw, 52px); line-height: 1.16; letter-spacing: -.022em; margin: 0; text-wrap: balance; }
+  h2 { font-family: var(--f-display); font-weight: 600; font-size: clamp(22px, 3.3vw, 33px); line-height: 1.24; letter-spacing: -.018em; margin: 0; text-wrap: balance; }
+  h3 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -.005em; }
+  p { margin: 0; color: var(--ink-2); max-width: 70ch; }
+  .lede { font-size: clamp(16px, 2vw, 18.5px); color: var(--ink-2); }
+  small { color: var(--muted); font-size: 13px; }
+  b { color: var(--ink); font-weight: 600; }
+
+  code, .mono { font-family: var(--f-mono); font-size: .92em; }
+  code { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 4px; padding: .05em .34em; color: var(--ink); word-break: break-word; }
+
+  .cols { display: grid; gap: 16px; }
+  @media (min-width: 720px) {
+    .cols.two { grid-template-columns: 1fr 1fr; }
+    .cols.three { grid-template-columns: repeat(3, 1fr); }
+    .cols.side { grid-template-columns: 1.15fr .85fr; align-items: start; }
+  }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 9px; }
+  .card .kicker { font-family: var(--f-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .card p { font-size: 14.5px; }
+  .card.gate { border-top: 3px solid var(--gate); }
+  .card.proof { border-top: 3px solid var(--proof); }
+  .card.read { border-top: 3px solid var(--contend); }
+
+  .plain { background: var(--gate-soft); border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+  .plain .kicker { font-family: var(--f-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--gate); }
+  .plain p { color: var(--ink); font-size: 15.5px; max-width: none; }
+  .plain.proof { background: var(--proof-soft); } .plain.proof .kicker { color: var(--proof); }
+  .plain.contend { background: var(--contend-soft); } .plain.contend .kicker { color: var(--contend); }
+
+  .facts { display: flex; flex-wrap: wrap; gap: 10px 34px; }
+  .fact { display: flex; flex-direction: column; gap: 2px; }
+  .fact b { font-family: var(--f-mono); font-size: clamp(20px, 3vw, 28px); font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .fact.bad b { color: var(--contend); }
+  .fact.good b { color: var(--gate); }
+  .fact span { font-size: 12.5px; color: var(--muted); }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 560px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  thead th { font-family: var(--f-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 500; background: var(--surface-2); white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.pick { color: var(--gate); font-weight: 600; }
+  td.warn { color: var(--contend); font-weight: 600; }
+  td.mono, th.mono { font-family: var(--f-mono); white-space: nowrap; }
+
+  .tag { display: inline-flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 11px; letter-spacing: .06em; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+  .tag.gate { background: var(--gate-soft); color: var(--gate); }
+  .tag.contend { background: var(--contend-soft); color: var(--contend); }
+  .tag.proof { background: var(--proof-soft); color: var(--proof); }
+
+  figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption { font-size: 12.5px; color: var(--muted); }
+  .figbox { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; }
+
+  .contract { display: grid; gap: 10px; }
+  @media (min-width: 720px) { .contract { grid-template-columns: repeat(3, 1fr); } }
+  .contract > div { border-left: 2px solid var(--line); padding-left: 12px; display: flex; flex-direction: column; gap: 5px; }
+  .contract h3 { font-family: var(--f-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  .contract p { font-size: 14px; }
+
+  .ask { display: flex; flex-direction: column; gap: 12px; }
+  .ask > div { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--proof); border-radius: 8px; padding: 14px 16px; }
+  .ask > div.decided { border-left-color: var(--gate); }
+  .ask .q { font-family: var(--f-mono); font-size: 12px; color: var(--proof); font-weight: 600; padding-top: 2px; }
+  .ask > div.decided .q { color: var(--gate); }
+  .ask p { font-size: 14.5px; }
+
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 22px; font-family: var(--f-mono); font-size: 12.5px; color: var(--muted); }
+  .hint { position: fixed; right: 16px; bottom: 14px; font-family: var(--f-mono); font-size: 11px; color: var(--muted); z-index: 5; }
+  @media (max-width: 719px) { .rail, .hint { display: none; } }
+  @media (prefers-reduced-motion: reduce) { .deck { scroll-behavior: auto; } }
+</style>
+<style>
+  .slide { gap: 22px; }
+  .lede { font-size: clamp(17px, 2.1vw, 20px); }
+  .card p, .plain p { font-size: 15.5px; }
+  .one { font-size: clamp(17px, 2.2vw, 21px); color: var(--ink); max-width: 60ch; line-height: 1.55; }
+  .steps { display: grid; gap: 12px; }
+  @media (min-width: 720px) { .steps { grid-template-columns: repeat(3, 1fr); } }
+  .steps > div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .steps .n { font-family: var(--f-mono); font-size: 12px; color: var(--gate); font-weight: 600; }
+  .steps p { font-size: 15px; }
+  ul.simple { margin: 0; padding-left: 1.2em; color: var(--ink-2); font-size: 15.5px; display: flex; flex-direction: column; gap: 6px; }
+  ul.simple b { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<nav class="rail" aria-label="슬라이드">
+  <a href="#s1" aria-current="true">1</a><a href="#s2">2</a><a href="#s3">3</a><a href="#s4">4</a><a href="#s5">5</a><a href="#s6">6</a><a href="#s7">7</a><a href="#s8">8</a><a href="#s9">9</a><a href="#s10">10</a><a href="#s11">11</a><a href="#s12">12</a><a href="#s13">13</a><a href="#s14">14</a><a href="#s15">15</a><a href="#s16">16</a><a href="#s17">17</a><a href="#s18">18</a><a href="#s19">19</a>
+</nav>
+<div class="hint mono">↑ ↓ / Space 로 이동</div>
+
+<main class="deck">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/></marker><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#a85b16"/></marker><marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#14706b"/></marker></defs></svg>
+<!-- 1 표지 -->
+<section class="slide" id="s1">
+  <div class="eyebrow"><span class="num">교육</span><span>동시성 입문 · 신입용</span><span class="bar"></span><span>develop 0d0809963 · 2026-09-30</span></div>
+  <h1>래치 · 락 · MVCC —<br>세 층의 동시성이 어떻게 구현돼 있나</h1>
+  <p class="lede">DB 서버 안에서는 수십 개 스레드가 같은 데이터를 동시에 만집니다. 그런데 왜 안 깨질까요. CUBRID 는 이 문제를 <b>세 층</b>으로 나눠 풉니다. 이 덱은 각 층이 무엇을 지키고 어디에 구현돼 있는지, 그리고 <b>문장별로 무슨 락을 잡고 무엇을 잡지 않는지</b>를 설명합니다.</p>
+  <div class="facts">
+    <div class="fact"><b>3</b><span>층 — 래치 · 락 · MVCC</span></div>
+    <div class="fact"><b>4</b><span>락 자원 종류</span></div>
+    <div class="fact good"><b>0</b><span>SELECT 가 잡는 행 락</span></div>
+    <div class="fact bad"><b>300 s</b><span>래치 타임아웃 (데드락 감지 없음)</span></div>
+  </div>
+  <div class="meta"><span>대상: 엔진 신입 · 리뷰 입문자</span><span>원문: education/latch-lock-mvcc.html (file:line 전부)</span></div>
+</section>
+
+<!-- 2 한 눈에 -->
+<section class="slide" id="s2">
+  <div class="eyebrow"><span class="num">01</span><span>한 눈에</span><span class="bar"></span></div>
+  <h2>셋은 서로 <b>다른 것</b>을 지킨다 — 그래서 서로 대체가 안 된다</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>래치</th><th>락</th><th>MVCC</th></tr></thead>
+    <tbody>
+      <tr><td>지키는 것</td><td>페이지 한 장의 <b>물리적</b> 일관성</td><td>트랜잭션 간 <b>논리적</b> 일관성</td><td>읽기가 쓰기를 <b>기다리지 않게</b></td></tr>
+      <tr><td>단위</td><td>16KB 페이지</td><td>행 · 클래스 · 트랜잭션</td><td>행의 버전</td></tr>
+      <tr><td>얼마나 쥐나</td><td>함수 하나 안 (µs~ms)</td><td>트랜잭션 끝까지</td><td>vacuum 이 치울 때까지</td></tr>
+      <tr><td>데드락</td><td class="warn">감지 안 함 — 순서 + 타임아웃</td><td>감지 스레드</td><td>해당 없음</td></tr>
+      <tr><td>코드</td><td class="mono">page_buffer.c</td><td class="mono">lock_manager.c</td><td class="mono">mvcc.c · vacuum.c</td></tr>
+    </tbody>
+  </table></div>
+  <p class="one">래치는 <b>지금 이 순간 이 페이지를 만지는 스레드</b>를, 락은 <b>트랜잭션이 끝날 때까지의 소유권</b>을, MVCC 는 <b>누가 어떤 버전을 보느냐</b>를 정합니다.</p>
+</section>
+
+<!-- 3 래치란 -->
+<section class="slide" id="s3">
+  <div class="eyebrow"><span class="num">02</span><span>래치</span><span class="bar"></span><span>src/storage/page_buffer.c</span></div>
+  <h2>디스크 페이지는 그냥 못 읽는다 —<br><b>fix</b> 로 빌려서 쓰고 <b>unfix</b> 로 돌려준다</h2>
+  <div class="figbox"><figure>
+    <svg viewBox="0 0 900 170" role="img" aria-label="호출자가 pgbuf_fix 로 페이지를 빌려 래치와 함께 받고 unfix 로 돌려주는 흐름">
+      <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
+        <rect x="20" y="40" width="200" height="70" rx="6" fill="none" stroke="currentColor"/><text x="34" y="66">① 호출자</text><text x="34" y="88" font-size="12" opacity=".7">heap · btree · catalog</text>
+        <rect x="350" y="30" width="220" height="90" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="364" y="56" fill="#14706b" font-weight="600">② 페이지 버퍼</text><text x="364" y="78" font-size="12" opacity=".8">메모리에 없으면 디스크에서 읽고</text><text x="364" y="98" font-size="12" opacity=".8">교체되지 않게 고정(fix)</text>
+        <rect x="680" y="40" width="200" height="70" rx="6" fill="none" stroke="currentColor"/><text x="694" y="66">③ 페이지 포인터</text><text x="694" y="88" font-size="12" opacity=".7">+ READ 또는 WRITE 래치</text>
+        <text x="230" y="60" font-size="12">"이 페이지(vpid) 를</text><text x="230" y="76" font-size="12">READ 로 빌려줘"</text>
+        <text x="580" y="62" font-size="12" fill="#14706b">래치와 함께 준다</text>
+        <text x="300" y="150" font-size="12" fill="#a85b16">↩ 다 쓰면 unfix — 래치 없는 fix 는 없고, 잡은 함수가 놓는다</text>
+      </g>
+      <g stroke="currentColor" fill="none" opacity=".5" marker-end="url(#ar)"><line x1="222" y1="75" x2="346" y2="75"/><line x1="572" y1="75" x2="676" y2="75"/></g>
+      <line x1="780" y1="112" x2="460" y2="124" stroke="#a85b16" stroke-dasharray="5 4" marker-end="url(#arw)"/>
+    </svg>
+    <figcaption>fix = "메모리에 고정 + 래치". READ 는 여럿이 같이, WRITE 는 혼자.</figcaption>
+  </figure></div>
+  <p><small>모드 <code>PGBUF_LATCH_READ / WRITE</code> (page_buffer.h:192~). 제어 블록 BCB 의 <code>atomic_latch</code> 한 워드에 리더 수·라이터·fix 수를 CAS 로 갱신한다(:497) — 기본 경로는 뮤텍스 없음.</small></p>
+</section>
+
+<!-- 4 래치 규칙 -->
+<section class="slide" id="s4">
+  <div class="eyebrow"><span class="num">03</span><span>래치 규칙</span><span class="bar"></span></div>
+  <h2>래치는 <b>데드락을 감지하지 않는다</b> — 순서 규칙과 300초 타임아웃으로 버틴다</h2>
+  <div class="cols three">
+    <div class="card gate"><span class="kicker">1 · 기다릴지 말지</span><h3>무조건 vs 조건부</h3><p>UNCONDITIONAL 은 될 때까지 대기, CONDITIONAL 은 안 되면 즉시 NULL. 단, 트랜잭션이 no-wait 상태면 무조건 요청도 <b>조용히 조건부로 강등</b>된다(:2227).</p></div>
+    <div class="card proof"><span class="kicker">2 · 순서</span><h3>같은 파일은 페이지 번호 순</h3><p><code>pgbuf_ordered_fix</code> 가 강제한다. 두 스레드가 서로 반대 순서로 잡는 일을 처음부터 막는 것이 회피의 전부다.</p></div>
+    <div class="card read"><span class="kicker">3 · 그래도 꼬이면</span><h3>300초 뒤 한쪽을 죽인다</h3><p>숨은 파라미터 <code>page_latch_timeout_in_msecs</code>. 디버그 빌드는 그 자리에서 assert — "래치 300초 코어" 는 누가 WRITE 래치를 쥐고 안 놓았나를 찾는 문제다.</p></div>
+  </div>
+  <p class="one">신입이 지킬 것: 래치를 쥔 채 <b>락을 기다리거나 다른 페이지를 무조건 fix 하지 않는다.</b></p>
+</section>
+
+<!-- 5 lock-free 경로 -->
+<section class="slide" id="s5">
+  <div class="eyebrow"><span class="num">04</span><span>래치 · 빠른 길</span><span class="bar"></span><span>page_buffer.c:2267</span></div>
+  <h2>읽기 전용 fix 는 <b>해시 탐색도 BCB 뮤텍스도 건너뛴다</b> — 빠르지만 빠지는 게 있다</h2>
+  <div class="figbox"><figure>
+    <svg viewBox="0 0 900 190" role="img" aria-label="pgbuf_fix 가 조건에 따라 lock-free 빠른 경로 또는 정규 경로로 가는 분기">
+      <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
+        <rect x="20" y="60" width="220" height="70" rx="6" fill="none" stroke="currentColor"/><text x="34" y="86">pgbuf_fix</text><text x="34" y="108" font-size="12" opacity=".7">READ + 기존 페이지 + 무조건?</text>
+        <rect x="360" y="20" width="250" height="60" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="374" y="44" fill="#14706b" font-weight="600">빠른 길 pgbuf_lockfree_fix_ro</text><text x="374" y="66" font-size="12" opacity=".8">CAS 한 번, 뮤텍스 없음 → goto fast_path</text>
+        <rect x="360" y="110" width="250" height="60" rx="6" fill="none" stroke="currentColor"/><text x="374" y="134">정규 길</text><text x="374" y="156" font-size="12" opacity=".7">해시 탐색 → BCB mutex → holder 등록</text>
+        <rect x="700" y="60" width="180" height="70" rx="6" fill="none" stroke="currentColor"/><text x="714" y="86">공통 꼬리</text><text x="714" y="108" font-size="12" opacity=".7">fast_path: 라벨 :2447</text>
+        <text x="250" y="48" font-size="12" fill="#14706b">예</text><text x="250" y="150" font-size="12">아니오</text>
+        <text x="380" y="98" font-size="12" fill="#a85b16">✂ 정규 길만 하는 일(dealloc 보호 등록 :2376)은 빠진다</text>
+      </g>
+      <g stroke="currentColor" fill="none" opacity=".5" marker-end="url(#ar)"><line x1="242" y1="80" x2="356" y2="50"/><line x1="242" y1="110" x2="356" y2="140"/><line x1="612" y1="50" x2="696" y2="85"/><line x1="612" y1="140" x2="696" y2="105"/></g>
+    </svg>
+    <figcaption>같은 함수의 두 길이 공통 꼬리로 합쳐진다 — 꼬리가 "정규 길에서 등록한 것"을 해제하면 빠른 길은 반쪽 회계가 된다.</figcaption>
+  </figure></div>
+  <p><small>실제 열린 결함: dealloc 보호 카운터를 빠른 길이 등록 없이 해제(CBRD-27263, 라이브 재현). 모듈 노트 src-storage §3.</small></p>
+</section>
+
+<!-- 6 락이란 -->
+<section class="slide" id="s6">
+  <div class="eyebrow"><span class="num">05</span><span>락</span><span class="bar"></span><span>src/transaction/lock_manager.c</span></div>
+  <h2>락은 <b>전역 해시맵 하나</b>다 — 키가 자원, 값이 "누가 쥐고 누가 기다리나"</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>자원 종류 (lock_manager.h:139-142)</th><th>키</th><th>언제</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">INSTANCE</td><td>행 OID + 클래스 OID</td><td>UPDATE / DELETE / FOR UPDATE 대상 행</td></tr>
+      <tr><td class="mono">CLASS</td><td>클래스 OID</td><td>테이블 단위 — 인텐트 락 포함</td></tr>
+      <tr><td class="mono">ROOT_CLASS</td><td>루트 클래스</td><td>DDL</td></tr>
+      <tr><td class="pick mono">TRANSACTION</td><td><b>MVCCID</b></td><td>INSERT 한 트랜잭션 자신의 self-lock — 2026-07 추가 (뒤에서)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="one">해제는 <b>트랜잭션 종료에 한꺼번에</b>(<code>lock_unlock_all</code>) — 중간에 풀지 않는 것이 원칙이라 2PL 이 됩니다.</p>
+  <p><small>모드 계열 <code>NULL &lt; SCH_S &lt; IS &lt; S &lt; IX &lt; BU/SIX/U &lt; X &lt; SCH_M</code>. 두 모드가 같이 있을 수 있는지는 호환표 <code>lock_Comp</code> 가 답한다.</small></p>
+</section>
+
+<!-- 7 인텐트 -->
+<section class="slide" id="s7">
+  <div class="eyebrow"><span class="num">06</span><span>락 · 인텐트</span><span class="bar"></span></div>
+  <h2>행을 잡기 전에 테이블에 <b>"쓸 거야"(IX)</b> 를 먼저 적어 둔다 — DDL 이 행을 안 봐도 알게</h2>
+  <div class="figbox"><figure>
+    <svg viewBox="0 0 900 200" role="img" aria-label="클래스에 IX 를 잡고 그 아래 행에 X 를 잡는 인텐트 계층">
+      <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
+        <rect x="330" y="20" width="240" height="56" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="344" y="44" fill="#14706b" font-weight="600">클래스 t — IX</text><text x="344" y="64" font-size="12" opacity=".8">"이 테이블 어딘가에 쓰는 사람 있음"</text>
+        <rect x="80" y="120" width="200" height="50" rx="6" fill="none" stroke="currentColor"/><text x="94" y="142">행 #1 — X</text><text x="94" y="162" font-size="12" opacity=".7">UPDATE 중</text>
+        <rect x="350" y="120" width="200" height="50" rx="6" fill="none" stroke="currentColor" opacity=".5"/><text x="364" y="142" opacity=".7">행 #2 — 락 없음</text><text x="364" y="162" font-size="12" opacity=".6">SELECT 는 스냅샷</text>
+        <rect x="620" y="120" width="200" height="50" rx="6" fill="none" stroke="currentColor"/><text x="634" y="142">행 #3 — X</text><text x="634" y="162" font-size="12" opacity=".7">DELETE 중</text>
+        <text x="600" y="100" font-size="12" fill="#a85b16">DDL(SCH_M) 은 IX 하나만 보고 기다린다</text>
+      </g>
+      <g stroke="currentColor" fill="none" opacity=".5" marker-end="url(#ar)"><line x1="400" y1="78" x2="200" y2="116"/><line x1="450" y1="78" x2="450" y2="116"/><line x1="500" y1="78" x2="700" y2="116"/></g>
+    </svg>
+    <figcaption>행 락이 <code>lock_escalation</code> 개를 넘으면 클래스 락으로 승격 — 해시맵을 아끼는 장치(:3146).</figcaption>
+  </figure></div>
+</section>
+
+<!-- 8 대기·데드락·격리 -->
+<section class="slide" id="s8">
+  <div class="eyebrow"><span class="num">07</span><span>락 · 대기</span><span class="bar"></span></div>
+  <h2>못 잡으면 <b>줄을 선다</b> — 시간이 지나면 타임아웃, 서로 기다리면 데드락 감지</h2>
+  <div class="cols three">
+    <div class="card read"><span class="kicker">타임아웃</span><h3>lock_timeout</h3><p>지나면 <code>ER_LK_UNILATERAL_ABORT</code>. 이건 <b>트랜잭션 락</b>의 시간이다 — 래치 300초와는 다른 파라미터.</p></div>
+    <div class="card proof"><span class="kicker">데드락</span><h3>감지 스레드</h3><p><code>lock_detect_local_deadlock</code>(:544) 이 wait-for 그래프에서 사이클을 찾아 한 트랜잭션을 희생시킨다.</p></div>
+    <div class="card gate"><span class="kicker">격리 수준</span><h3>S 락을 언제 놓나</h3><p>READ COMMITTED(기본) 는 문장 끝에, REPEATABLE READ / SERIALIZABLE 은 트랜잭션 끝까지(:7213-7230).</p></div>
+  </div>
+  <p class="one">MVCC 가 들어온 뒤 락의 일은 줄었습니다 — <b>평범한 SELECT 는 행 락을 잡지 않습니다.</b></p>
+</section>
+
+<!-- 9 MVCC 헤더 -->
+<section class="slide" id="s9">
+  <div class="eyebrow"><span class="num">08</span><span>MVCC</span><span class="bar"></span><span>mvcc.h:38</span></div>
+  <h2>행마다 <b>"누가 넣었고 누가 지웠나"</b> 를 적어 둔다 — 쓰기는 제자리 수정이 아니라 새 버전</h2>
+  <div class="figbox"><figure>
+    <svg viewBox="0 0 900 150" role="img" aria-label="MVCC 행 헤더의 세 필드와 INSERT DELETE UPDATE 가 각각 무엇을 적는지">
+      <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
+        <rect x="20" y="30" width="180" height="50" rx="6" fill="#ece8f4" stroke="#5b4b8a" stroke-width="1.5"/><text x="34" y="52" fill="#5b4b8a" font-weight="600">mvcc_insid</text><text x="34" y="70" font-size="12" opacity=".8">넣은 트랜잭션</text>
+        <rect x="210" y="30" width="180" height="50" rx="6" fill="#ece8f4" stroke="#5b4b8a" stroke-width="1.5"/><text x="224" y="52" fill="#5b4b8a" font-weight="600">mvcc_delid</text><text x="224" y="70" font-size="12" opacity=".8">지운/갱신한 트랜잭션</text>
+        <rect x="400" y="30" width="220" height="50" rx="6" fill="#ece8f4" stroke="#5b4b8a" stroke-width="1.5"/><text x="414" y="52" fill="#5b4b8a" font-weight="600">prev_version_lsa</text><text x="414" y="70" font-size="12" opacity=".8">옛 버전이 undo 로그 어디에</text>
+        <rect x="630" y="30" width="250" height="50" rx="6" fill="none" stroke="currentColor"/><text x="644" y="60">데이터 …</text>
+        <text x="20" y="112" font-size="12">INSERT → 새 행, insid = 나</text>
+        <text x="300" y="112" font-size="12">DELETE → 행은 두고 delid = 나</text>
+        <text x="600" y="112" font-size="12">UPDATE → 옛 버전은 undo 로그로, 같은 자리에 새 버전</text>
+        <text x="20" y="140" font-size="12" opacity=".7">MVCCID = 64비트 단조 증가, 절대 재사용 안 함. tran_index(재사용됨) 와 다르다. 특수값 NULL=0 · ALL_VISIBLE=3 · 실제는 4부터.</text>
+      </g>
+    </svg>
+    <figcaption>버전이 힙에 쌓이는 방식이 아니다 — 힙엔 최신 하나, 옛 것은 undo 로그(=트랜잭션 로그 안).</figcaption>
+  </figure></div>
+</section>
+
+<!-- 10 스냅샷 -->
+<section class="slide" id="s10">
+  <div class="eyebrow"><span class="num">09</span><span>MVCC · 판정</span><span class="bar"></span><span>mvcc_satisfies_snapshot, mvcc.c:156</span></div>
+  <h2>읽기는 <b>스냅샷</b>으로 판정한다 — "그 트랜잭션이 내 시점에 끝났었나"</h2>
+  <div class="figbox"><figure>
+    <svg viewBox="0 0 900 150" role="img" aria-label="스냅샷의 세 구간과 행 가시성 판정 순서">
+      <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
+        <rect x="20" y="30" width="270" height="44" rx="6" fill="#d9ebe9" stroke="#14706b"/><text x="34" y="50" fill="#14706b">&lt; lowest_active</text><text x="34" y="68" font-size="12" opacity=".8">전부 끝남 (커밋 or 중단)</text>
+        <rect x="300" y="30" width="330" height="44" rx="6" fill="none" stroke="currentColor"/><text x="314" y="50">그 사이</text><text x="314" y="68" font-size="12" opacity=".8">비트맵으로 "아직 활성인가" 개별 판정</text>
+        <rect x="640" y="30" width="240" height="44" rx="6" fill="#f3e4d4" stroke="#a85b16"/><text x="654" y="50" fill="#a85b16">&gt; highest_completed</text><text x="654" y="68" font-size="12" opacity=".8">전부 안 시작함</text>
+        <text x="20" y="108" font-size="12">① insid 가 커밋됐나? 아니면 <tspan fill="#a85b16">안 보임</tspan></text>
+        <text x="330" y="108" font-size="12">② delid 가 있고 커밋됐나? 그러면 <tspan fill="#a85b16">안 보임</tspan></text>
+        <text x="680" y="108" font-size="12">③ 그 외 <tspan fill="#14706b">보임</tspan></text>
+        <text x="20" y="136" font-size="12" opacity=".8">④ 너무 새 버전이면 prev_version_lsa 를 따라 undo 로그에서 옛 버전을 꺼낸다 (heap_get_visible_version_from_log)</text>
+      </g>
+    </svg>
+    <figcaption>스냅샷 = 활성 트랜잭션 집합의 사진. 기다리지 않는다 — 안 보이면 옛 버전을 읽는다.</figcaption>
+  </figure></div>
+</section>
+
+<!-- 11 vacuum -->
+<section class="slide" id="s11">
+  <div class="eyebrow"><span class="num">10</span><span>MVCC · 청소</span><span class="bar"></span><span>src/query/vacuum.c</span></div>
+  <h2>지운 버전은 <b>vacuum 데몬</b>이 치운다 — 그리고 그 데몬은 지금도 돌고 있다</h2>
+  <div class="cols two">
+    <div class="card proof"><span class="kicker">무엇을</span><h3>가장 오래된 스냅샷보다 오래된 delid</h3><p>그 버전은 누구에게도 보일 수 없으니 물리 삭제(<code>mvcc_satisfies_vacuum</code> :321). 살아남은 행은 <code>ALL_VISIBLE</code> 로 표시해 다음부터 판정을 건너뛴다.</p></div>
+    <div class="card read"><span class="kicker">그래서 조심할 것</span><h3>활성 트랜잭션과 동시에 돈다</h3><p>힙·인덱스 코드는 "vacuum 이 지금 이 페이지를 치우고 있을 수 있다"를 전제해야 한다. <code>OLD_PAGE_PREVENT_DEALLOC</code> 같은 보호 장치가 <b>성능이 아니라 정합성</b> 장치인 이유.</p></div>
+  </div>
+  <p class="one">MVCC 의 대가는 청소다 — PG 는 힙에 버전을 쌓고 vacuum 하고, CUBRID 는 undo 로그에 두고 vacuum 이 로그를 따라간다.</p>
+</section>
+
+<!-- 12 문장별 락 (읽기·쓰기) -->
+<section class="slide" id="s12">
+  <div class="eyebrow"><span class="num">11</span><span>문장별 락 ①</span><span class="bar"></span><span>READ COMMITTED · MVCC 클래스</span></div>
+  <h2>읽기는 <b>클래스 IS 만</b>, 쓰기는 <b>클래스 IX + 행 X</b></h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>문장</th><th>컴파일(클라이언트)</th><th>실행 · 클래스</th><th>실행 · 행</th><th>잡지 <b>않는</b> 것</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">SELECT</td><td>SCH_S</td><td>IS</td><td class="pick">없음 — 스냅샷</td><td>행 S. 미커밋 갱신 행을 만나도 <b>기다리지 않음</b></td></tr>
+      <tr><td class="mono">SELECT … FOR UPDATE</td><td>SCH_S</td><td>IX</td><td>X (결과 행마다)</td><td>—</td></tr>
+      <tr><td class="mono">UPDATE / DELETE</td><td>SCH_S</td><td>IX</td><td>X (대상 행)</td><td>클래스 X (옛 주석만 남음)</td></tr>
+      <tr><td>비MVCC 클래스(시리얼) SELECT</td><td>SCH_S</td><td>IS</td><td>S — RC 에선 잡았다 바로 놓음</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <p><small>근거: 컴파일 SCH_S <code>locator_cl.c:3153</code> · 스캔 IS <code>heap_file.c:6437 lock_scan</code> · FOR UPDATE <code>query_executor.c:25015</code> · UPDATE/DELETE IX <code>:25064</code>, 행 X <code>locator_sr.c:5860</code> · 시리얼 S instant <code>scan_manager.c:6082</code>.</small></p>
+</section>
+
+<!-- 13 문장별 락 (INSERT·DDL·SHOW) -->
+<section class="slide" id="s13">
+  <div class="eyebrow"><span class="num">12</span><span>문장별 락 ②</span><span class="bar"></span></div>
+  <h2>INSERT 만 예외 — 행 X 대신 <b>트랜잭션(MVCCID) X 하나</b>. DDL 은 <b>SCH_M</b> 이라 전부와 부딪힌다</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>문장</th><th>클래스</th><th>행 / 트랜잭션</th><th>잡지 <b>않는</b> 것</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">INSERT</td><td>IX</td><td class="pick">새 슬롯 행 X 생략 → <b>내 MVCCID 에 X</b> (self-lock)</td><td>행 X (재사용 슬롯·비MVCC 클래스는 여전히 행 X)</td></tr>
+      <tr><td>unique/FK 검사가 남의 미커밋 삽입을 만남</td><td>—</td><td><b>inserter 의 MVCCID 에 S</b> → 대기 → root 부터 재탐색</td><td>행 락 (행엔 락이 없다)</td></tr>
+      <tr><td class="mono">DDL</td><td class="warn">SCH_M (대상) · 파티션 분할은 X</td><td>—</td><td>—</td></tr>
+      <tr><td class="mono">SHOW … / 통계 조회</td><td>S (기본) · APPROX 옵션은 IS</td><td>—</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <p class="one">"DDL 이 안 끝나요" 는 대개 누군가의 <b>열린 트랜잭션이 그 클래스에 SCH_S 를 쥔 것</b>입니다 — 컴파일만 해도 SCH_S 가 잡히니까요.</p>
+  <p><small>근거: INSERT IX <code>query_executor.c:13255</code> · 행 X 생략 + self-lock <code>heap_file.c:21285-21325</code>, <code>log_tran_table.c:4086</code> · observer S <code>btree.c:27365</code> · DDL <code>locator_cl.c:2108</code> · SHOW <code>heap_file.c:18906</code>.</small></p>
+</section>
+
+<!-- 14 격리 수준 -->
+<section class="slide" id="s14">
+  <div class="eyebrow"><span class="num">13</span><span>격리 수준</span><span class="bar"></span><span>dbtran_def.h:53 기본 = READ COMMITTED</span></div>
+  <h2>격리 수준이 바꾸는 것은 둘 — <b>스냅샷을 언제 찍나</b>, <b>S 락을 언제 놓나</b></h2>
+  <div class="cols two">
+    <div class="card gate"><span class="kicker">READ COMMITTED (기본)</span><h3>문장마다</h3><p>스냅샷을 문장마다 새로 찍고, S 락은 문장이 끝나면 놓는다. UPDATE 는 최신 커밋 버전을 다시 읽어 갱신한다.</p></div>
+    <div class="card proof"><span class="kicker">REPEATABLE READ / SERIALIZABLE</span><h3>트랜잭션에 한 번</h3><p>스냅샷은 시작 때 한 번, S 락은 끝까지. 스냅샷에 안 보이는 행을 갱신하려 하면 SERIALIZABLE 충돌로 거부한다.</p></div>
+  </div>
+  <p><small><code>lock_unlock_object</code> :7213-7230 ("RR/SERIALIZABLE: nothing to do") · <code>locator_cl.c:690-697</code> 주석.</small></p>
+</section>
+
+<!-- 15 한 문장의 여정 -->
+<section class="slide" id="s15">
+  <div class="eyebrow"><span class="num">14</span><span>한 문장의 여정</span><span class="bar"></span></div>
+  <h2>셋은 한 문장 안에서 <b>동시에</b> 움직인다</h2>
+  <div class="cols three">
+    <div class="card"><span class="kicker">SELECT … WHERE id = 7</span><h3>락 IS · 래치 READ · 스냅샷</h3><p>클래스 IS 만. B-tree root→leaf READ 래치를 잡고 놓고, 힙 페이지 READ 래치. 행 헤더를 스냅샷과 대조 — 너무 새면 undo 로그의 옛 버전.</p></div>
+    <div class="card"><span class="kicker">UPDATE … WHERE id = 7</span><h3>락 IX+X · 래치 WRITE · 새 버전</h3><p>클래스 IX → 행 X (남이 쥐면 대기). 힙 페이지 WRITE 래치 → undo 로그 append → 새 버전 기록 → set_dirty → unfix. 커밋 전엔 남들은 옛 버전을 본다.</p></div>
+    <div class="card gate"><span class="kicker">INSERT … VALUES (8, …)</span><h3>락 IX + self-lock · 래치 WRITE</h3><p>클래스 IX + 내 MVCCID 에 X. bestspace 로 빈 자리(busy 면 건너뜀) → WRITE 래치 → 기록. unique 검사자가 이 행을 보면 내 MVCCID 에 S 를 걸고 기다린다.</p></div>
+  </div>
+  <p class="one">경계가 보입니다 — MVCC 는 "읽기가 쓰기를 안 기다리게" 하지만, <b>"두 쓰기가 같은 키를 넣는가"</b>(unique/FK) 는 여전히 락의 일입니다.</p>
+</section>
+
+<!-- 16 self-lock 전후 -->
+<section class="slide" id="s16">
+  <div class="eyebrow"><span class="num">15</span><span>self-lock 은 왜 생겼나</span><span class="bar"></span><span>CBRD-26942 · #7266 · 2026-07-25</span></div>
+  <h2>행마다 X 600만 개 대신 <b>트랜잭션에 X 하나</b> — 남긴 것은 unique/FK 직렬화</h2>
+  <div class="figbox"><figure>
+    <svg viewBox="0 0 900 200" role="img" aria-label="이전엔 INSERT 행마다 X 락, 지금은 트랜잭션 MVCCID 에 X 하나와 검사자의 S 대기">
+      <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
+        <text x="20" y="26" font-size="12" opacity=".7">이전: 새 행마다 X</text>
+        <rect x="20" y="36" width="56" height="28" rx="4" fill="#f3e4d4" stroke="#a85b16"/><rect x="82" y="36" width="56" height="28" rx="4" fill="#f3e4d4" stroke="#a85b16"/><rect x="144" y="36" width="56" height="28" rx="4" fill="#f3e4d4" stroke="#a85b16"/><text x="212" y="56" fill="#a85b16">… × 6,000,000 → 고정 크기 해시맵 체인이 늘어 모두가 느려진다</text>
+        <text x="20" y="92" font-size="12" opacity=".7">읽기 격리는 MVCC 가 이미 하고 있었다 — 이 X 는 중복. 남은 진짜 역할은 "unique/FK 검사자를 기다리게 하는 것" 하나.</text>
+        <text x="20" y="126" font-size="12" opacity=".7">지금: LOCK_RESOURCE_TRANSACTION</text>
+        <rect x="20" y="136" width="230" height="40" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="34" y="161" fill="#14706b" font-weight="600">inserter: MVCCID#42 에 X</text>
+        <rect x="520" y="136" width="360" height="40" rx="6" fill="none" stroke="currentColor"/><text x="534" y="161">unique/FK 검사자: MVCCID#42 에 S → 대기</text>
+        <text x="270" y="150" font-size="12" fill="#14706b">S 는 X 와 비호환</text><text x="270" y="168" font-size="12" fill="#14706b">commit/abort 뒤 깨어나 root 부터 재탐색</text>
+      </g>
+      <line x1="516" y1="156" x2="256" y2="156" stroke="#14706b" marker-end="url(#arg)"/>
+    </svg>
+    <figcaption>행 단위 락 없이 "미결정 버전을 봤다"는 의존을 락 매니저의 wait/deadlock/timeout 에 그대로 연결한다.</figcaption>
+  </figure></div>
+  <p><small>inserter X <code>log_tran_table.c:4086</code> · observer S <code>btree.c:27365</code> · 키 <code>lock_create_mvccid_search_key</code> :739. UPDATE/DELETE 는 여전히 행 X.</small></p>
+</section>
+
+<!-- 17 Oracle 대조 -->
+<section class="slide" id="s17">
+  <div class="eyebrow"><span class="num">16</span><span>다른 DBMS 는</span><span class="bar"></span><span>Oracle SQL Reference 10gR1 · LOCK TABLE 18-85</span></div>
+  <h2>Oracle 은 <b>행마다 버전을 안 적는다</b> — 블록 슬롯 + undo 로 같은 일을 한다</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>항목</th><th>Oracle</th><th>CUBRID</th></tr></thead>
+    <tbody>
+      <tr><td>버전 메타데이터</td><td>블록 헤더의 ITL 슬롯에 트랜잭션 정보, 행은 슬롯 번호만 <small>(매뉴얼 미확인)</small></td><td>행마다 insid / delid / prev_version_lsa</td></tr>
+      <tr><td>옛 버전</td><td>undo 세그먼트에서 SCN 기준 재구성 <small>(매뉴얼 미확인)</small></td><td>undo 로그(=트랜잭션 로그 안)에서 prev_version_lsa 로</td></tr>
+      <tr><td>읽기와 락</td><td class="pick">"A query never places a lock on a table. Readers never block writers…" <small>(18-85)</small></td><td>클래스 IS 만, 행 락 없음 — 같은 방향</td></tr>
+      <tr><td>DML 의 테이블 락</td><td>자동 ROW EXCLUSIVE (≈ IX), 수동 LOCK TABLE 모드 5종 <small>(18-87)</small></td><td>IX. 수동 테이블 락 문은 없음</td></tr>
+      <tr><td>청소</td><td>undo 순환 재사용 + delayed block cleanout <small>(매뉴얼 미확인)</small></td><td>vacuum 데몬이 로그를 따라가며 정리</td></tr>
+    </tbody>
+  </table></div>
+  <p><small>"매뉴얼 미확인" 은 로컬에 Concepts 가이드가 없어 인용 못 한 항목 — 들어오면 절 번호로 바꾼다. 둘 다 "제자리 갱신 + undo 재구성" 계열이고, Oracle 의 "트랜잭션당 enqueue 하나" 는 CUBRID self-lock 발상과 닮았다.</small></p>
+</section>
+
+<!-- 18 함정 -->
+<section class="slide" id="s18">
+  <div class="eyebrow"><span class="num">17</span><span>함정 셋</span><span class="bar"></span><span>전부 실제 사례</span></div>
+  <h2>신입이 밟는 곳은 정해져 있다 — <b>층을 섞을 때</b></h2>
+  <div class="cols three">
+    <div class="card read"><span class="kicker">① 래치 ↔ 락 혼용</span><h3>래치 쥔 채 락 대기</h3><p>래치는 함수 안, 락은 트랜잭션 끝까지. 페이지 래치를 쥔 채 <code>lock_object</code> 대기에 들어가면 래치 데드락(감지 없음) → 300초 코어.</p></div>
+    <div class="card read"><span class="kicker">② no-wait 속 무조건 래치</span><h3>조용히 NULL 이 온다</h3><p>bestspace 처럼 busy 를 정상으로 다루는 호출자와 <code>disk_reserve_sectors</code> 처럼 assert 하는 호출자가 같은 코드에 섞여 있다(CBRD-27198).</p></div>
+    <div class="card read"><span class="kicker">③ MVCCID ≠ tran_index</span><h3>재사용 여부가 다르다</h3><p>스냅샷·헤더·self-lock 키는 MVCCID, 락 엔트리·TDES 슬롯은 tran_index. 그리고 vacuum 은 지금도 돈다 — 보호 카운터는 정합성 장치(CBRD-27263).</p></div>
+  </div>
+</section>
+
+<!-- 19 퀴즈 -->
+<section class="slide" id="s19">
+  <div class="eyebrow"><span class="num">18</span><span>확인 퀴즈</span><span class="bar"></span><span>답은 원문 §8 에 접혀 있음</span></div>
+  <h2>읽었으면 <b>바로</b> 맞출 수 있는 것만</h2>
+  <div class="ask">
+    <div><span class="q">Q1</span><p><b>평범한 SELECT 가 잡는 락과 잡지 않는 락은?</b> (§11)</p></div>
+    <div><span class="q">Q2</span><p><b>unique 검사 중 남의 미커밋 삽입 행을 만나면 무엇을 키로 어떤 모드를 요청하고, 깨어난 뒤 반드시 무엇을 하나?</b> (§15)</p></div>
+    <div><span class="q">Q3</span><p><b>INSERT 가 새 슬롯 행의 X 를 생략할 수 있는 이유 — 그 락의 두 역할 중 MVCC 가 이미 대신하던 쪽은?</b> (§15)</p></div>
+  </div>
+  <div class="ask" style="margin-top:8px">
+    <div><span class="q">Q4</span><p><b>래치 데드락은 어떻게 처리되나?</b> (§03)</p></div>
+    <div><span class="q">Q5</span><p><b>READ COMMITTED 와 REPEATABLE READ 의 차이를 스냅샷·S 락 두 축으로?</b> (§13)</p></div>
+    <div><span class="q">Q6</span><p><b>Oracle 이 "행마다 버전을 안 적는다"는 뜻은? CUBRID 와 같은 점 하나, 다른 점 하나.</b> (§16)</p></div>
+  </div>
+  <div class="meta" style="margin-top:6px"><span>원문 <b>education/latch-lock-mvcc.html</b> (§8 답)</span><span>모듈 노트 <b>src-storage · src-transaction §2</b></span><span>추적 패킷 <b>imports/vimkim/transaction/lock-manager-*</b></span></div>
+</section>
+
+
+</main>
+
+<script>
+  (function () {
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+    var dots = Array.prototype.slice.call(document.querySelectorAll('.rail a'));
+    var deck = document.querySelector('.deck');
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function current() {
+      var best = 0, bestTop = Infinity;
+      slides.forEach(function (s, i) { var t = Math.abs(s.getBoundingClientRect().top); if (t < bestTop) { bestTop = t; best = i; } });
+      return best;
+    }
+    function mark() { var i = current(); dots.forEach(function (d, j) { d.setAttribute('aria-current', j === i ? 'true' : 'false'); }); }
+    function go(i) { i = Math.max(0, Math.min(slides.length - 1, i)); slides[i].scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }); }
+    deck.addEventListener('scroll', function () { window.clearTimeout(deck._t); deck._t = window.setTimeout(mark, 80); });
+    document.addEventListener('keydown', function (e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) { return; }
+      if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); go(current() + 1); }
+      else if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); go(current() - 1); }
+      else if (e.key === 'Home') { e.preventDefault(); go(0); }
+      else if (e.key === 'End') { e.preventDefault(); go(slides.length - 1); }
+    });
+    mark();
+  })();
+</script>
+</body>
+</html>

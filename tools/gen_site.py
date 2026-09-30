@@ -242,7 +242,8 @@ intro=md2html('\n'.join(readme.split('\n')[1:]).split('## 리포 구성')[0])
 rules=md2html('## 공유 규약'+readme.split('## 공유 규약',1)[1]) if '## 공유 규약' in readme else ''
 # 교육 자료: education/*.html 을 site/education/ 으로 복사하고 카드로 건다 (2026-09-30)
 import shutil
-EDU=[('latch-lock-mvcc.html','래치 · 락 · MVCC 입문','세 층의 동시성 구현 + 문장별 락 표 + Oracle 대조 · 신입용')]
+EDU=[('latch-lock-mvcc.html','래치 · 락 · MVCC 입문 (문서)','세 층의 동시성 구현 + 문장별 락 표 + Oracle 대조 · 신입용'),
+     ('latch-lock-mvcc-deck.html','래치 · 락 · MVCC 입문 (덱 19장)','같은 내용의 슬라이드 — ← → 로 넘김, 발표용')]
 os.makedirs('site/education', exist_ok=True)
 for fn,_,_ in EDU:
     if os.path.exists('education/'+fn): shutil.copyfile('education/'+fn, 'site/education/'+fn)
