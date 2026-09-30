@@ -19,7 +19,7 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">23</span><span class="iss">⚠24</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">23</span><span class="iss">⚠29</span></span></a></li>
 <li><a href="src-transaction.html" class="cur"><span>src/transaction</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
@@ -114,11 +114,16 @@
 </ul>
 <h4>log_sysop_start / log_sysop_commit / log_sysop_abort (log_manager.c)</h4>
 <ul>
-<li>TDES 의 topops 스택으로 중첩되는 시스템 오퍼레이션. abort 는 그 sysop 안의 로그만 undo 하고(부분 실패가 상위 트랜잭션을 깨지 않는 이유), commit 은 상위에 흡수되거나 <code>LOG_SYSOP_END</code> 로 독립 커밋. crash 안전성·비용·다른 DBMS 의 대응 개념은 <code>imports/vimkim/transaction/sysop-explained_977cf18a4.md</code> §1~§10 (§6·§11·§12 의 예시는 feat/oos). — vimkim 2026-09-30 (미대조)</li>
+<li>TDES 의 topops 스택으로 중첩되는 시스템 오퍼레이션. abort 는 그 sysop 안의 로그만 undo 하고(부분 실패가 상위 트랜잭션을 깨지 않는 이유), commit 은 상위에 흡수되거나 <code>LOG_SYSOP_END</code> 로 독립 커밋. crash 안전성·비용·다른 DBMS 의 대응 개념은 <code>imports/vimkim/transaction/sysop-explained_977cf18a4.md</code> §1~§10 (§6·§11·§12 의 예시는 feat/oos). <code>log_sysop_start</code> (:3667) 는 디스크 I/O·WAL 레코드 없이 <code>tdes-&gt;topops.stack[last].lastparent_lsa = tail_lsa</code> 만 밀어 넣고(O(1), <code>lock_topop</code> 1회), 종료는 <code>LOG_SYSOP_END</code> 한 종류에 <code>LOG_SYSOP_END_TYPE</code> 이 <code>COMMIT / ABORT / LOGICAL_UNDO / LOGICAL_COMPENSATE / LOGICAL_RUN_POSTPONE</code> (log_record.hpp:67~, 진입 <code>log_sysop_commit</code> :3984, <code>log_sysop_end_logical_undo</code> :4009, <code>_compensate</code> :4052, <code>_run_postpone</code> :4071). — vimkim 2026-09-30; .51 대조 develop 0d0809963</li>
 </ul>
 <h4>lock_manager.c — end-to-end 추적 패킷 (imports/vimkim/transaction/lock-manager-*.md, 기준 f30f1c260)</h4>
 <ul>
-<li>자원·모드·계층·변환·에스컬레이션 / 대기·데드락·타임아웃·기상·해제·재시작 / MVCC SELECT·FOR UPDATE·DML 의 클래스-행 정책 / <strong>MVCCID X self-lock 과 unique·FK 의 S wait→recheck</strong> 네 추적과 claim 후보·negative search·안 한 실험 목록. 서버측 loaddb 의 <code>BU_LOCK</code> 과 트랜잭션 MVCCID self-lock 은 자원·소유자가 다른 두 락이라는 정리는 <code>imports/vimkim/loaddb/CBRD-27157-*.md</code> (수정 PR#7588 은 feat/oos 에만). lock 을 건드리는 리뷰는 위 <code>lock_object</code> 항목 다음에 이 패킷의 trace 2·4 를 연다. — vimkim 2026-09-30 (미대조)</li>
+<li>자원·모드·계층·변환·에스컬레이션 / 대기·데드락·타임아웃·기상·해제·재시작 / MVCC SELECT·FOR UPDATE·DML 의 클래스-행 정책 / <strong>MVCCID X self-lock 과 unique·FK 의 S wait→recheck</strong> 네 추적과 claim 후보·negative search·안 한 실험 목록. 서버측 loaddb 의 <code>BU_LOCK</code> 과 트랜잭션 MVCCID self-lock 은 자원·소유자가 다른 두 락이라는 정리는 <code>imports/vimkim/loaddb/CBRD-27157-*.md</code> (수정 PR#7588 은 feat/oos 에만). lock 을 건드리는 리뷰는 위 <code>lock_object</code> 항목 다음에 이 패킷의 trace 2·4 를 연다. — vimkim 2026-09-30</li>
+<li><strong>락 자원 종류는 넷이다 — <code>LOCK_RESOURCE_INSTANCE / CLASS / ROOT_CLASS / TRANSACTION</code></strong> (lock_manager.h:139-142). <code>TRANSACTION</code> 은 <strong>inserter 의 MVCCID 를 키로 하는 self-lock</strong>: 트랜잭션이 자기 MVCCID 에 X 를 잡고 (<code>lock_transaction_mvccid</code> :6468, 키 <code>lock_create_mvccid_search_key</code> :739, 해제 <code>lock_unlock_transaction_mvccid</code> :6521, 조회 <code>lock_has_lock_on_transaction_mvccid</code> :6584), MVCC INSERT 가 새 행마다 row X 를 잡는 대신 이 X 로 <code>INSERT_IN_PROGRESS</code> 수명을 대표한다. unique/FK 검사에서 그 MVCCID 를 만난 다른 트랜잭션은 같은 자원에 S 를 요청해(X 와 비호환) commit/abort/서브트랜잭션 완료까지 기다린 뒤 <strong>인덱스를 root 부터 다시 탐색</strong>한다. class hierarchy·escalation 은 이 자원에 적용되지 않는다. (원문 C030~C037 요지; 자원 종류·API 는 .51 대조, btree 쪽 wait/recheck 줄 범위는 미대조) — vimkim(원문 imports/vimkim/transaction/lock-manager-source-trace-packet_f30f1c2.md) 2026-09-30; .51 대조 develop 0d0809963</li>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>"self-lock 을 건너뛴다"(CBRD-27157 류) 는 unique/FK observer 의 대기 상대를 없애는 변경이다 — 그 경로가 정말 unique/FK 검사 대상이 아닌지 먼저 본다.</li>
+</ul>
+<li><strong>commit 은 로그 flush 를 기다리고 abort 는 기다리지 않는다; ABORT 레코드는 후속 flush 에 편승하고, 그룹 커밋의 fsync 병합은 ≈1s 지연 특성을 가진다</strong> — vimkim 의 printf 트레이스 실측(4cfc8370e, CS 모드, debug). <code>imports/vimkim/transaction/log-manager-append-flush-dynamic-analysis_4cfc837.md</code> §5~§6. 수치는 원문 조건 한정. — vimkim 2026-09-30</li>
 </ul>
 <h4>heap_get_visible_version_from_log — 구버전 읽기 경로 개선 제안 (미계측 초안)</h4>
 <ul>

@@ -19,7 +19,7 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">23</span><span class="iss">⚠24</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">23</span><span class="iss">⚠29</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
@@ -103,7 +103,7 @@
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
 <ul>
 <li><strong>[미머지 — CBRD-27441 서버측 loaddb 의 파티션 범위 검증]</strong> PR#7982 OPEN(2026-09-30). 해설 <code>imports/vimkim/loaddb/CBRD-27441-validate-partition-range-server-loaddb_109f16a.md</code>. — vimkim 2026-09-30</li>
-<li><strong>[feat/oos 전용 — CBRD-27157 loaddb 워커 MVCCID self-lock]</strong> PR#7588 은 feat/oos 에만 머지. develop 의 <code>load_server_loader.cpp</code> 에 같은 문제가 있는지는 <strong>미확인</strong>. <code>BU_LOCK</code> vs MVCCID self-lock 구분은 <code>imports/vimkim/loaddb/CBRD-27157-server-loaddb-locking-source-trace_f11fc42.md</code>. — vimkim 2026-09-30</li>
+<li><strong>[feat/oos 전용 — CBRD-27157 loaddb 워커 MVCCID self-lock]</strong> PR#7588 은 feat/oos 에만 머지. develop 의 <code>load_server_loader.cpp</code> 에 같은 문제가 있는지는 <strong>미확인</strong>. <code>BU_LOCK</code> vs MVCCID self-lock 구분은 <code>imports/vimkim/loaddb/CBRD-27157-server-loaddb-locking-source-trace_f11fc42.md</code>. develop 의 <code>load_server_loader.cpp</code> 도 클래스를 <code>xlocator_find_class_oid (..., BU_LOCK)</code> 로 잡는다(:127·:138·:159·:284, <code>assert (lock_has_lock_on_object (..., BU_LOCK))</code> :609). — vimkim 2026-09-30; .51 대조 develop 0d0809963</li>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>

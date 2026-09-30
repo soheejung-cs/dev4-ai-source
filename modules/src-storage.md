@@ -380,8 +380,10 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   (`system_parameter.c:10159-10160`, "disable AOUT list until we fix CBRD-20741"; 경고 로그 없음). `page_buffer.c` 머리 주석의 "LRU + Aout of 2Q" 는 현행과 다르다.
   `pgbuf_remove_private_from_aout_list` 는 호출자 없는 죽은 코드. — vimkim(원문 imports/vimkim/pgbuf/defects-report_5cd4f860e.md D7) 2026-09-30; .51 대조 develop 0d0809963
   - ✅ **리뷰 체크포인트**: `data_aout_ratio` 를 만지는 실험·튜닝 제안은 무효 — 파라미터가 살아 있지 않다.
-- **`PSTAT_PB_NUM_IOWRITES` 는 DWB 를 거치지 않는 분기에서만 증가한다** (`pgbuf_bcb_flush_with_wal` :10804, `else` = DWB 미사용). DWB 활성(기본)이면 pgbuf 가
-  내보낸 페이지 수가 이 카운터에 안 잡히고, DWB 쪽 카운터와 의미가 갈린다. flush 량을 이 값으로 읽으면 과소 판정. — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md P5) 2026-09-30; .51 대조 develop 0d0809963
+- **`PSTAT_PB_NUM_IOWRITES` 의 의미는 DWB on/off 에 따라 다르다** — pgbuf 쪽은 DWB 미사용 분기에서만 1회 증가(`pgbuf_bcb_flush_with_wal` :10804, `else`), DWB 활성(기본)이면
+  `double_write_buffer.cpp` 가 DWB 파일 쓰기(:2339 `count_wb_pages`)와 원위치 쓰기(:2115/:2150 `count_writes`)를 각각 더해 **페이지당 2회** 집계된다. DWB on/off 를 바꿔 이 값을 비교하면 무효.
+  `PSTAT_PB_NUM_FLUSHED` 는 `pgbuf_flush_victim_candidates` (:4065) 만 더한다 — 체크포인트 flush 는 0 이라 "flush 량" 지표가 아니다. `SHOW PAGE BUFFER STATUS` 의 `Victim_candidate_pages` 는 zone3 ∧ **dirty**(:17309)인데
+  내부 `count_vict_cand`(`pgbuf_lru_add_victim_candidate` :15627)는 victim 가능 = non-dirty 쪽이라 이름이 같고 뜻이 반대(원문 주장, 내부 쪽 정의는 미대조). SHOW 의 `Hit_rate` 는 deprecated 로 항상 NULL(:17397, statdump 의 `Data_page_buffer_hit_ratio` 를 쓸 것). 원문 D6. — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md P5) 2026-09-30; .51 대조 develop 0d0809963
 - **lock-free RO fast path 의 구조** — `pgbuf_fix` 에서 `request_mode == READ && fetch_mode ∈ {OLD_PAGE, OLD_PAGE_PREVENT_DEALLOC, OLD_PAGE_MAYBE_DEALLOCATED}
   && UNCONDITIONAL` 이면 `pgbuf_lockfree_fix_ro()` (:2267) 로 가고 성공 시 `goto fast_path` (:2279 → 라벨 :2447) 로 **해시 탐색·BCB mutex·holder 등록의 정규 경로를 전부 건넌다**.
   이 경로가 들어온 커밋·동기·성능 수치와 되돌릴 때의 비용은 `imports/vimkim/pgbuf/research/lockfree-fix-origin.md`. 정규 경로만 하는 일(예: `register_avoid_deallocation` :2376)은
@@ -407,7 +409,8 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 - `cubrid backupdb -l 0` 는 볼륨 파일을 페이지 0..N-1 로 `pread` 전수 복사(할당 상태 무시)하되, 볼륨마다 체크포인트·flush·DWB sync 를 선행하고, 기본 consistency check 와 LZ4 압축이 붙는다.
   `-t N` 병렬은 압축 병렬이지 I/O 병렬이 아니다(pread·write 가 공유 mutex 하). `imports/vimkim/storage/survey-backupdb-level-0_cd593bc.md` — vimkim 2026-09-30
 - heap/btree 스캔에 사용자 질의 경로용 page prefetch 는 없다(`prefetch` 는 vacuum 로그·파서 클래스 락·커서 OID·`__builtin_prefetch` 뿐); `posix_fadvise` 는 볼륨 open 시 1회 hint(`file_io.c`, `data_file_os_advise`).
-  도입 검토는 `imports/vimkim/storage/CBRD-26788-prefetch-survey.md` (CBRD-26788, PR 없음). — vimkim 2026-09-30
+  도입 검토는 `imports/vimkim/storage/CBRD-26788-prefetch-survey.md` (CBRD-26788, PR 없음). 원문이 인용한 `parallel_heap_scan_page_threshold`(기본 2048) 는 develop 에 없고, 현행은 **`parallel_scan_page_threshold`(hidden, 기본 256)** 등 `PRM_NAME_PARALLEL_*` 6종(system_parameter.c:781~789) — 원문 수치를 그대로 쓰면 오판. — vimkim 2026-09-30; .51 대조
+- **복구(restart) 중에는 temp 볼륨 판정이 항상 false 다** — `pgbuf_is_temporary_volume()` 이 `!LOG_ISRESTARTED()` 면 false 를 반환(주석: "until database is loaded and restarted, I will return false always"). 복구 중 temp 페이지는 WAL 면제·LRU 승격 억제·DWB 우회 등 temp 특수 처리를 받지 않는다 — 보수 측 동작이지만 근거 주석이 없다(원문 P8). — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md) 2026-09-30; .51 대조 develop 0d0809963
 
 ## 3. 예비 이슈 사항
 
@@ -466,6 +469,18 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   트랜잭션 lock 정책은 그 뒤 어떤 에러/abort 가 나는지만 바꾼다. zero-wait 트랜잭션의 UNCONDITIONAL → CONDITIONAL 강등(위 §3 "래치 타임아웃이 서버 abort" 항목의 원인 축)은
   PR#7630(CBRD-27198, 머지 `b203b6c9d`)이 disk manager 경로에서 막았고, 근본 분리(호출자가 wait/try/ordered-retry 를 명시)는 CBRD-27356 으로 남아 있다(원문). `imports/vimkim/storage/CBRD-27198-*.md` — vimkim 2026-09-30
 - **[관측 — 300초 WRITE latch 점유 원인 규명 계측안, CBRD-26325]** holder 추적·breadcrumb·강제 스택 덤프 4단계 — 래치 타임아웃 코어를 다시 만나면 `imports/vimkim/pgbuf/CBRD-26325-latch-timeout-instrumentation-proposal.md` 부터. — vimkim 2026-09-30
+- **[미수정 — pgbuf 초기화/종료 위생 3건 (원문 D2/P7)]** ① `pgbuf_initialize` :1600 `memset (&pgbuf_Pool.direct_victims, 0, sizeof (PGBUF_VICTIM_CANDIDATE_LIST))` — 대상은 `PGBUF_DIRECT_VICTIM`(:722, 포인터 3개)인데
+  16B 타입 크기를 써 마지막 멤버 `waiter_threads_low_priority` 가 초기화되지 않는다(정적 저장소라 첫 초기화만 우연히 0; init 실패 → `pgbuf_finalize` 경로에서 garbage `delete` 가능). ② `Aout_mutex` 이중 `pthread_mutex_destroy` —
+  `pgbuf_initialize_aout_list` 실패 경로(:5834)와 `pgbuf_finalize`(:1939) 양쪽. ③ quota 배열 `malloc (PGBUF_PRIVATE_LRU_COUNT * ...)` (:13929) 는 private LRU 0개면 `malloc(0)` 반환값 의존(원문 주장, 0 조건 미대조). 한 PR 로 묶을 만한 위생 건. — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md) 2026-09-30; .51 대조 develop 0d0809963
+- **[미수정 — `big_private_lrus_with_victims` 큐에 생산자가 없음 (원문 D4)]** `pgbuf_lfcq_add_lru_with_victims` 는 private(:16329 부근)·shared 큐에만 `produce` 하고, big 큐의 유일한 `produce` 는 `pgbuf_lfcq_get_victim_from_private_lru` 가
+  같은 큐에서 `consume`(:16375) 한 뒤 되넣는 :16402 뿐 → 항상 비어 있다. over-quota(`restrict_other`) 스레드의 "큰 private 리스트부터 회수" 2단계는 무효고 곧장 shared 로 간다. 큐 제거 또는 크기·quota 조건 라우팅 중 택일. — vimkim 2026-09-30; .51 대조 develop 0d0809963
+- **[미수정 — `pgbuf_panic_assign_direct_victims_from_lru` 호출부가 죽은 호출 (원문 P3 부속)]** `pgbuf_get_victim_from_lru_list` 가 `pgbuf_remove_from_lru_list (thread_p, bufptr, lru_list)` (:9376; 이 함수가 `prev_BCB = NULL` 로 끊는다) **뒤에**
+  `bufptr->prev_BCB` 를 넘겨(:9382) 호출하므로 `bcb_start == NULL` → 즉시 0. 대기 스레드가 많을 때(`waiter_threads_low_priority->size() >= 5 + threads/20`) 발동하려던 panic 배급이 없다. 리스트 이탈 **전**의 이웃을 넘겨야 한다. — vimkim 2026-09-30; .51 대조 develop 0d0809963
+- **[미수정 — 죽은 진단 도구·낡은 주석 (원문 P4/P6/P9)]** `pgbuf_dump()` (:11274) 가 atomic-latch 리팩터링 이전 필드 `bufptr->fcnt`(:11320)·`bufptr->zone`(:11340) 을 참조하고 `consistenet_str` 오타 — 그 가드를 켜면 컴파일 불가.
+  `pgbuf_rv_dealloc_undo_compensate` 는 `VPID vpid` 를 대입 없이 `VPID_AS_ARGS` 로 로그에 찍는다(TDE+debug 한정). `monitor.victim_rich` 는 계산(:14425)만 되고 읽는 곳이 없다(:9027 주석은 재시도 조건이라 설명 — 주석-코드 불일치),
+  `UINT16MAX`(:300) 미사용, `buf_LRU_list` 주석의 `num_garbage_LRU_list`(:749) 는 코드에 없음, `goto copy_unflushed_lsa`(:10745) 는 라벨(:10749)이 바로 다음. — vimkim 2026-09-30; .51 대조 develop 0d0809963
+- **[사용성 — `double_write_buffer_size` 는 크기 접미사를 못 받는다 (원문 D5)]** `PRM_ID_DWB_SIZE` 의 플래그가 `PRM_FOR_SERVER | PRM_USER_CHANGE` 뿐(:4348)이라 `PRM_SIZE_UNIT` 가 없다 — `data_buffer_size`(:1186, `PRM_SIZE_UNIT | PRM_DIFFER_UNIT`) 와 달리
+  `=2M` 을 쓰면 ER -839 로 **서버 부팅 실패**(원문 실측; start 유틸은 그냥 기다려 조용히 죽는다). 바이트로 적어야 한다. — vimkim 2026-09-30; .51 대조 develop 0d0809963
 
 **CBRD-24094(10a1df3e6, OID-ordered overflow chains + separator directory)는 온디스크
 포맷 비호환** — 구 포맷 볼륨을 새 빌드로 열면 **읽기는 되지만 뷰 생성 등 카탈로그 쓰기에서

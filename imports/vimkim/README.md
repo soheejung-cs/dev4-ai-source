@@ -91,20 +91,24 @@ OLAP/HTAP 로드맵·JIT 입문서. 원 리포에서 본다.
 | CBRD-26176 bestspace 재설계 | 머지됨(`e84a7f6dc`, #7353). `src/storage/bestspace.{cpp,hpp}` 현존 | `src-storage.md` §2 포인터 |
 | CBRD-27151 bulk destroy vs 복구 재실행 | PR#7785 OPEN | `src-storage.md` §3 |
 | CBRD-26500 hit ratio 언더플로 | PR#7157 OPEN(approved, 2026-08-14 이후 정지) | `src-storage.md` §3 |
-| D2·D4·D5·D6·P4·P6·P7·P8·P9, lock manager claim 후보, sysop 세부, CDC 원인 후보 | **미대조** | `staging/정소희-vimkim-imports.md` 에 미확인 표기로 대기 |
+| **D2** memset sizeof 오류 · **D4** big private 큐 생산자 없음 · **P3 부속** panic 배급 죽은 호출 · **P4/P6/P9** 죽은 진단·낡은 주석 · **P7-②** Aout_mutex 이중 destroy · **P8** 복구 중 temp 판정 false · **D5** DWB size 접미사 불가 | **잔존** (:1600 / :16402 / :9376→:9382 / :11320·:11340 / :1939·:5834 / `pgbuf_is_temporary_volume` / :4348 플래그) | `src-storage.md` §2·§3 |
+| **D6** 관측 카운터 4건 | (a) DWB on 이면 `PSTAT_PB_NUM_IOWRITES` 는 dwb.cpp :2115/:2150/:2339 에서 2회, off 면 pgbuf :10804 1회 (b) `PSTAT_PB_NUM_FLUSHED` 는 victim flusher :4065 만 (c) SHOW `Victim_candidate_pages` = zone3∧dirty :17309 (d) `num_hit` 은 develop 에 없음 — SHOW `Hit_rate` 자체가 deprecated NULL :17397 | `src-storage.md` §2 |
+| sysop 내부(`log_sysop_start` 스택만, END 타입 5종) · **락 자원 4종(`LOCK_RESOURCE_TRANSACTION` = MVCCID self-lock)** · loaddb `BU_LOCK` | **일치** (:3667, log_record.hpp:67~ / lock_manager.h:142, :739·:6468·:6521·:6584 / load_server_loader.cpp:127~) — 우리 staging 27369 의 "자원 셋" 을 정정 | `src-transaction.md` §2, `src-loaddb.md` §3 |
+| prefetch 조사의 `parallel_heap_scan_page_threshold`(2048) | **이름·기본값 다름** — 현행 `parallel_scan_page_threshold` hidden 기본 256 (system_parameter.c:783) | `src-storage.md` §2 주석 |
+| dwb_read_page 실패 시 BCB mutex 보유 반환, `count_vict_cand` 내부 정의, quota 0 조건, lock claim C031~C038 의 btree 줄 범위, CDC 원인 후보, 볼륨 파서 세부 | **미대조** | `staging/정소희-vimkim-imports.md` |
 
-## 3. 방식에서 배울 점 (my-cubrid-skills + 문서 규약) — 채택은 사용자 판단
+## 3. 방식에서 배울 점 (my-cubrid-skills + 문서 규약) — 2026-09-30 채택분은 각 항목 끝 **[반영: 파일]**
 
 우리 규약(`skills/source-learning`, `dev4-review-workspace/skills/*`, `claude-workspace/memory/rules/*`)과 비교해 **없거나 약한 것만** 적는다.
 
-1. **파일명에 기준 커밋·에이전트 접미사** `<slug>_<7자리SHA>_<claude|codex>.md`. 우리는 본문 머리에 리비전을 적는데, 파일명에 있으면 디렉터리 목록만으로 낡은 문서를 가려낼 수 있다. 같은 주제를 두 에이전트가 쓴 판을 나란히 두는 것도 이 규약 덕이다.
-2. **조사 문서 골격 `Verdict → Shared Scenario → Trace(file:line 표) → Runtime Probe → Unknowns → Source Revisions`** (`storage/survey-*`). 우리 §2 "주장→근거→체크포인트" 에 **"확인 못 한 것(Unknowns)"과 "찾아봤는데 없던 것(Negative searches)"** 절이 없다 — 다음 사람이 같은 grep 을 반복하지 않게 해 준다. `source-learning` §4 에 추가 검토.
+1. **파일명에 기준 커밋·에이전트 접미사** `<slug>_<7자리SHA>_<claude|codex>.md`. 우리는 본문 머리에 리비전을 적는데, 파일명에 있으면 디렉터리 목록만으로 낡은 문서를 가려낼 수 있다. 같은 주제를 두 에이전트가 쓴 판을 나란히 두는 것도 이 규약 덕이다. **[반영: `skills/source-learning` §2]**
+2. **조사 문서 골격 `Verdict → Shared Scenario → Trace(file:line 표) → Runtime Probe → Unknowns → Source Revisions`** (`storage/survey-*`). 우리 §2 "주장→근거→체크포인트" 에 **"확인 못 한 것(Unknowns)"과 "찾아봤는데 없던 것(Negative searches)"** 절이 없다 — 다음 사람이 같은 grep 을 반복하지 않게 해 준다. **[반영: `skills/source-learning` §2]**
 3. **결함 보고서 → 이슈 제안 목록(P1~P9, "등록 전 초안", 심각도·준비 상태·검증 방법·근거 챕터 링크)** 형식(`pgbuf/09-issue-proposals.md`). 우리 §3 예비 이슈의 한 항목이 이 정도 구조를 가지면 발번이 바로 된다.
 4. **정적 분석 뒤 동적 실증 + "정적 문서 대비 정정/보강" 절**(`transaction/log-manager-append-flush-dynamic-analysis` §6, `storage/CBRD-26176-*-03-callflows`). 우리 "검증된" 기준(§2: 가능하면 실행으로 확인)의 좋은 실례 — 정정 사항을 별도 절로 모아 정적 문서를 고친다.
-5. **CI 증거 규율**(`cubrid-ci-analyze`, `cubrid-common/references/ci-evidence.md`): run ID 와 attempt 를 구분, 엔진 커밋과 테스트케이스 리비전을 따로 기록, 러너 exit 0 은 판정이 아니다, 인과 주장마다 `PR relation(direct/plausible/unlikely/unknown) + confidence + falsifier + next action`. `dev4-review-workspace/skills/gha-ci` 와 대조해 빠진 항목(특히 falsifier) 채택 검토.
-6. **PR 본문 계약**(`cubrid-pr-create`): `## Purpose / Implementation / Remarks` 고정, **AS-IS/TO-BE 한 줄씩**, 25~35줄 한 화면, 상세는 별도 문서 링크, **로컬 전용 명령(`just`·alias·절대경로) 금지 + 게시 전 스캔** (`rg -nP '\bjust\s+\w'`). 우리 `goto`·`~/bin/*` 도 PR·JIRA 본문에 쓰면 안 되는 로컬 도구다 — `PR브랜치-규칙` 에 스캔 한 줄 추가 검토.
-7. **JIRA 본문 Layer Ownership**(`cubrid-jira-issue-write`): Triage(목적/이유/방안) = 결론, Description = 메커니즘, Summary = 범위·영향 — **같은 사실을 두 층에 쓰지 않는다**, 작성 후 중복 grep. 이유에는 임계값을 코드 이름으로(`DB_PAGESIZE/8`), 영향은 5범주 중 하나만 구체 사례로. 우리 `jira-task` 스킬과 상보.
-8. **리뷰 코멘트는 REST 3 endpoint 합집합**(`gh-pr-comments-all`): `/pulls/N/comments`(인라인) + `/pulls/N/reviews`(리뷰 요약, `COMMENTED`+빈 본문은 래퍼라 버림) + `/issues/N/comments`(대화 탭). 하나만 보면 리뷰 요약·대화 탭이 조용히 빠진다. `review-response` 스킬의 수집 단계와 대조.
+5. **CI 증거 규율**(`cubrid-ci-analyze`, `cubrid-common/references/ci-evidence.md`): run ID 와 attempt 를 구분, 엔진 커밋과 테스트케이스 리비전을 따로 기록, 러너 exit 0 은 판정이 아니다, 인과 주장마다 `PR relation(direct/plausible/unlikely/unknown) + confidence + falsifier + next action`. **[반영: `dev4-tc-workspace/skills/gha-ci` — 귀속 판정에 반증 조건 한 줄]**
+6. **PR 본문 계약**(`cubrid-pr-create`): `## Purpose / Implementation / Remarks` 고정, **AS-IS/TO-BE 한 줄씩**, 25~35줄 한 화면, 상세는 별도 문서 링크, **로컬 전용 명령(`just`·alias·절대경로) 금지 + 게시 전 스캔** (`rg -nP '\bjust\s+\w'`). 우리 `goto`·`~/bin/*` 도 PR·JIRA 본문에 쓰면 안 되는 로컬 도구다 — **[반영: `claude-workspace/memory/rules/PR브랜치-규칙.md` §3, `skills/jira-task`]**
+7. **JIRA 본문 Layer Ownership**(`cubrid-jira-issue-write`): Triage(목적/이유/방안) = 결론, Description = 메커니즘, Summary = 범위·영향 — **같은 사실을 두 층에 쓰지 않는다**, 작성 후 중복 grep. 이유에는 임계값을 코드 이름으로(`DB_PAGESIZE/8`), 영향은 5범주 중 하나만 구체 사례로. **[반영: `claude-workspace/skills/jira-task` 규칙]**
+8. **리뷰 코멘트는 REST 3 endpoint 합집합**(`gh-pr-comments-all`): `/pulls/N/comments`(인라인) + `/pulls/N/reviews`(리뷰 요약, `COMMENTED`+빈 본문은 래퍼라 버림) + `/issues/N/comments`(대화 탭). 하나만 보면 리뷰 요약·대화 탭이 조용히 빠진다. `review-response` 는 이미 `gh pr view --json reviews,comments` + `pulls/N/comments` 로 셋을 본다 — **이미 충족**.
 9. **용어집 `CONTEXT.md` 에 `_Avoid_` 동의어 목록** — "test bucket 말고 test suite". 우리 CONTRIBUTING 7항(원문 용어 유지)과 상보적: 유지할 원문뿐 아니라 **쓰지 말 표현**을 적는다.
 10. **테스트 실행은 attempt 디렉터리에 `$CUBRID`·CTP 를 복사해 격리**하고, 판정은 프로세스 종료 코드가 아니라 결과 산출물(summary·XML·`.result`)로 (`cubrid-common/references/testkit-focused.md`). 우리 `harness/templates/repro.sh`·`session.py` 의 격리 원칙과 같은 방향; "exit 0 ≠ pass" 는 명문화 가치.
 11. **자동 발행 계약을 좁게 명시**: fork·대상 리포·draft 세 조건이 전부 맞을 때만 확인 없이 진행, 하나라도 다르면 묻는다(`cubrid-pr-create` "Automatic Draft Publication Contract"). 우리 "타인 PR 게시 전 사용자 검토" 규칙의 반대편 — 내 PR 은 조건부 자동화하는 선례.
