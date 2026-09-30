@@ -9,7 +9,7 @@
     <div class="fact good"><b>0</b><span>SELECT 가 잡는 행 락</span></div>
     <div class="fact bad"><b>300 s</b><span>래치 타임아웃 (데드락 감지 없음)</span></div>
   </div>
-  <div class="meta"><span>대상: 엔진 신입 · 리뷰 입문자</span><span>원문: education/latch-lock-mvcc.html (file:line 전부)</span></div>
+  <div class="meta"><span>대상: 엔진 신입 · 리뷰 입문자</span><span>원문: <a href="latch-lock-mvcc.html">latch-lock-mvcc.html</a> (file:line 전부)</span><span><a href="../index.html">← 소스 노트 홈</a></span></div>
 </section>
 
 <!-- 2 한 눈에 -->
@@ -299,7 +299,13 @@
     <div><span class="q">Q2</span><p><b>unique 검사 중 남의 미커밋 삽입 행을 만나면 무엇을 키로 어떤 모드를 요청하고, 깨어난 뒤 반드시 무엇을 하나?</b> (§15)</p></div>
     <div><span class="q">Q3</span><p><b>INSERT 가 새 슬롯 행의 X 를 생략할 수 있는 이유 — 그 락의 두 역할 중 MVCC 가 이미 대신하던 쪽은?</b> (§15)</p></div>
   </div>
-  <div class="ask" style="margin-top:8px">
+</section>
+
+<!-- 20 퀴즈 ② -->
+<section class="slide" id="s20">
+  <div class="eyebrow"><span class="num">19</span><span>확인 퀴즈 ②</span><span class="bar"></span><span>답은 원문 §8 에 접혀 있음</span></div>
+  <h2>못 맞추면 <b>그 장을 다시</b> 본다</h2>
+  <div class="ask">
     <div><span class="q">Q4</span><p><b>래치 데드락은 어떻게 처리되나?</b> (§03)</p></div>
     <div><span class="q">Q5</span><p><b>READ COMMITTED 와 REPEATABLE READ 의 차이를 스냅샷·S 락 두 축으로?</b> (§13)</p></div>
     <div><span class="q">Q6</span><p><b>Oracle 이 "행마다 버전을 안 적는다"는 뜻은? CUBRID 와 같은 점 하나, 다른 점 하나.</b> (§16)</p></div>
