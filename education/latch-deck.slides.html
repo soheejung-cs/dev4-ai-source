@@ -1,0 +1,330 @@
+<!-- 1 표지 -->
+<section class="slide" id="s1">
+  <div class="eyebrow"><span class="num">교육</span><span>래치 입문 · 신입용</span><span class="bar"></span><span>develop e17fdab25 · 2026-09-30</span></div>
+  <h1>래치 —<br>페이지 한 장을 <b>빌리고 돌려주는</b> 규칙</h1>
+  <p class="lede">서버 안의 모든 페이지 접근은 <code>pgbuf_fix</code> 로 시작해 <code>pgbuf_unfix</code> 로 끝납니다. 그 사이에 페이지를 지키는 것이 <b>래치</b>입니다. 이 덱은 래치가 무엇을 지키고, 못 받으면 어떻게 기다리고, 언제 조용히 실패하는지를 <code>page_buffer.c</code> 의 실제 코드로 따라갑니다.</p>
+  <div class="facts">
+    <div class="fact"><b>2</b><span>모드 — READ · WRITE</span></div>
+    <div class="fact"><b>1</b><span>64비트 워드에 상태 전부</span></div>
+    <div class="fact bad"><b>300 s</b><span>기본 타임아웃 (데드락 감지 없음)</span></div>
+    <div class="fact good"><b>0</b><span>fix 뒤 남겨도 되는 래치 수</span></div>
+  </div>
+  <div class="meta"><span>대상: 엔진 신입 · PR#8034 리뷰 입문</span><span>앞편: <a href="latch-lock-mvcc-deck.html">래치 · 락 · MVCC 입문</a></span><span><a href="../index.html">← 소스 노트 홈</a></span></div>
+</section>
+
+<!-- 2 넷 중 하나 -->
+<section class="slide" id="s2">
+  <div class="eyebrow"><span class="num">01</span><span>자리 잡기</span><span class="bar"></span></div>
+  <h2>서버에는 동기화 도구가 <b>넷</b> 있다 — 래치는 그중 "페이지 한 장" 용이다</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>래치</th><th>BCB 뮤텍스</th><th>크리티컬 섹션</th><th>락</th></tr></thead>
+    <tbody>
+      <tr><td>지키는 것</td><td>페이지 <b>내용</b></td><td>BCB 의 <b>대기 큐</b>·플래그</td><td>전역 표(트랜잭션 표·로그·쿼리 표)</td><td>행·클래스의 <b>논리</b>적 소유</td></tr>
+      <tr><td>단위</td><td>16KB 페이지 1장</td><td>BCB 1개</td><td>이름 붙은 구간 (<code>CSECT_*</code>)</td><td>OID · MVCCID</td></tr>
+      <tr><td>쥐는 시간</td><td>함수 안 (µs~ms)</td><td>몇 줄</td><td>몇 줄~한 요청</td><td>트랜잭션 끝까지</td></tr>
+      <tr><td>데드락</td><td class="warn">감지 없음 — 순서 + 타임아웃</td><td>없음 (순서 고정)</td><td>추적기가 순서 검사 (debug)</td><td>감지 스레드</td></tr>
+      <tr><td>코드</td><td class="mono">page_buffer.c</td><td class="mono">PGBUF_BCB_LOCK</td><td class="mono">critical_section.c</td><td class="mono">lock_manager.c</td></tr>
+    </tbody>
+  </table></div>
+  <p class="one">헷갈리면 이렇게 기억합니다 — <b>래치는 "지금 이 페이지를 만지는 사람"</b>, 뮤텍스는 그 래치의 <b>장부를 고치는 몇 줄</b>, 락은 <b>트랜잭션의 소유권</b>.</p>
+  <p><small>크리티컬 섹션 이름 <code>critical_section.h:59~</code> (<code>CSECT_TRAN_TABLE</code>, <code>CSECT_LOG</code> …). 주석에 "Latch for …" 라 적혀 있지만 페이지 래치와는 다른 물건이다.</small></p>
+</section>
+
+<!-- 3 왜 -->
+<section class="slide" id="s3">
+  <div class="eyebrow"><span class="num">02</span><span>왜 필요한가</span><span class="bar"></span></div>
+  <h2>페이지는 <b>공유 메모리</b>다 — 두 스레드가 같이 고치면 슬롯 표가 깨진다</h2>
+  <div class="cols two">
+    <div class="card read"><span class="kicker">래치 없이</span><h3>스레드 A 가 슬롯 3을 옮기는 도중 B 가 슬롯 4를 넣는다</h3><p>슬롯 디렉터리의 오프셋과 실제 레코드 위치가 어긋난다. 디스크에 그대로 내려가면 <b>복구도 못 하는</b> 손상이다. 트랜잭션 락은 이걸 못 막는다 — 락은 행의 소유를 가르지, 같은 페이지의 다른 행을 고치는 두 쓰기를 가르지 않는다.</p></div>
+    <div class="card gate"><span class="kicker">래치로</span><h3>WRITE 는 혼자, READ 는 여럿</h3><p>고치려면 WRITE 래치를 받아야 하고, WRITE 를 쥔 동안은 아무도 못 읽는다. 읽기끼리는 같이 든다. 그래서 래치는 <b>짧아야</b> 한다 — 함수 하나 안에서 잡고 놓는다.</p></div>
+  </div>
+  <p class="one">래치가 지키는 것은 <b>물리적 일관성</b>입니다. "이 행을 누가 갱신 중인가" 는 락과 MVCC 의 몫이고, 래치는 그걸 모릅니다.</p>
+</section>
+
+<!-- 4 BCB -->
+<section class="slide" id="s4">
+  <div class="eyebrow"><span class="num">03</span><span>자료구조</span><span class="bar"></span><span>page_buffer.c:478 · :490</span></div>
+  <h2>페이지마다 제어 블록 <b>BCB</b> — 래치 상태는 <b>64비트 워드 하나</b>에 다 들어 있다</h2>
+  <div class="figbox"><figure>
+    <svg viewBox="0 0 900 190" role="img" aria-label="BCB 의 atomic_latch 워드 구성과 대기 큐">
+      <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
+        <text x="20" y="28" font-size="12" opacity=".7">union pgbuf_atomic_latch_impl — uint64_t raw 하나를 CAS 로 갱신</text>
+        <rect x="20" y="40" width="200" height="54" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="34" y="62" fill="#14706b" font-weight="600">latch_mode</text><text x="34" y="82" font-size="12" fill="#1f3d3a">NO · READ · WRITE</text>
+        <rect x="230" y="40" width="200" height="54" rx="6" fill="#f6e6d6" stroke="#a85b16" stroke-width="1.5"/><text x="244" y="62" fill="#a85b16" font-weight="600">waiter_exists</text><text x="244" y="82" font-size="12" fill="#5a3410">줄 선 사람 있나</text>
+        <rect x="440" y="40" width="200" height="54" rx="6" fill="#e7e3f2" stroke="#5b4b8a" stroke-width="1.5"/><text x="454" y="62" fill="#5b4b8a" font-weight="600">fcnt</text><text x="454" y="82" font-size="12" fill="#3a2f5c">지금 쥔 fix 수</text>
+        <rect x="670" y="40" width="210" height="54" rx="6" fill="none" stroke="currentColor"/><text x="684" y="62">next_wait_thrd</text><text x="684" y="82" font-size="12" opacity=".7">THREAD_ENTRY 대기 큐</text>
+        <text x="20" y="130" font-size="12">READ 가 셋이면 latch_mode=READ, fcnt=3. WRITE 는 latch_mode=WRITE, fcnt=1 (같은 스레드가 두 번 fix 하면 2).</text>
+        <text x="20" y="154" font-size="12" fill="#a85b16">뮤텍스(bufptr-&gt;mutex)는 워드가 아니라 <tspan font-weight="600">큐를 고칠 때만</tspan> 잡는다 — 잡고 놓는 기본 경로는 CAS 한 번.</text>
+        <text x="20" y="178" font-size="12" opacity=".7">CAS 루프: pgbuf_latch_bcb_upon_fix :6377 · pgbuf_unlatch_bcb_upon_unfix :6591 · pgbuf_wakeup_reader_writer :7391</text>
+      </g>
+    </svg>
+    <figcaption>세 필드를 한 워드에 두는 이유 — "리더가 있나, 대기자가 있나, 몇 명인가" 를 <b>원자적으로 한 번에</b> 판정하려고.</figcaption>
+  </figure></div>
+</section>
+
+<!-- 5 fix 의 여정 -->
+<section class="slide" id="s5">
+  <div class="eyebrow"><span class="num">04</span><span>fix 의 여정</span><span class="bar"></span><span>pgbuf_fix_release, page_buffer.c:2166~2470</span></div>
+  <h2><code>pgbuf_fix</code> 한 번은 <b>여덟 단계</b>다 — 어디서 NULL 이 나올 수 있는지가 핵심</h2>
+  <div class="steps">
+    <div><span class="n">① 검증</span><p>vpid 가 유효한 페이지인가. debug 는 fix 마다 디스크 섹터 표까지 본다(<code>page_validation_level</code>).</p></div>
+    <div><span class="n">② 조용한 강등 :2231</span><p>무조건 요청인데 대기 시간이 0 또는 -2 면 <b>호출자 모르게 조건부로</b> 바꾼다.</p></div>
+    <div><span class="n">③ 빠른 길 :2267</span><p>READ + 기존 페이지 + 무조건이면 해시도 뮤텍스도 없이 CAS 한 번 → <code>fast_path</code>.</p></div>
+    <div><span class="n">④ 해시 탐색</span><p>vpid → BCB. 없으면 ⑤, 있으면 BCB 뮤텍스를 잡고 ⑥.</p></div>
+    <div><span class="n">⑤ 디스크에서</span><p>빈 BCB 를 잡아(victim) 페이지를 읽어 온다. 여기가 I/O 대기.</p></div>
+    <div><span class="n">⑥ 래치 판정 :6232</span><p>바로 줄 수 있나, 줄 서야 하나. 다음 장.</p></div>
+    <div><span class="n">⑦ holder 등록</span><p>내 스레드의 holder 리스트에 "이 BCB 를 n 번 쥐고 있다" 를 적는다.</p></div>
+    <div><span class="n">⑧ 꼬리 :2447</span><p>빠른 길과 정규 길이 합쳐진다. <code>PREVENT_DEALLOC</code> 보호 해제도 여기.</p></div>
+  </div>
+  <p><small>NULL 이 나오는 곳: ①(<code>ER_PB_BAD_PAGEID</code>) · ⑤(I/O 오류) · ⑥(조건부 거부, 대기 타임아웃). ⑥ 만 "에러 없는 NULL" 이 가능하다 — §06·§08.</small></p>
+</section>
+
+<!-- 6 래치 판정 -->
+<section class="slide" id="s6">
+  <div class="eyebrow"><span class="num">05</span><span>래치 판정</span><span class="bar"></span><span>pgbuf_latch_bcb_upon_fix, page_buffer.c:6232</span></div>
+  <h2>바로 줄까 줄 세울까 — 판정은 <b>네 가지</b>뿐이다</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>지금 상태</th><th>요청</th><th>판정</th><th>왜</th></tr></thead>
+    <tbody>
+      <tr><td>NO_LATCH (아무도 없음)</td><td>READ 또는 WRITE</td><td class="pick">즉시 — fcnt=1</td><td>비어 있다</td></tr>
+      <tr><td>READ, <b>대기자 없음</b></td><td>READ</td><td class="pick">즉시 — fcnt++</td><td>읽기끼리는 같이 든다</td></tr>
+      <tr><td>READ, <b>대기자 있음</b></td><td>READ (내가 홀더 아님)</td><td class="warn">줄 선다</td><td>새 리더가 계속 끼어들면 기다리는 WRITE 가 굶는다 — <code>waiter_exists</code> 가 이걸 막는다</td></tr>
+      <tr><td>내가 이미 홀더</td><td>같은 모드 또는 WRITE→WRITE</td><td class="pick">즉시 — fcnt++</td><td>재진입. 같은 함수 스택 안에서 두 번 fix 해도 된다</td></tr>
+      <tr><td>내가 READ 홀더, 남도 있음</td><td>WRITE (승격)</td><td class="warn">놓고 맨 앞에 줄 선다</td><td>§12</td></tr>
+      <tr><td>그 외 (남이 WRITE, 또는 내가 WRITE 요청)</td><td>—</td><td class="warn">줄 선다</td><td>Case 3</td></tr>
+    </tbody>
+  </table></div>
+  <p class="one">"줄 선다" 로 판정됐을 때 <b>조건부</b>면 여기서 끝(거부)이고, <b>무조건</b>이면 다음 장의 대기로 갑니다.</p>
+</section>
+
+<!-- 7 조건부 vs 무조건 -->
+<section class="slide" id="s7">
+  <div class="eyebrow"><span class="num">06</span><span>조건부 · 무조건</span><span class="bar"></span><span>page_buffer.h:201 · page_buffer.c:2231 · :6517</span></div>
+  <h2>못 받으면 <b>기다릴지 말지</b>는 호출자가 고른다 — 그런데 한 번 <b>몰래 바뀐다</b></h2>
+  <div class="cols three">
+    <div class="card gate"><span class="kicker">UNCONDITIONAL</span><h3>될 때까지 기다린다</h3><p>대부분의 호출자. 타임아웃(300초)이 오면 그때 NULL.</p></div>
+    <div class="card proof"><span class="kicker">CONDITIONAL</span><h3>안 되면 바로 NULL</h3><p>bestspace 처럼 "바쁘면 다른 페이지" 가 정상인 호출자. 거부 자체가 오류가 아니다.</p></div>
+    <div class="card read"><span class="kicker">강등 :2231</span><h3>무조건 → 조건부, 호출자 모르게</h3><p>현재 대기 시간이 <code>LK_ZERO_WAIT</code>(0) 또는 <code>LK_FORCE_ZERO_WAIT</code>(-2) 면 무조건 요청도 조건부가 된다. 호출자는 "기다리겠다" 고 썼는데 코드는 안 기다린다.</p></div>
+  </div>
+  <div class="plain contend"><span class="kicker">거부됐을 때 오류는? :6517</span><p>대기 시간이 <b>0 이면 <code>ER_LK_PAGE_TIMEOUT</code> 설정</b>, <b>-2 면 오류 없이 그냥 NULL</b>. -2 는 "엔진이 스스로 건 프로브니 조용히 실패시켜라" 는 뜻이고, 그 호출자(bestspace <code>L1_fix</code>)는 스스로 처리한다. 다른 호출자가 -2 창 안에 끼어 있으면 오류 없는 NULL 을 받는다 — §17 함정 ②.</p></div>
+</section>
+
+<!-- 8 줄 서기 -->
+<section class="slide" id="s8">
+  <div class="eyebrow"><span class="num">07</span><span>줄 서기</span><span class="bar"></span><span>pgbuf_block_bcb, page_buffer.c:6981</span></div>
+  <h2>기다리기로 했으면 <b>BCB 의 큐에 내 스레드를 매단다</b></h2>
+  <div class="figbox"><figure>
+    <svg viewBox="0 0 900 170" role="img" aria-label="BCB 대기 큐에 스레드 엔트리가 매달리는 모습">
+      <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
+        <rect x="20" y="40" width="150" height="60" rx="6" fill="#e7e3f2" stroke="#5b4b8a" stroke-width="1.5"/><text x="34" y="64" fill="#5b4b8a" font-weight="600">BCB</text><text x="34" y="86" font-size="12" fill="#3a2f5c">WRITE, fcnt=1</text>
+        <rect x="230" y="40" width="180" height="60" rx="6" fill="none" stroke="currentColor"/><text x="244" y="64">T7 (promoter)</text><text x="244" y="86" font-size="12" opacity=".7">request WRITE · 맨 앞</text>
+        <rect x="450" y="40" width="180" height="60" rx="6" fill="none" stroke="currentColor"/><text x="464" y="64">T3</text><text x="464" y="86" font-size="12" opacity=".7">request READ, fcnt 1</text>
+        <rect x="670" y="40" width="180" height="60" rx="6" fill="none" stroke="currentColor"/><text x="684" y="64">T9</text><text x="684" y="86" font-size="12" opacity=".7">request WRITE, fcnt 1</text>
+        <text x="20" y="140" font-size="12">각 스레드는 THREAD_ENTRY 에 request_latch_mode · request_fix_count 를 적고(:6999) next_wait_thrd 로 이어진다. 승격자는 맨 앞, 나머지는 뒤에 붙는다.</text>
+        <text x="20" y="162" font-size="12" fill="#a85b16">큐를 고치는 동안만 BCB 뮤텍스. 매단 뒤 뮤텍스를 놓고 pgbuf_timed_sleep 으로 잔다(:7088).</text>
+      </g>
+      <g stroke="currentColor" fill="none" opacity=".5" marker-end="url(#ar)"><line x1="172" y1="70" x2="226" y2="70"/><line x1="412" y1="70" x2="446" y2="70"/><line x1="632" y1="70" x2="666" y2="70"/></g>
+    </svg>
+    <figcaption>큐는 스레드 엔트리를 직접 잇는 단일 연결 리스트 — 별도 할당이 없다.</figcaption>
+  </figure></div>
+  <p><small><code>PGBUF_LATCH_FLUSH</code> 로도 줄 설 수 있는데 이건 래치가 아니라 "이 페이지가 flush 될 때까지" 기다리는 표식이다(:7031). §16.</small></p>
+</section>
+
+<!-- 9 timed_sleep -->
+<section class="slide" id="s9">
+  <div class="eyebrow"><span class="num">08</span><span>자고 깨기</span><span class="bar"></span><span>pgbuf_timed_sleep, page_buffer.c:7220</span></div>
+  <h2>얼마나 자나 — <b>트랜잭션 설정은 "기다릴지" 만 정하고</b>, 길이는 래치 파라미터가 정한다</h2>
+  <div class="cols side">
+    <div class="figbox"><figure>
+      <svg viewBox="0 0 560 200" role="img" aria-label="timed_sleep 의 예산 결정과 세 가지 깨어남">
+        <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="12">
+          <text x="14" y="22" opacity=".7">old = wait = pgbuf_find_current_wait_msecs ()</text>
+          <rect x="14" y="36" width="250" height="44" rx="6" fill="#f6e6d6" stroke="#a85b16"/><text x="26" y="54" fill="#a85b16" font-weight="600">wait 가 0 또는 -2</text><text x="26" y="72" fill="#5a3410">예산 0 — 안 잔다</text>
+          <rect x="290" y="36" width="256" height="44" rx="6" fill="#d9ebe9" stroke="#14706b"/><text x="302" y="54" fill="#14706b" font-weight="600">그 외 (-1 · 양수)</text><text x="302" y="72" fill="#1f3d3a">예산 = page_latch_timeout (300 s)</text>
+          <text x="14" y="112">깨는 이유 셋:</text>
+          <text x="14" y="134">① unfix 가 깨움 → 래치 받음, NO_ERROR</text>
+          <text x="14" y="154">② 인터럽트 → ER_INTERRUPTED</text>
+          <text x="14" y="174">③ 예산 만료 → 트랜잭션 활성이면 다시 잔다(try_again), 아니면 victim</text>
+          <text x="14" y="194" opacity=".7">:7237 · :7248 · :7375</text>
+        </g>
+      </svg>
+    </figure></div>
+    <div class="card proof"><span class="kicker">왜 old 를 따로 두나</span><h3>만료 때 <b>어떤 오류</b>를 낼지는 원래 값으로 고른다</h3><p>-1(무한)인데 만료 → "있을 수 없는 일": <code>assert (0)</code> + <code>ER_LK_UNILATERALLY_ABORTED</code> — 트랜잭션을 죽인다.<br>양수 → <code>ER_PAGE_LATCH_TIMEDOUT</code> + <code>ER_LK_PAGE_TIMEOUT</code> — 정상 타임아웃.<br><b>0 또는 -2 → 아무 오류 없이 <code>ER_FAILED</code></b> (:7375).</p></div>
+  </div>
+  <p class="one">300초는 숨은 파라미터 <code>page_latch_timeout_in_msecs</code> 입니다(:107, :1648). 트랜잭션의 <code>lock_timeout</code> 이 아닙니다.</p>
+</section>
+
+<!-- 10 대기 시간 출처 -->
+<section class="slide" id="s10">
+  <div class="eyebrow"><span class="num">09</span><span>대기 시간은 누구 것인가</span><span class="bar"></span><span>PR#8034 (CBRD-27486, 미머지)</span></div>
+  <h2>대기 시간은 <b>트랜잭션의 것</b>이었다 — PR#8034 뒤엔 <b>스레드 값이 먼저</b>, 없으면 트랜잭션 값</h2>
+  <div class="figbox"><figure>
+    <svg viewBox="0 0 900 180" role="img" aria-label="대기 시간 조회의 우선순위: 스레드 override 먼저, 없으면 TDES">
+      <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
+        <rect x="20" y="30" width="270" height="70" rx="6" fill="none" stroke="currentColor"/><text x="34" y="54">logtb_find_current_wait_msecs</text><text x="34" y="76" font-size="12" opacity=".7">pgbuf_find_current_wait_msecs 도 같은 규칙</text>
+        <rect x="360" y="14" width="240" height="56" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="374" y="36" fill="#14706b" font-weight="600">① THREAD_ENTRY</text><text x="374" y="56" font-size="12" fill="#1f3d3a">wait_msecs_override ≠ -3 이면 그것</text>
+        <rect x="360" y="90" width="240" height="56" rx="6" fill="#e7e3f2" stroke="#5b4b8a" stroke-width="1.5"/><text x="374" y="112" fill="#5b4b8a" font-weight="600">② LOG_TDES</text><text x="374" y="132" font-size="12" fill="#3a2f5c">tdes-&gt;wait_msecs — lock_timeout</text>
+        <text x="620" y="36" font-size="12">엔진이 잠깐 세우는 값 (7곳)</text><text x="620" y="54" font-size="12" opacity=".7">bestspace 프로브 -2 · 롤백 -1 · 검증 -1 …</text>
+        <text x="620" y="112" font-size="12">사용자가 정한 값</text><text x="620" y="130" font-size="12" opacity=".7">같은 트랜잭션의 모든 스레드가 읽는다</text>
+        <text x="20" y="168" font-size="12" fill="#a85b16">PR 이전엔 ①이 없었다 — 엔진의 임시값도 ②에 썼고, 병렬 워커가 그걸 같이 봤다. 형제 스레드의 저장/복원이 겹치면 임시값이 세션에 남았다.</text>
+      </g>
+      <g stroke="currentColor" fill="none" opacity=".5" marker-end="url(#ar)"><line x1="292" y1="55" x2="356" y2="42"/><line x1="292" y1="75" x2="356" y2="118"/></g>
+    </svg>
+    <figcaption>-3 은 <code>LK_WAIT_NOT_OVERRIDDEN</code> — "내 값 없음". 스레드가 태스크를 마치면 <code>retire_context ()</code> 가 -3 으로 되돌린다.</figcaption>
+  </figure></div>
+  <p><small>PR 이 ①로 옮긴 곳: bestspace <code>L1_fix</code> · <code>btree_set_error</code> · disk manager 3곳 · <code>heap_does_exist</code> · <code>log_rollback</code>. ②에 남긴 곳: 문장의 LOCK_TIMEOUT 힌트 · 온라인 인덱스 빌드 락 승격 · compactdb · lock dump (다른 트랜잭션·교착 탐지기가 봐야 하므로).</small></p>
+</section>
+
+<!-- 11 깨우기 -->
+<section class="slide" id="s11">
+  <div class="eyebrow"><span class="num">10</span><span>돌려주기 · 깨우기</span><span class="bar"></span><span>pgbuf_unlatch_bcb_upon_unfix :6591 · pgbuf_wakeup_reader_writer :7391</span></div>
+  <h2><code>unfix</code> 는 fcnt 를 하나 줄이고, <b>0 이 되면</b> 줄 선 사람을 깨운다 — 규칙은 넷</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>큐에 있는 것</th><th>어떻게</th><th>왜</th></tr></thead>
+    <tbody>
+      <tr><td>request 가 NO_LATCH</td><td>큐에서 뺀다, 안 깨운다</td><td>타임아웃·인터럽트로 이미 포기한 스레드 (:7420)</td></tr>
+      <tr><td>FLUSH 대기</td><td>그냥 둔다</td><td>래치가 아니라 "flush 끝나면" 표식 — flush 가 깨운다 (:7432)</td></tr>
+      <tr><td class="mono">READ</td><td class="pick">머리의 리더를 <b>전부</b> 깨운다</td><td>같이 들 수 있으니 한꺼번에</td></tr>
+      <tr><td class="mono">WRITE</td><td class="pick"><b>첫 하나</b>만 깨운다</td><td>WRITE 는 혼자 든다</td></tr>
+    </tbody>
+  </table></div>
+  <p class="one">깨어난 스레드는 <b>깨운 쪽이 이미 fcnt 와 latch_mode 를 대신 써 준 상태</b>로 일어납니다(:7471). 일어나서 다시 경쟁하지 않습니다.</p>
+  <p><small>타임아웃으로 스스로 포기할 때는 <code>pgbuf_timed_sleep_error_handling</code>(:7131) 이 큐에서 자기를 빼고, 자기가 맨 앞이었으면 뒤 사람을 대신 깨워 준다(:7195). 안 그러면 뒤 사람이 영원히 잔다.</small></p>
+</section>
+
+<!-- 12 holder -->
+<section class="slide" id="s12">
+  <div class="eyebrow"><span class="num">11</span><span>장부</span><span class="bar"></span><span>pgbuf_holder :440 · pgbuf_unfix_all :3186</span></div>
+  <h2>스레드마다 <b>"내가 쥔 페이지 목록"</b> 이 있다 — 그래서 누수를 잡을 수 있다</h2>
+  <div class="cols two">
+    <div class="card gate"><span class="kicker">PGBUF_HOLDER</span><h3>BCB 하나당 한 줄: fix_count · bufptr · watcher 들</h3><p>같은 스레드가 같은 페이지를 두 번 fix 하면 새 줄이 아니라 <code>fix_count</code> 가 2 가 된다. debug 빌드는 <code>fixed_at</code> 에 어느 파일:줄에서 잡았는지까지 적는다 — "누가 안 놓았나" 를 찾는 첫 단서.</p></div>
+    <div class="card read"><span class="kicker">요청이 끝날 때</span><h3><code>pgbuf_unfix_all</code> 이 남은 줄을 본다</h3><p>하나라도 남아 있으면 <b>debug 는 <code>assert (false)</code></b>(:3211), release 는 대신 놓아 준다. 즉 "fix 하고 unfix 안 한 함수" 는 그 요청이 끝나는 순간 들킨다. 단, 요청이 끝나기 전까지는 다른 스레드가 그 페이지에서 300초를 기다린다.</p></div>
+  </div>
+  <p class="one">규칙: <b>성공한 모든 <code>pgbuf_fix</code> 는 같은 함수 안의 <code>pgbuf_unfix</code> 또는 <code>pgbuf_set_dirty (…, FREE)</code> 와 짝</b>. 에러 경로도 예외가 아닙니다.</p>
+</section>
+
+<!-- 13 승격 -->
+<section class="slide" id="s13">
+  <div class="eyebrow"><span class="num">12</span><span>승격</span><span class="bar"></span><span>pgbuf_promote_read_latch, page_buffer.c:2751</span></div>
+  <h2>READ 로 보다가 고치고 싶으면 — <b>혼자면 제자리 승격, 아니면 놓고 맨 앞에 줄 선다</b></h2>
+  <div class="cols three">
+    <div class="card gate"><span class="kicker">내가 유일한 홀더</span><h3>제자리 승격</h3><p><code>holder-&gt;fix_count == fcnt</code> 면 워드의 latch_mode 만 WRITE 로 바꾼다. 아무도 못 끼어든다(:2826).</p></div>
+    <div class="card proof"><span class="kicker">다른 리더가 있음 · SHARED_READER</span><h3>놓고, 승격자로 맨 앞에</h3><p>내 fix 를 전부 놓고 <code>wait_for_latch_promote</code> 를 켠 채 <code>pgbuf_block_bcb</code> 에 "맨 앞" 으로 들어간다(:2892). 승격자는 하나만 있을 수 있다(:7006 assert).</p></div>
+    <div class="card read"><span class="kicker">다른 리더가 있음 · ONLY_READER</span><h3>실패로 돌려준다</h3><p><code>ER_PAGE_LATCH_PROMOTE_FAIL</code> (notification, :2847). 호출자는 페이지를 놓고 <b>root 부터 다시 내려온다</b> — B-tree 가 이 조건을 쓴다.</p></div>
+  </div>
+  <p class="one">놓았다 다시 잡는 사이 <b>페이지 내용이 바뀌었을 수 있습니다.</b> 승격 뒤 코드는 놓기 전에 읽은 값을 믿으면 안 됩니다.</p>
+</section>
+
+<!-- 14 순서 -->
+<section class="slide" id="s14">
+  <div class="eyebrow"><span class="num">13</span><span>순서 규칙</span><span class="bar"></span><span>page_buffer.c:7081 주석</span></div>
+  <h2>래치는 <b>데드락을 감지하지 않는다</b> — 그래서 두 장을 잡을 땐 <b>순서</b>가 전부다</h2>
+  <div class="figbox"><figure>
+    <svg viewBox="0 0 900 150" role="img" aria-label="두 스레드가 서로 반대 순서로 두 페이지를 잡아 영원히 기다리는 그림">
+      <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
+        <rect x="20" y="30" width="170" height="50" rx="6" fill="#f6e6d6" stroke="#a85b16"/><text x="34" y="52" fill="#a85b16" font-weight="600">스레드 A</text><text x="34" y="70" font-size="12" fill="#5a3410">P1 WRITE 쥠 → P2 요청</text>
+        <rect x="365" y="10" width="170" height="40" rx="6" fill="none" stroke="currentColor"/><text x="379" y="35">페이지 P1</text>
+        <rect x="365" y="90" width="170" height="40" rx="6" fill="none" stroke="currentColor"/><text x="379" y="115">페이지 P2</text>
+        <rect x="710" y="30" width="170" height="50" rx="6" fill="#f6e6d6" stroke="#a85b16"/><text x="724" y="52" fill="#a85b16" font-weight="600">스레드 B</text><text x="724" y="70" font-size="12" fill="#5a3410">P2 WRITE 쥠 → P1 요청</text>
+        <text x="200" y="140" font-size="12" fill="#a85b16">둘 다 300초를 잔다. 만료되면 한쪽이 victim — debug 빌드는 그 자리에서 assert (0).</text>
+      </g>
+      <g stroke="currentColor" fill="none" opacity=".5" marker-end="url(#ar)"><line x1="192" y1="45" x2="361" y2="30"/><line x1="192" y1="65" x2="361" y2="105" stroke-dasharray="5 4"/><line x1="708" y1="65" x2="539" y2="110"/><line x1="708" y1="45" x2="539" y2="30" stroke-dasharray="5 4"/></g>
+    </svg>
+    <figcaption>코드의 결정(:7081): "래치 사이 데드락이 없다고 보장하지 않는다. 대신 못 받으면 timed sleep 으로 막고, 깨어나면 victim 으로 다룬다."</figcaption>
+  </figure></div>
+  <div class="cols two">
+    <div class="card gate"><span class="kicker">B-tree</span><h3>부모 → 자식 (래치 커플링)</h3><p>내려가면서 자식을 잡은 뒤 부모를 놓는다. 위로 올라가야 하면(분할·병합) 놓고 root 부터. 형제로 옆걸음할 땐 <b>조건부</b>로 — 반대 방향 스캔과 만나면 데드락이라서.</p></div>
+    <div class="card proof"><span class="kicker">힙</span><h3>VPID 순 — <code>pgbuf_ordered_fix</code></h3><p>헤더 페이지 → 일반 페이지 → 오버플로 순서를 코드가 강제한다. 다음 장.</p></div>
+  </div>
+</section>
+
+<!-- 15 ordered fix -->
+<section class="slide" id="s15">
+  <div class="eyebrow"><span class="num">14</span><span>순서 fix</span><span class="bar"></span><span>pgbuf_ordered_fix, page_buffer.c:12186 · PGBUF_WATCHER page_buffer.h:240</span></div>
+  <h2>순서가 어긋나게 잡아야 하면 — <b>쥔 걸 다 놓고, 정렬해서, 순서대로 다시 잡는다</b></h2>
+  <div class="steps">
+    <div><span class="n">① watcher 를 들고 온다</span><p><code>PGBUF_INIT_WATCHER (w, rank, hfid)</code> — 그룹(힙 헤더 VPID)과 등급(HDR 0 &lt; NORMAL 1 &lt; OVERFLOW 2)을 적는다.</p></div>
+    <div><span class="n">② 먼저 조건부로</span><p>이미 쥔 페이지가 있으면 <b>조건부</b>로 시도한다(:12262). 되면 끝 — 대부분 여기서 끝난다.</p></div>
+    <div><span class="n">③ 안 되면 전부 놓는다</span><p>내 holder 리스트의 watcher 달린 페이지를 모두 unfix 하고 (그룹, 등급, VPID) 로 정렬.</p></div>
+    <div><span class="n">④ 순서대로 다시</span><p>정렬 순으로 무조건 fix. 요청 페이지도 그 자리에 끼워 잡는다.</p></div>
+    <div><span class="n">⑤ 호출자에게 알린다</span><p>다시 잡힌 watcher 는 <code>page_was_unfixed = true</code>. <b>놓았다 잡은 사이 내용이 바뀌었을 수 있다</b>는 신호.</p></div>
+    <div><span class="n">⑥ 규칙 위반은 치명</span><p>같은 페이지의 watcher 끼리 등급·그룹이 다르면 <code>ER_PB_ORDERED_INCONSISTENCY</code> (fatal, :12468).</p></div>
+  </div>
+  <p class="one">그래서 watcher 를 쓰는 경로에서 watcher 없이 <code>pgbuf_fix</code> 를 부르면 ③이 그 페이지를 못 놓고 순서가 깨집니다(:12429 assert).</p>
+</section>
+
+<!-- 16 fetch 모드 -->
+<section class="slide" id="s16">
+  <div class="eyebrow"><span class="num">15</span><span>fetch 모드 · vacuum</span><span class="bar"></span><span>page_buffer.h:174~184</span></div>
+  <h2>"어떤 페이지를 기대하나" 를 fix 에 같이 말한다 — <b>vacuum 이 지금도 지우고 있어서</b></h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>모드</th><th>뜻</th><th>언제</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">OLD_PAGE</td><td>이미 할당된 페이지. 없으면 오류</td><td>기본</td></tr>
+      <tr><td class="mono">NEW_PAGE</td><td>방금 할당한 페이지. 디스크에서 안 읽고 만든다</td><td>파일 확장 직후</td></tr>
+      <tr><td class="mono">OLD_PAGE_MAYBE_DEALLOCATED</td><td>그 사이 해제됐을 수 있음. 해제됐으면 <b>경고 수준</b> 오류로 NULL</td><td>bestspace 처럼 오래된 힌트로 찾아갈 때</td></tr>
+      <tr><td class="mono pick">OLD_PAGE_PREVENT_DEALLOC</td><td>래치를 받기 전까지 <b>해제 금지 카운터</b>를 올려 둔다</td><td>vacuum 과 경주하는 힙 스캔</td></tr>
+      <tr><td class="mono">OLD_PAGE_IF_IN_BUFFER</td><td>버퍼에 있을 때만, 없으면 조용히 NULL</td><td>있으면 좋고 없어도 되는 최적화</td></tr>
+    </tbody>
+  </table></div>
+  <p><small>해제 금지 카운터는 성능 장치가 아니라 <b>정합성 장치</b>다 — 빠른 길(:2267)이 등록 없이 꼬리(:2447)에서 해제해 반쪽 회계가 되는 열린 결함이 있다(CBRD-27263, 미수정). 모듈 노트 src-storage §3.</small></p>
+</section>
+
+<!-- 17 dirty flush -->
+<section class="slide" id="s17">
+  <div class="eyebrow"><span class="num">16</span><span>더티 · flush</span><span class="bar"></span><span>pgbuf_set_dirty :4823 · PGBUF_LATCH_FLUSH</span></div>
+  <h2>고쳤으면 <b>unfix 전에</b> dirty 를 찍는다 — 그리고 로그가 페이지보다 먼저다</h2>
+  <div class="cols three">
+    <div class="card gate"><span class="kicker">순서</span><h3>로그 append → 페이지 수정 → set_dirty → unfix</h3><p><code>pgbuf_set_dirty (…, FREE)</code> 는 dirty 마크와 unfix 를 한 번에 한다. dirty 를 unfix 뒤에 찍으면 그 사이 flush 된 깨끗한 척하는 페이지가 남는다.</p></div>
+    <div class="card proof"><span class="kicker">oldest_unflush_lsa</span><h3>"이 페이지의 첫 미반영 로그"</h3><p>flush 데몬이 이 LSA 보다 로그가 먼저 디스크에 갔는지 확인하고 페이지를 쓴다 — WAL 규칙(INV-5). unfix 때 dirty 인데 LSA 가 비어 있으면 assert(:6650).</p></div>
+    <div class="card read"><span class="kicker">FLUSH 대기</span><h3>래치가 아니다</h3><p><code>PGBUF_LATCH_FLUSH</code> 로 줄 서는 스레드는 "이 페이지가 디스크에 내려갈 때까지" 기다리는 것. unfix 는 이걸 안 깨운다(§10). flush 가 끝나야 깨운다.</p></div>
+  </div>
+</section>
+
+<!-- 18 함정 -->
+<section class="slide" id="s18">
+  <div class="eyebrow"><span class="num">17</span><span>함정 셋</span><span class="bar"></span><span>전부 실제 사례 · 2026-08 ~ 09</span></div>
+  <h2>신입이 밟는 곳은 정해져 있다 — <b>대기 시간을 만질 때</b></h2>
+  <div class="cols three">
+    <div class="card read"><span class="kicker">① 래치 쥔 채 락 대기</span><h3>감지 없는 데드락</h3><p>페이지 래치를 든 채 <code>lock_object</code> 로 들어가면, 그 락을 쥔 트랜잭션이 내 페이지를 기다릴 때 둘 다 300초. 래치는 함수 안에서 끝내고 나서 락을 잡는다.</p></div>
+    <div class="card read"><span class="kicker">② 오류 없는 NULL</span><h3>-2 창에 끼어든 다른 fix</h3><p>bestspace 가 -2 를 세운 동안 debug 의 페이지 검증이 볼륨 헤더를 fix 하면 강등 → 거부 → 오류 없음 → <code>ASSERT_ERROR_AND_SET</code> 가 죽인다. CBRD-27198 이 볼륨 헤더만 막고(<code>force_latch_wait</code>), PR#8034 가 일반화. <b>사용자의 <code>lock_timeout=0</code> 도 같은 else 로 떨어진다</b>(:7375, CBRD-27355 미해결).</p></div>
+    <div class="card read"><span class="kicker">③ 임시값을 공유 칸에</span><h3>TDES 에 쓰면 형제가 본다</h3><p>"잠깐 -1 로 했다 되돌리기" 를 <code>tdes-&gt;wait_msecs</code> 에 하면 병렬 워커가 그 사이 그 값을 읽고, 저장/복원이 겹치면 세션에 남는다(CBRD-27183 → 27486). 스레드 값(§09)이 생긴 이유. 아직 TDES 에 남은 자리도 있다 — <code>lock_object_wait_msecs</code>.</p></div>
+  </div>
+</section>
+
+<!-- 19 체크리스트 -->
+<section class="slide" id="s19">
+  <div class="eyebrow"><span class="num">18</span><span>리뷰 체크리스트</span><span class="bar"></span><span>src/storage/AGENTS.md · src-storage §2</span></div>
+  <h2>래치 코드를 <b>쓰거나 리뷰할 때</b> 여섯 줄</h2>
+  <ul class="simple">
+    <li><b>짝</b> — 성공한 fix 마다 unfix 또는 <code>set_dirty (…, FREE)</code>. 에러 경로 포함. <code>pgbuf_unfix_and_init</code> 로 포인터도 지운다.</li>
+    <li><b>순서</b> — dirty 는 unfix 보다 먼저, 로그는 페이지 수정보다 먼저.</li>
+    <li><b>쥔 채 하지 않는 것</b> — 락 대기, 다른 페이지 무조건 fix, I/O 대기.</li>
+    <li><b>watcher</b> — ordered fix 를 쓰는 경로에서 watcher 없는 fix 금지. <code>page_was_unfixed</code> 뒤엔 읽은 값을 다시 읽는다.</li>
+    <li><b>NULL 이 오면</b> — <code>er_errid ()</code> 를 본다. 0 이면 누가 -2 창 안에서 강등시킨 것. <code>ER_LK_PAGE_TIMEOUT</code> 은 정상 사건 — 재시도 가능한 호출자인지 확인.</li>
+    <li><b>대기 시간을 바꾸면</b> — 스레드 값(<code>logtb_set_thread_wait_msecs</code>)으로, 같은 함수 안에서 복원. TDES 에 쓰는 순간 형제 워커의 문제다.</li>
+  </ul>
+</section>
+
+<!-- 20 퀴즈 -->
+<section class="slide" id="s20">
+  <div class="eyebrow"><span class="num">19</span><span>확인 퀴즈</span><span class="bar"></span><span>답은 덱에 없다 — 세션에서 답한다</span></div>
+  <h2>읽었으면 <b>코드로</b> 답할 수 있는 것만</h2>
+  <div class="ask">
+    <div><span class="q">Q1</span><p><b>READ 래치가 걸린 페이지에 새 READ 요청이 왔는데 줄을 서야 하는 경우는? 그 판정에 쓰는 워드의 필드 이름은?</b> (§05)</p></div>
+    <div><span class="q">Q2</span><p><b>무조건 fix 가 호출자 모르게 조건부가 되는 조건과, 거부됐을 때 오류가 설정되는 값·안 되는 값은?</b> (§06)</p></div>
+    <div><span class="q">Q3</span><p><b><code>pgbuf_timed_sleep</code> 이 실제로 자는 길이는 누가 정하고, 만료 때 오류 종류는 무엇으로 고르나?</b> (§08)</p></div>
+  </div>
+</section>
+
+<!-- 21 퀴즈 ② -->
+<section class="slide" id="s21">
+  <div class="eyebrow"><span class="num">20</span><span>확인 퀴즈 ②</span><span class="bar"></span><span>못 맞추면 그 장을 다시</span></div>
+  <h2>PR#8034 를 읽을 수 있는지</h2>
+  <div class="ask">
+    <div><span class="q">Q4</span><p><b>unfix 로 fcnt 가 0 이 됐을 때 큐에 [READ, READ, WRITE, READ] 가 있으면 누가 깨어나나?</b> (§10)</p></div>
+    <div><span class="q">Q5</span><p><b>스레드 값이 -2 인 채 볼륨 헤더를 fix 하면 <code>pgbuf_force_latch_wait</code> 는 무엇을 세우고, 나올 때 무엇으로 복원되나?</b> (§09)</p></div>
+    <div><span class="q">Q6</span><p><b>ordered fix 가 "쥔 걸 다 놓고 다시 잡은" 뒤 호출자는 무엇을 보고 그 사실을 알고, 왜 알아야 하나?</b> (§14)</p></div>
+  </div>
+  <div class="meta" style="margin-top:6px"><span>앞편 <b>latch-lock-mvcc-deck.html</b></span><span>모듈 노트 <b>src-storage §2 · §3</b></span><span>리뷰 <b>projects/CBRD-27486/리뷰보고서-PR8034.md</b></span></div>
+</section>
