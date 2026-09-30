@@ -240,7 +240,14 @@ cards_mod=''.join('<a class="card" href="%s"><span class="nm">%s</span><div clas
 readme=open('README.md').read()
 intro=md2html('\n'.join(readme.split('\n')[1:]).split('## 리포 구성')[0])
 rules=md2html('## 공유 규약'+readme.split('## 공유 규약',1)[1]) if '## 공유 규약' in readme else ''
-home_inner=intro+'<h2>공통 문서</h2><div class="cards">'+cards_doc+'</div><h2>모듈</h2><div class="cards">'+cards_mod+'</div>'+rules
+# 교육 자료: education/*.html 을 site/education/ 으로 복사하고 카드로 건다 (2026-09-30)
+import shutil
+EDU=[('latch-lock-mvcc.html','래치 · 락 · MVCC 입문','세 층의 동시성 구현 + 문장별 락 표 + Oracle 대조 · 신입용')]
+os.makedirs('site/education', exist_ok=True)
+for fn,_,_ in EDU:
+    if os.path.exists('education/'+fn): shutil.copyfile('education/'+fn, 'site/education/'+fn)
+cards_edu=''.join('<a class="card" href="education/%s"><span class="nm">%s</span><div class="st"><span>%s</span></div></a>'%(fn,html.escape(t),html.escape(d)) for fn,t,d in EDU if os.path.exists('education/'+fn))
+home_inner=intro+'<h2>공통 문서</h2><div class="cards">'+cards_doc+'</div><h2>모듈</h2><div class="cards">'+cards_mod+'</div>'+('<h2>교육 자료</h2><div class="cards">'+cards_edu+'</div>' if cards_edu else '')+rules
 open('site/index.html','w').write(shell('index.html','CUBRID 소스 노트',home_inner,
   'AGENTS.md 증류 + 컨테이너(.50/.51/.52) 축적 지식 — 모듈별 목적·분석·예비 이슈. git이 정본, 이 사이트는 웹 뷰.'))
 print("생성:", sorted(os.listdir('site'))[:6], "... 총", len(os.listdir('site')), "파일")

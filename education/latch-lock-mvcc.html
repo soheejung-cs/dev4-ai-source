@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>래치·락·MVCC 입문</title>
+<meta name="description" content="CUBRID 동시성 세 층 — 페이지 래치, 트랜잭션 락, MVCC 가 어떻게 구현돼 있고 문장별로 무슨 락을 잡는지. 신입 교육 자료. 기준 develop 0d0809963 (2026-09-30).">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --bg:#F2F3F1; --panel:#FFFFFF; --ink:#1C242C; --muted:#5E6B74; --line:#D9DEE1;
+  --accent:#33608C; --accent-ink:#2A4F73;
+  --ck:#155E42; --ck-bg:#EDF6F1; --ck-line:#BFDCCB;
+  --warn:#8A4B00; --warn-bg:#FBF2E4; --warn-line:#EBCF9A;
+  --code-bg:#ECEFF1; --code-ink:#31556E;
+  --latch:#0E6B6F; --latch-bg:#E4F2F1; --lock:#33608C; --lock-bg:#E8EEF6; --mvcc:#6B4E9E; --mvcc-bg:#EFEAF7;
+  --bad:#9E2B2B; --bad-bg:#FBEAEA;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12171C; --panel:#1A2129; --ink:#DAE2E8; --muted:#8A97A1; --line:#2A333C;
+  --accent:#7FA9D4; --accent-ink:#9FC0E2;
+  --ck:#7CC7A4; --ck-bg:#15231D; --ck-line:#25473A;
+  --warn:#E0AE55; --warn-bg:#241C10; --warn-line:#4A3A1C;
+  --code-bg:#212A33; --code-ink:#9CC1DB;
+  --latch:#5FBEC2; --latch-bg:#12292B; --lock:#7FA9D4; --lock-bg:#182534; --mvcc:#B49AE0; --mvcc-bg:#241D33;
+  --bad:#E08A8A; --bad-bg:#2E1A1A;
+}}
+:root[data-theme="dark"]{
+  --bg:#12171C; --panel:#1A2129; --ink:#DAE2E8; --muted:#8A97A1; --line:#2A333C;
+  --accent:#7FA9D4; --accent-ink:#9FC0E2;
+  --ck:#7CC7A4; --ck-bg:#15231D; --ck-line:#25473A;
+  --warn:#E0AE55; --warn-bg:#241C10; --warn-line:#4A3A1C;
+  --code-bg:#212A33; --code-ink:#9CC1DB;
+  --latch:#5FBEC2; --latch-bg:#12292B; --lock:#7FA9D4; --lock-bg:#182534; --mvcc:#B49AE0; --mvcc-bg:#241D33;
+  --bad:#E08A8A; --bad-bg:#2E1A1A;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans KR",system-ui,sans-serif;font-size:15px;line-height:1.75;-webkit-font-smoothing:antialiased}
+code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.85em;background:var(--code-bg);color:var(--code-ink);padding:.06em .3em;border-radius:3px;word-break:break-word}
+pre{background:var(--code-bg);color:var(--ink);padding:14px 16px;border-radius:8px;overflow:auto;font-family:"JetBrains Mono",monospace;font-size:.82em;line-height:1.6}
+pre code{background:none;padding:0;color:inherit}
+a{color:var(--accent)}
+header.top{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+header.top a.home{font-family:"Gothic A1",sans-serif;font-weight:800;text-decoration:none;color:var(--ink)}
+header.top .meta{color:var(--muted);font-size:.85em}
+main{max-width:1040px;margin:0 auto;padding:24px 16px 80px}
+h1{font-family:"Gothic A1",sans-serif;font-weight:800;font-size:1.9em;line-height:1.25;margin:.2em 0 .3em}
+.lede{color:var(--muted);margin:0 0 1.6em;font-size:1.02em}
+h2{font-family:"Gothic A1",sans-serif;font-weight:800;font-size:1.35em;margin:2.2em 0 .6em;padding-top:.4em;border-top:1px solid var(--line)}
+h3{font-family:"Gothic A1",sans-serif;font-weight:700;font-size:1.08em;margin:1.4em 0 .4em}
+.tag{display:inline-block;font-family:"Gothic A1",sans-serif;font-weight:700;font-size:.78em;padding:.1em .55em;border-radius:999px;margin-right:.3em;vertical-align:middle}
+.t-latch{background:var(--latch-bg);color:var(--latch)} .t-lock{background:var(--lock-bg);color:var(--lock)} .t-mvcc{background:var(--mvcc-bg);color:var(--mvcc)}
+table{border-collapse:collapse;width:100%;margin:.6em 0 1.2em;font-size:.93em;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:.45em .7em;vertical-align:top;text-align:left}
+th{background:var(--code-bg);font-family:"Gothic A1",sans-serif;font-weight:700;white-space:nowrap}
+td.none{color:var(--muted);font-style:italic}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:1em 0}
+.key{background:var(--ck-bg);border:1px solid var(--ck-line);border-radius:10px;padding:12px 18px;margin:1em 0}
+.key b{color:var(--ck)}
+.warn{background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:10px;padding:12px 18px;margin:1em 0}
+.warn b{color:var(--warn)}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:1em 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.card h3{margin:.1em 0 .4em}
+.card.latch{border-top:4px solid var(--latch)} .card.lock{border-top:4px solid var(--lock)} .card.mvcc{border-top:4px solid var(--mvcc)}
+figure{margin:1.2em 0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+figure svg{width:100%;height:auto;display:block}
+figcaption{color:var(--muted);font-size:.86em;margin-top:.5em}
+svg text{font-family:"Noto Sans KR",system-ui,sans-serif;font-size:13px;fill:var(--ink)}
+svg text.mono{font-family:"JetBrains Mono",monospace;font-size:12px}
+svg text.small{font-size:11.5px;fill:var(--muted)}
+svg .bx{fill:var(--panel);stroke:var(--line);stroke-width:1.2}
+svg .latch{fill:var(--latch-bg);stroke:var(--latch)} svg .lock{fill:var(--lock-bg);stroke:var(--lock)} svg .mvcc{fill:var(--mvcc-bg);stroke:var(--mvcc)}
+svg .bad{fill:var(--bad-bg);stroke:var(--bad)}
+svg .ar{stroke:var(--muted);stroke-width:1.4;fill:none;marker-end:url(#ah)}
+svg .ar2{stroke:var(--accent);stroke-width:1.6;fill:none;marker-end:url(#ah2)}
+details{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 16px;margin:.7em 0}
+summary{cursor:pointer;font-weight:700;font-family:"Gothic A1",sans-serif}
+details[open] summary{margin-bottom:.4em}
+.src{font-size:.86em;color:var(--muted)}
+.src code{font-size:.9em}
+ol.steps li{margin:.3em 0}
+@media (max-width:640px){main{padding:16px 16px 60px} h1{font-size:1.5em}}
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="home" href="../index.html">CUBRID 소스 노트</a>
+  <span class="meta">교육 자료 · 기준 develop <code>0d0809963</code> (2026-09-30) · 작성 정소희(.51) + Claude</span>
+</header>
+<main>
+<h1>래치 · 락 · MVCC — 세 층의 동시성이 어떻게 구현돼 있나</h1>
+<p class="lede">신입 엔지니어용. "DB 서버 안에서 수십 개 스레드가 같은 데이터를 동시에 만지는데 왜 안 깨지나"를 세 층으로 나눠 설명하고, <b>문장별로 무슨 락을 잡고 무엇을 잡지 않는지</b>를 표로 정리한다. 모든 주장에 <code>파일:줄</code>을 붙였다 — 코드로 확인하는 습관이 이 문서의 목표다.</p>
+
+<div class="key"><b>핵심 문장 하나.</b> 래치는 <b>"지금 이 순간 이 페이지를 만지는 스레드"</b>를, 락은 <b>"이 트랜잭션이 끝날 때까지 이 데이터의 소유권"</b>을, MVCC 는 <b>"각 트랜잭션이 어떤 버전을 보느냐"</b>를 결정한다. 셋은 서로 대체가 안 된다.</div>
+
+<h2>0. 한 눈에 — 세 층은 서로 다른 것을 지킨다</h2>
+<table>
+<thead><tr><th></th><th><span class="tag t-latch">래치</span>latch</th><th><span class="tag t-lock">락</span>lock</th><th><span class="tag t-mvcc">MVCC</span>다중 버전</th></tr></thead>
+<tbody>
+<tr><th>지키는 것</th><td><b>메모리 페이지 한 장의 물리적 일관성</b> — 쓰는 도중 읽어 깨진 바이트를 보지 않게</td><td><b>트랜잭션 간 논리적 일관성</b> — 같은 행·테이블을 두 트랜잭션이 상충되게 바꾸지 않게</td><td><b>읽기가 쓰기를 기다리지 않게</b> — 각자 자기 시점의 버전을 본다</td></tr>
+<tr><th>단위</th><td>16KB 페이지</td><td>행(OID) · 클래스 · <b>트랜잭션(MVCCID)</b></td><td>행의 <b>버전</b></td></tr>
+<tr><th>얼마나 쥐나</th><td>µs~ms. <b>함수 하나 안에서</b> 잡고 놓는다</td><td><b>트랜잭션이 끝날 때까지</b> (commit/rollback)</td><td>버전은 vacuum 이 치울 때까지</td></tr>
+<tr><th>못 잡으면</th><td>대기 → 300초 타임아웃</td><td>대기 → <code>lock_timeout</code> 또는 데드락 감지</td><td>기다리지 않는다 (옛 버전을 읽는다)</td></tr>
+<tr><th>데드락</th><td><b>감지 안 함</b> — 순서 규칙 + 타임아웃</td><td>감지 스레드가 wait-for 그래프 검사</td><td>해당 없음</td></tr>
+<tr><th>코드</th><td><code>src/storage/page_buffer.c</code></td><td><code>src/transaction/lock_manager.c</code></td><td><code>src/transaction/mvcc.c</code> + 힙·B-tree·<code>src/query/vacuum.c</code></td></tr>
+</tbody></table>
+
+<h2>1. <span class="tag t-latch">래치</span> 페이지 버퍼가 준다</h2>
+<p>디스크 페이지는 그냥 못 읽는다. 반드시 <b>페이지 버퍼(pgbuf)</b>를 통해 메모리로 올려서 본다. 진입점이 <code>pgbuf_fix()</code>, 반납이 <code>pgbuf_unfix()</code>다. <b>래치 없는 fix 는 없다.</b></p>
+<pre><code>pgptr = pgbuf_fix (thread_p, &amp;vpid, OLD_PAGE, PGBUF_LATCH_READ, PGBUF_UNCONDITIONAL_LATCH);
+   ... 페이지를 읽거나 고친다 (고쳤으면 pgbuf_set_dirty) ...
+pgbuf_unfix (thread_p, pgptr);</code></pre>
+
+<figure>
+<svg viewBox="0 0 900 300" role="img" aria-labelledby="f1t"><title id="f1t">pgbuf_fix 경로 — BCB 의 atomic_latch 한 워드와 두 경로</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker>
+<marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--accent)"/></marker></defs>
+<rect class="bx" x="20" y="30" width="170" height="60" rx="8"/><text x="105" y="55" text-anchor="middle">호출자 (heap / btree)</text><text x="105" y="76" text-anchor="middle" class="mono">pgbuf_fix(vpid, READ|WRITE)</text>
+<path class="ar" d="M190 60 H240"/>
+<rect class="bx latch" x="240" y="20" width="220" height="80" rx="8"/><text x="350" y="46" text-anchor="middle">조건 검사</text><text x="350" y="66" text-anchor="middle" class="small">READ + OLD_PAGE + UNCONDITIONAL ?</text><text x="350" y="86" text-anchor="middle" class="small">tdes 가 zero-wait 면 CONDITIONAL 로 강등 (:2227)</text>
+<path class="ar2" d="M460 45 H520"/><text x="490" y="38" class="small" text-anchor="middle">예</text>
+<rect class="bx latch" x="520" y="20" width="180" height="50" rx="8"/><text x="610" y="42" text-anchor="middle">lock-free 빠른 경로</text><text x="610" y="60" text-anchor="middle" class="mono">pgbuf_lockfree_fix_ro :2267</text>
+<path class="ar" d="M460 80 H520"/><text x="490" y="98" class="small" text-anchor="middle">아니오</text>
+<rect class="bx" x="520" y="80" width="180" height="50" rx="8"/><text x="610" y="102" text-anchor="middle">정규 경로</text><text x="610" y="120" text-anchor="middle" class="small">해시 탐색 → BCB mutex → holder 등록</text>
+<path class="ar" d="M700 45 H760"/><path class="ar" d="M700 105 H760"/>
+<rect class="bx latch" x="760" y="30" width="120" height="90" rx="8"/><text x="820" y="55" text-anchor="middle">BCB</text><text x="820" y="76" text-anchor="middle" class="mono">atomic_latch</text><text x="820" y="94" text-anchor="middle" class="small">리더 수 | 라이터 | fix 수</text><text x="820" y="110" text-anchor="middle" class="small">CAS 한 워드 (:497)</text>
+<rect class="bx" x="20" y="150" width="860" height="130" rx="8"/>
+<text x="40" y="176" font-weight="700">잡는 규칙 (page_buffer.c)</text>
+<text x="40" y="200" class="small">· READ 는 여럿, WRITE 는 혼자. 모드는 <tspan class="mono">PGBUF_LATCH_READ / WRITE</tspan> (page_buffer.h:192~)</text>
+<text x="40" y="222" class="small">· UNCONDITIONAL = 될 때까지 대기, CONDITIONAL = 안 되면 즉시 NULL (page_buffer.h:201-202)</text>
+<text x="40" y="244" class="small">· 데드락 감지 없음 (:7081 주석) → 같은 파일 안 페이지 번호 순 <tspan class="mono">pgbuf_ordered_fix</tspan> + 300초 타임아웃 <tspan class="mono">page_latch_timeout_in_msecs</tspan>(숨은 파라미터)</text>
+<text x="40" y="266" class="small">· 디버그 빌드는 타임아웃 자리에서 assert → "래치 300초 코어" = 누가 WRITE 래치를 쥐고 안 놓았나를 찾는 문제</text>
+</svg>
+<figcaption>그림 1. <code>pgbuf_fix</code> 는 조건이 맞으면 해시 탐색·BCB 뮤텍스를 다 건너뛰는 lock-free 경로로 간다. 빠르지만 정규 경로만 하는 부수 작업이 빠지는 함정이 있다(§7 ③).</figcaption>
+</figure>
+
+<div class="warn"><b>신입이 지킬 규칙.</b> 래치는 잡은 함수가 놓는다. 래치를 쥔 채 <b>락을 기다리거나</b>(lock_object) <b>다른 페이지를 무조건 fix 하지</b> 않는다 — 데드락 감지가 없어서 300초 뒤 코어로 나타난다.</div>
+
+<h2>2. <span class="tag t-lock">락</span> 락 매니저가 준다</h2>
+<p>트랜잭션 수준의 소유권. 구현은 <b>전역 해시맵 하나</b>: 키 = <code>LK_RES_KEY</code>(lock_manager.h:148), 값 = 자원 <code>LK_RES</code>(누가 쥐고, 누가 기다리나) + 트랜잭션별 <code>LK_ENTRY</code>. 해제는 <b>트랜잭션 종료에 한꺼번에</b>(<code>lock_unlock_all</code>) — 그래서 2PL 이다.</p>
+
+<h3>2.1 자원 종류 4가지 (lock_manager.h:139-142)</h3>
+<table><thead><tr><th>종류</th><th>키</th><th>언제</th></tr></thead><tbody>
+<tr><td><code>LOCK_RESOURCE_INSTANCE</code></td><td>행 OID + 클래스 OID</td><td>UPDATE/DELETE/<code>FOR UPDATE</code> 대상 행</td></tr>
+<tr><td><code>LOCK_RESOURCE_CLASS</code></td><td>클래스 OID</td><td>테이블 단위 (인텐트 락 포함)</td></tr>
+<tr><td><code>LOCK_RESOURCE_ROOT_CLASS</code></td><td>루트 클래스</td><td>DDL</td></tr>
+<tr><td><code>LOCK_RESOURCE_TRANSACTION</code></td><td><b>MVCCID</b></td><td>INSERT 한 트랜잭션 자신의 <b>self-lock</b> — 2026-07 CBRD-26942(#7266) 추가. §4 참조</td></tr>
+</tbody></table>
+
+<h3>2.2 인텐트 락 — 왜 행을 잡기 전에 테이블에 IX 를 먼저 잡나</h3>
+<figure>
+<svg viewBox="0 0 900 250" role="img" aria-labelledby="f2t"><title id="f2t">클래스 IX 아래 행 X — 인텐트 락 계층</title>
+<rect class="bx lock" x="330" y="20" width="240" height="56" rx="8"/><text x="450" y="44" text-anchor="middle">클래스 <tspan class="mono">t</tspan></text><text x="450" y="64" text-anchor="middle" class="small">IX (쓰는 사람 있음) / IS (읽는 사람 있음) / SCH_M (DDL)</text>
+<path class="ar" d="M400 76 L200 130"/><path class="ar" d="M450 76 V130"/><path class="ar" d="M500 76 L700 130"/>
+<rect class="bx lock" x="120" y="130" width="160" height="50" rx="8"/><text x="200" y="152" text-anchor="middle">행 #1</text><text x="200" y="170" text-anchor="middle" class="small">X (UPDATE 중)</text>
+<rect class="bx" x="370" y="130" width="160" height="50" rx="8"/><text x="450" y="152" text-anchor="middle">행 #2</text><text x="450" y="170" text-anchor="middle" class="small">락 없음 (SELECT 는 스냅샷)</text>
+<rect class="bx lock" x="620" y="130" width="160" height="50" rx="8"/><text x="700" y="152" text-anchor="middle">행 #3</text><text x="700" y="170" text-anchor="middle" class="small">X (DELETE 중)</text>
+<text x="450" y="215" text-anchor="middle" class="small">DDL(SCH_M) 은 행을 일일이 안 봐도 클래스의 IX 하나로 "지금 쓰는 사람 있음" 을 알고 기다린다.</text>
+<text x="450" y="236" text-anchor="middle" class="small">행 락이 <tspan class="mono">lock_escalation</tspan> 개를 넘으면 클래스 락으로 승격 (lock_escalate_if_needed :3146) — 해시맵을 아낀다.</text>
+</svg>
+<figcaption>그림 2. 모드 계열: <code>NULL &lt; SCH_S &lt; IS &lt; S &lt; IX &lt; BU/SIX/U &lt; X &lt; SCH_M</code>. 호환 여부는 <code>lock_Comp</code> 표로 판정한다.</figcaption>
+</figure>
+
+<h3>2.3 대기와 데드락</h3>
+<ul>
+<li>못 잡으면 자원의 대기 큐에 선다. <code>lock_timeout</code> 이 지나면 <code>ER_LK_UNILATERAL_ABORT</code>.</li>
+<li>데드락은 감지 스레드가 <code>lock_detect_local_deadlock</code>(:544)로 wait-for 그래프에서 사이클을 찾아 한 트랜잭션을 희생시킨다.</li>
+<li>격리 수준이 영향을 주는 곳은 <b>S 락을 언제 놓느냐</b>다: READ COMMITTED 는 문장이 끝나면 놓고, REPEATABLE READ / SERIALIZABLE 은 트랜잭션 끝까지 쥔다 (<code>lock_unlock_object</code> :7213-7230). 기본은 READ COMMITTED (dbtran_def.h:53).</li>
+</ul>
+
+<h2>3. <span class="tag t-mvcc">MVCC</span> 행에 "누가 넣었고 누가 지웠나"를 적어 둔다</h2>
+<figure>
+<svg viewBox="0 0 900 330" role="img" aria-labelledby="f3t"><title id="f3t">MVCC 행 헤더와 스냅샷 가시성 판정</title>
+<text x="20" y="28" font-weight="700">힙의 행 하나 = MVCC_REC_HEADER (mvcc.h:38) + 데이터</text>
+<rect class="bx mvcc" x="20" y="40" width="130" height="44" rx="6"/><text x="85" y="58" text-anchor="middle" class="mono">mvcc_insid</text><text x="85" y="76" text-anchor="middle" class="small">넣은 트랜잭션</text>
+<rect class="bx mvcc" x="150" y="40" width="130" height="44" rx="6"/><text x="215" y="58" text-anchor="middle" class="mono">mvcc_delid</text><text x="215" y="76" text-anchor="middle" class="small">지운/갱신한 트랜잭션</text>
+<rect class="bx mvcc" x="280" y="40" width="170" height="44" rx="6"/><text x="365" y="58" text-anchor="middle" class="mono">prev_version_lsa</text><text x="365" y="76" text-anchor="middle" class="small">옛 버전이 undo 로그 어디에</text>
+<rect class="bx" x="450" y="40" width="200" height="44" rx="6"/><text x="550" y="66" text-anchor="middle">데이터 …</text>
+<text x="20" y="118" font-weight="700">MVCCID = 64비트 단조 증가, 절대 재사용 안 함 (≠ tran_index)</text>
+<text x="20" y="140" class="small">특수값: <tspan class="mono">MVCCID_NULL</tspan>=0 · <tspan class="mono">MVCCID_ALL_VISIBLE</tspan>=3 (vacuum 이 정리 끝낸 표시) · 실제 번호는 <tspan class="mono">MVCCID_FIRST</tspan>=4 부터 (storage_common.h:339-342)</text>
+<text x="20" y="178" font-weight="700">스냅샷 (MVCC_SNAPSHOT, mvcc.h:169) 으로 판정 — mvcc_satisfies_snapshot (mvcc.c:156)</text>
+<rect class="bx" x="20" y="190" width="860" height="36" rx="6"/>
+<rect x="21" y="191" width="250" height="34" fill="var(--ck-bg)"/><text x="146" y="213" text-anchor="middle" class="small">&lt; lowest_active_mvccid : 전부 끝남 (커밋 or 중단)</text>
+<rect x="271" y="191" width="360" height="34" fill="var(--warn-bg)"/><text x="451" y="213" text-anchor="middle" class="small">그 사이 : 비트맵으로 "아직 활성인가" 개별 판정</text>
+<rect x="631" y="191" width="248" height="34" fill="var(--bad-bg)"/><text x="755" y="213" text-anchor="middle" class="small">&gt; highest_completed : 전부 안 시작함</text>
+<text x="20" y="256" class="small">① insid 가 내 스냅샷에서 커밋됐나? 아니면 <b>안 보임</b>   ② delid 가 있고 그것도 커밋됐나? 그러면 지워진 것, <b>안 보임</b>   ③ 그 외 <b>보임</b></text>
+<text x="20" y="278" class="small">④ "너무 새 버전"(TOO_NEW) 이면 prev_version_lsa 를 따라 undo 로그에서 옛 버전을 꺼내 온다 — heap_get_visible_version_from_log</text>
+<text x="20" y="312" font-weight="700">청소 = vacuum 데몬 (src/query/vacuum.c)</text><text x="330" y="312" class="small">가장 오래된 활성 스냅샷보다 오래된 delid 를 가진 버전을 물리 삭제 (mvcc_satisfies_vacuum :321), 산 행은 ALL_VISIBLE 로 표시. <b>활성 트랜잭션과 동시에 돈다.</b></text>
+</svg>
+<figcaption>그림 3. 쓰기는 제자리 수정이 아니라 새 버전이다: INSERT 는 새 행(insid=나), DELETE 는 delid 만 적음, UPDATE 는 옛 버전을 undo 로그로 보내고 같은 자리에 새 버전.</figcaption>
+</figure>
+
+<h2>4. 문장별로 무슨 락을 잡고, 무엇을 잡지 않나</h2>
+<p>모든 문장은 두 단계다. <b>컴파일(클라이언트 측)</b> 에서 참조 클래스에 스키마 락을 걸고, <b>실행(서버 측)</b> 에서 클래스 인텐트 락과 행 락을 건다. 아래는 기본 격리 수준 READ COMMITTED, MVCC 클래스(일반 테이블) 기준이다.</p>
+<table>
+<thead><tr><th>문장</th><th>컴파일 시 클래스</th><th>실행 시 클래스</th><th>행</th><th>잡지 <b>않는</b> 것</th><th>근거</th></tr></thead>
+<tbody>
+<tr><td><code>SELECT</code></td><td><code>SCH_S</code> (스키마 읽기)</td><td><code>IS</code> (스캔 시작)</td><td class="none">없음 — 스냅샷으로 판정</td><td>행 S 락. 남의 미커밋 갱신 행을 만나도 <b>기다리지 않고</b> 옛 버전을 읽는다</td><td class="src"><code>locator_cl.c:3153</code> · <code>heap_file.c:6437 lock_scan(IS)</code> · <code>locator_cl.c:462</code></td></tr>
+<tr><td><code>SELECT … FOR UPDATE</code></td><td><code>SCH_S</code></td><td><code>IX</code></td><td><code>X</code> (결과 행마다)</td><td>—</td><td class="src"><code>query_executor.c:25015 qexec_for_update_set_class_locks</code> · <code>:171 / qexec_execute_selupd_list</code></td></tr>
+<tr><td><code>UPDATE</code> / <code>DELETE</code></td><td><code>SCH_S</code></td><td><code>IX</code></td><td><code>X</code> (대상 행)</td><td>클래스 X. 옛 코드 주석엔 "sequential 이면 X" 가 남아 있지만 MVCC 는 IX (<code>:25064</code> 주석)</td><td class="src"><code>query_executor.c:25064</code> · <code>heap_file.c:23920</code> · <code>locator_sr.c:5860</code></td></tr>
+<tr><td><code>INSERT</code></td><td><code>SCH_S</code></td><td><code>IX</code></td><td><b>새 슬롯 행의 X 는 생략</b> → 대신 <b>내 MVCCID 에 X</b> (self-lock)</td><td>행 X (MVCC 클래스, 새 슬롯 한정. 재사용 슬롯·비MVCC 클래스는 여전히 행 X)</td><td class="src"><code>query_executor.c:13255</code> · <code>heap_file.c:21285-21325</code> · <code>log_tran_table.c:4086</code></td></tr>
+<tr><td>unique / FK 검사 중 남의 미커밋 삽입 행을 만남</td><td>—</td><td>—</td><td>그 <b>inserter 의 MVCCID 에 S</b> → 대기 → 해제 → <b>root 부터 재탐색</b></td><td>행 락 (행엔 락이 없다)</td><td class="src"><code>btree.c:27365-27375</code></td></tr>
+<tr><td>DDL (<code>CREATE/ALTER/DROP</code>)</td><td><code>SCH_M</code> (대상 클래스)</td><td>파티션 분할 등은 클래스 <code>X</code></td><td>—</td><td>—</td><td class="src"><code>locator_cl.c:2108, 5454</code> · <code>execute_statement.c:6801</code></td></tr>
+<tr><td><code>SHOW …</code> / 통계 조회</td><td>—</td><td><code>S</code> (기본) · <code>APPROX</code> 옵션은 <code>IS</code></td><td>—</td><td>—</td><td class="src"><code>heap_file.c:18906-18915</code></td></tr>
+<tr><td>비MVCC 클래스(시리얼 등) <code>SELECT</code></td><td><code>SCH_S</code></td><td><code>IS</code></td><td><code>S</code> — RC 에선 "instant"(잡았다 바로 놓음)</td><td>—</td><td class="src"><code>scan_manager.c:6082-6090, 6965-7006</code></td></tr>
+</tbody></table>
+
+<div class="key"><b>읽어야 할 패턴.</b> ① 읽기는 <b>클래스 IS 만</b> 잡고 행은 스냅샷에 맡긴다. ② 쓰기는 <b>클래스 IX + 행 X</b>. ③ INSERT 만 예외로 행 X 대신 <b>트랜잭션(MVCCID) X</b> 하나. ④ DDL 은 <b>SCH_M</b> 이라 어떤 SCH_S/IS/IX 와도 부딪힌다 — "DDL 이 안 끝나요" 는 대개 누군가의 열린 트랜잭션이 그 클래스에 SCH_S 를 쥔 것이다.</div>
+
+<h3>4.1 격리 수준이 바꾸는 것</h3>
+<table><thead><tr><th></th><th>READ COMMITTED (기본)</th><th>REPEATABLE READ / SERIALIZABLE</th></tr></thead><tbody>
+<tr><th>스냅샷</th><td>문장마다 새로 찍음</td><td>트랜잭션에 한 번 (locator_cl.c:690-697 주석)</td></tr>
+<tr><th>S 락 수명</th><td>문장이 끝나면 놓음 (<code>lock_unlock_object_by_isolation</code>)</td><td>트랜잭션 끝까지 (<code>lock_unlock_object</code> :7213-7217 "nothing to do")</td></tr>
+<tr><th>UPDATE 가 보는 버전</th><td>최신 커밋(DIRTY) 버전을 다시 읽어 갱신</td><td>스냅샷 버전만 — 안 보이는 행을 갱신하려 하면 SERIALIZABLE 충돌</td></tr>
+</tbody></table>
+
+<h2>5. 한 문장의 여정 — 셋이 한 번에 움직인다</h2>
+<div class="grid3">
+<div class="card lock"><h3>SELECT * FROM t WHERE id = 7</h3>
+<ol class="steps">
+<li><span class="tag t-lock">락</span> 클래스 IS. 행 락 없음.</li>
+<li><span class="tag t-latch">래치</span> B-tree root→leaf READ 래치(잡고 놓고), 힙 페이지 READ 래치.</li>
+<li><span class="tag t-mvcc">MVCC</span> 행 헤더 insid/delid 를 내 스냅샷과 대조 → 보이면 반환, 너무 새면 undo 로그의 옛 버전.</li>
+</ol></div>
+<div class="card lock"><h3>UPDATE t SET v = 1 WHERE id = 7</h3>
+<ol class="steps">
+<li><span class="tag t-lock">락</span> 클래스 IX → 행 X. 남이 X 를 쥐면 여기서 대기(데드락이면 감지 스레드가 희생 선택).</li>
+<li><span class="tag t-latch">래치</span> 힙 페이지 WRITE 래치 → undo 로그 append(WAL) → 새 버전 기록 → set_dirty → unfix.</li>
+<li><span class="tag t-mvcc">MVCC</span> 새 버전 insid=나, 옛 버전은 prev_version_lsa 로. 커밋 전엔 남들은 옛 버전을 본다.</li>
+</ol></div>
+<div class="card lock"><h3>INSERT INTO t VALUES (8, …)</h3>
+<ol class="steps">
+<li><span class="tag t-lock">락</span> 클래스 IX + (행 X 대신) <b>내 MVCCID 에 X</b> = self-lock.</li>
+<li><span class="tag t-latch">래치</span> bestspace 로 빈 자리 찾기(busy 면 건너뜀) → 힙 페이지 WRITE 래치 → 기록.</li>
+<li><span class="tag t-mvcc">MVCC</span> 새 행 insid=나. unique 검사하던 남이 이 행을 보면 내 MVCCID 에 S 를 걸고 기다렸다가 root 부터 다시 검사.</li>
+</ol></div>
+</div>
+<p>여기서 <b>락과 MVCC 의 경계</b>가 보인다: MVCC 는 "읽기가 쓰기를 안 기다리게" 는 해 주지만, <b>"두 쓰기가 같은 키를 넣는가"</b>(unique/FK) 같은 미래의 충돌은 못 막는다. 그건 여전히 락의 일이고, 그래서 self-lock 이 필요하다.</p>
+
+<h3>5.1 self-lock 이 생긴 이유 (CBRD-26942, #7266, 2026-07-25)</h3>
+<figure>
+<svg viewBox="0 0 900 250" role="img" aria-labelledby="f4t"><title id="f4t">행마다 X 락 vs 트랜잭션 MVCCID 에 X 하나</title>
+<text x="20" y="28" font-weight="700">이전: INSERT 한 행마다 X</text>
+<rect class="bx lock" x="20" y="40" width="60" height="30" rx="5"/><rect class="bx lock" x="86" y="40" width="60" height="30" rx="5"/><rect class="bx lock" x="152" y="40" width="60" height="30" rx="5"/><text x="240" y="60">… × 6,000,000 (미커밋 INSERT 600만 = X 600만)</text>
+<text x="20" y="98" class="small">고정 크기 락 해시맵의 버킷 체인이 늘어나 <b>모든 트랜잭션</b>의 acquire/release 가 느려짐. 그런데 새 슬롯의 행 X 는 아무도 못 잡고 있으니 항상 즉시 grant — 읽기 격리는 MVCC 가 이미 하고 있어 <b>중복</b>.</text>
+<text x="20" y="140" font-weight="700">지금: 트랜잭션 MVCCID 에 X 하나 (LOCK_RESOURCE_TRANSACTION)</text>
+<rect class="bx lock" x="20" y="152" width="200" height="34" rx="6"/><text x="120" y="174" text-anchor="middle">inserter: MVCCID#42 에 X</text>
+<path class="ar2" d="M420 169 H225"/>
+<rect class="bx lock" x="420" y="152" width="300" height="34" rx="6"/><text x="570" y="174" text-anchor="middle">unique/FK 검사자: MVCCID#42 에 S 요청 → 대기</text>
+<text x="20" y="216" class="small">S 는 X 와 비호환 → inserter 의 commit/abort(서브트랜잭션 완료)까지 기다린 뒤 S 해제 → <b>인덱스를 root 부터 재탐색</b>. 행 단위 락 없이 "미결정 버전을 봤다"는 의존을 락 매니저에 연결한다.</text>
+<text x="20" y="238" class="small">inserter X: log_tran_table.c:4086 (logtb_ensure_mvccid_self_lock) · observer S: btree.c:27365 · 키: lock_create_mvccid_search_key :739</text>
+</svg>
+<figcaption>그림 4. 남긴 것 = unique/FK 직렬화. 버린 것 = MVCC 와 중복이던 행 단위 읽기 격리.</figcaption>
+</figure>
+
+<h2>6. Oracle 은 어떻게 다른가 — "행마다 버전을 안 적는다"</h2>
+<p>사용자 질문: "Oracle 은 MVCC 를 행마다 적지 않는다던데." 맞다. 아래 표에서 <b>매뉴얼로 확인한 것</b>과 <b>일반 지식(매뉴얼 미확인)</b>을 구분했다. 로컬에 있는 Oracle 매뉴얼은 SQL Reference 10gR1 뿐이라 내부 구조(ITL·undo·SCN)는 Concepts 가이드 확인 전까지 <b>매뉴얼 미확인</b>으로 표기한다.</p>
+<table>
+<thead><tr><th>항목</th><th>Oracle</th><th>CUBRID</th><th>차이가 뜻하는 것</th></tr></thead>
+<tbody>
+<tr><td>버전 메타데이터 위치</td><td>행 헤더에 트랜잭션 ID 를 직접 적지 않는다. <b>블록 헤더의 ITL(Interested Transaction List) 슬롯</b>에 그 블록을 만진 트랜잭션(XID·undo 위치·commit SCN)을 두고, 행은 그 슬롯 번호(lock byte)만 가리킨다. <span class="src">(매뉴얼 미확인 — Concepts 가이드 없음)</span></td><td>행마다 <code>mvcc_insid</code>/<code>mvcc_delid</code>/<code>prev_version_lsa</code> (mvcc.h:38). 블록 단위 슬롯 없음</td><td>CUBRID 는 행 하나만 봐도 가시성이 결정되고 vacuum 이 행 단위로 정리한다. Oracle 은 블록 단위 슬롯이라 헤더가 작지만 슬롯이 모자라면(ITL 부족) 대기가 생긴다</td></tr>
+<tr><td>옛 버전은 어디에</td><td>테이블 블록엔 최신만. 옛 이미지는 <b>undo 세그먼트</b>. 읽기는 블록의 SCN 이 질의 SCN 보다 새로우면 블록을 복제해 undo 를 역적용한 <b>consistent read 블록</b>을 만든다. <span class="src">(매뉴얼 미확인)</span></td><td>같은 방향 — 힙엔 최신 버전, 옛 버전은 <b>undo 로그</b>에 있고 <code>prev_version_lsa</code> 로 따라간다 (<code>heap_get_visible_version_from_log</code>)</td><td>둘 다 "제자리 갱신 + undo 에서 재구성" 계열. PG 처럼 힙에 여러 버전을 쌓는 방식이 아니다. CUBRID 의 특이점은 <b>undo 가 WAL(트랜잭션 로그) 안에</b> 있다는 것 — 그래서 로그 append 위치(<code>append_lsa</code>)를 읽기 경로가 본다(CBRD-27400)</td></tr>
+<tr><td>시점 좌표</td><td>SCN (System Change Number) 하나</td><td>MVCCID (64비트 단조) + 스냅샷(lowest_active / highest_completed / 비트맵)</td><td>CUBRID 는 "활성 집합" 을 비트맵으로 들고 다녀 "커밋됐나" 를 SCN 비교가 아니라 집합 검사로 푼다</td></tr>
+<tr><td>읽기와 락</td><td><b>"A query never places a lock on a table. Readers never block writers and writers never block readers."</b> <span class="src">(SQL Reference 10gR1, LOCK TABLE, 18-85 / p.1565)</span></td><td>SELECT 는 클래스 IS 만 잡고 행 락 없음 (§4). 읽기가 쓰기를 막지 않는 점은 같다. 단 DDL(SCH_M) 은 SCH_S/IS 와 부딪힌다</td><td>둘 다 reader/writer 비차단. CUBRID 의 IS 는 "DDL 을 막기 위한" 인텐트지 행 보호가 아니다</td></tr>
+<tr><td>DML 의 테이블 락</td><td>UPDATE/INSERT/DELETE 는 자동으로 <b>ROW EXCLUSIVE</b>(=RX) 테이블 락. 모드는 ROW SHARE / ROW EXCLUSIVE / SHARE / SHARE ROW EXCLUSIVE / EXCLUSIVE, <code>LOCK TABLE … IN … MODE [NOWAIT]</code> 로 수동 지정 가능 <span class="src">(18-87~88 / p.1567-1568)</span></td><td>UPDATE/DELETE/INSERT 는 클래스 <b>IX</b> (§4). 수동 테이블 락 문은 없고 <code>lock_timeout</code>·no-wait 는 세션/트랜잭션 속성</td><td>RX ≈ IX, SHARE ≈ S, EXCLUSIVE ≈ X 로 대응. 이름만 다르고 계층 구조(인텐트 → 행)는 같다</td></tr>
+<tr><td>행 락의 실체</td><td>별도 락 매니저 테이블이 아니라 <b>블록 안의 lock byte + ITL</b> (TX 락은 트랜잭션당 enqueue 하나). 행 락 수에 비례해 커지는 전역 구조가 없다. <span class="src">(매뉴얼 미확인)</span></td><td>전역 해시맵의 <code>LK_ENTRY</code> — 행 락 수에 비례. 그래서 INSERT 600만 건이 문제가 됐고 self-lock(§5.1)이 나왔다</td><td>Oracle 의 "트랜잭션당 TX enqueue 하나 + 행은 슬롯 포인터" 가 CUBRID self-lock 의 발상과 닮았다 — CUBRID 는 INSERT 에만 적용했고 UPDATE/DELETE 는 여전히 행 X</td></tr>
+<tr><td>정리(청소)</td><td>undo 는 undo 세그먼트에서 순환 재사용(retention). 테이블 블록은 delayed block cleanout 으로 커밋 표시가 뒤늦게 반영 <span class="src">(매뉴얼 미확인)</span></td><td>vacuum 데몬이 로그를 따라가며 delid 가 오래된 버전을 물리 삭제, 산 행은 ALL_VISIBLE 표시 (vacuum.c)</td><td>CUBRID 는 청소 주체가 별도 데몬이라 "vacuum 이 지금 이 페이지를 치울 수 있다" 를 힙 코드가 항상 전제해야 한다(§7 ③)</td></tr>
+</tbody></table>
+<p class="src">Oracle 인용은 로컬 매뉴얼 <code>dev4-oracle-manual/sql-reference-10gR1</code> 의 쪽 번호. "매뉴얼 미확인" 항목은 Oracle Database Concepts 가이드가 리포에 들어오면 절 번호로 바꿔야 한다.</p>
+
+<h2>7. 신입이 밟는 함정 셋 (전부 실제 사례)</h2>
+<div class="grid3">
+<div class="card latch"><h3>① 래치로 락을, 락으로 래치를 대신하려 함</h3><p>래치는 함수 안에서 끝나야 하고 락은 트랜잭션 끝까지 간다. 페이지 래치를 쥔 채 <code>lock_object</code> 대기에 들어가면 래치 데드락(감지 없음) → 300초 코어. <span class="src">모듈 노트 src-storage §2 리뷰 체크포인트</span></p></div>
+<div class="card latch"><h3>② no-wait 트랜잭션 안의 무조건 래치</h3><p>조용히 조건부가 되어 NULL 이 돌아온다(page_buffer.c:2227). <code>bestspace::L1_fix</code> 처럼 busy 를 정상으로 다루는 호출자와 <code>disk_reserve_sectors</code> 처럼 assert 하는 호출자가 같은 코드에 섞여 있다. <span class="src">CBRD-27198 / PR#7630, imports/vimkim/storage/survey-unconditional-page-latch-assumptions</span></p></div>
+<div class="card mvcc"><h3>③ MVCCID 와 tran_index 혼동 · vacuum 동시성</h3><p>스냅샷·헤더·self-lock 키는 MVCCID(재사용 안 됨), 락 엔트리·TDES 슬롯은 tran_index(재사용됨). 그리고 vacuum 은 활성 트랜잭션과 동시에 도니 <code>OLD_PAGE_PREVENT_DEALLOC</code> 같은 보호가 <b>정합성 장치</b>다 — lock-free fast path 가 그 카운터를 반쪽만 회계하는 결함이 열려 있다. <span class="src">CBRD-27263, src-storage §3</span></p></div>
+</div>
+
+<h2>8. 확인 퀴즈 — 읽었으면 바로 맞출 수 있는 것</h2>
+<p>답은 접혀 있다. 먼저 스스로 답한 뒤 연다. 못 맞추면 해당 절을 다시 읽는다.</p>
+<details><summary>Q1. 평범한 <code>SELECT</code> 가 잡는 락과 잡지 않는 락은?</summary><p>클래스 <b>IS</b>(+컴파일 시 SCH_S)만 잡고, <b>행 락은 잡지 않는다</b>. 행의 가시성은 스냅샷으로 판정한다. → §4 표 1행, <code>heap_file.c:6437</code></p></details>
+<details><summary>Q2. unique 검사 중 남의 미커밋 삽입 행을 만난 트랜잭션은 무엇을 키로 어떤 모드의 락을 요청하고, 깨어난 뒤 반드시 무엇을 하는가?</summary><p><b>inserter 의 MVCCID</b> 를 키로 <b>S</b> 를 요청해 inserter 가 끝날 때까지 기다리고, 깨어나면 S 를 놓고 <b>인덱스를 root 부터 다시 탐색</b>한다. → §5.1, <code>btree.c:27365-27375</code></p></details>
+<details><summary>Q3. INSERT 가 새 슬롯 행의 X 락을 생략할 수 있는 이유 — 그 락이 하던 두 역할 중 MVCC 가 이미 대신하던 쪽은?</summary><p><b>읽기 격리</b>(남이 미커밋 행을 못 보게 하는 것). 이건 insid 가 스냅샷에 안 보이는 것으로 이미 보장된다. 남은 역할인 unique/FK 직렬화는 self-lock 이 이어받았다. → §5.1</p></details>
+<details><summary>Q4. 래치 데드락은 어떻게 처리되는가?</summary><p><b>감지하지 않는다.</b> 같은 파일 안 페이지 번호 순서(<code>pgbuf_ordered_fix</code>)로 회피하고, 그래도 꼬이면 300초 타임아웃(<code>page_latch_timeout_in_msecs</code>)으로 한쪽을 죽인다. 디버그 빌드는 그 자리에서 assert. → §1</p></details>
+<details><summary>Q5. READ COMMITTED 와 REPEATABLE READ 의 차이를 락과 스냅샷 두 축으로 말하면?</summary><p>스냅샷: RC 는 문장마다, RR 은 트랜잭션에 한 번. S 락: RC 는 문장 끝에 놓고, RR 은 트랜잭션 끝까지 쥔다. → §4.1, <code>lock_manager.c:7213-7230</code></p></details>
+<details><summary>Q6. Oracle 이 "행마다 버전을 안 적는다" 는 말의 정확한 뜻은? CUBRID 와 같은 점 하나, 다른 점 하나.</summary><p>Oracle 은 블록 헤더의 ITL 슬롯에 트랜잭션 정보를 두고 행은 슬롯 번호만 가리킨다(매뉴얼 미확인, Concepts 가이드 필요). 같은 점: 옛 버전을 테이블이 아니라 undo 에서 재구성한다. 다른 점: CUBRID 는 행마다 insid/delid 를 적고 별도 vacuum 데몬이 청소한다. → §6</p></details>
+
+<h2>9. 더 읽을 곳</h2>
+<ul>
+<li>모듈 노트 <a href="../src-storage.html">src-storage</a> §2 pgbuf 항목 · <a href="../src-transaction.html">src-transaction</a> §2 락 자원·self-lock·MVCC 항목</li>
+<li><code>imports/vimkim/pgbuf/00-overview.md</code> §4 뮤텍스 계층·락 랭킹, <code>02-fix-unfix-latch.md</code> (lock-free 경로)</li>
+<li><code>imports/vimkim/transaction/lock-manager-source-trace-packet_f30f1c2.md</code> trace 3(MVCC 락 정책)·4(self-lock rendezvous)</li>
+<li>엔진 리포 <code>src/storage/AGENTS.md</code>, <code>src/transaction/AGENTS.md</code> — 구조 1차 정본</li>
+</ul>
+<p class="src">이 문서의 <code>파일:줄</code> 은 전부 develop <code>0d0809963</code>(2026-09-30) 기준이다. 줄 번호는 밀리니 함수 이름으로 다시 찾는다.</p>
+</main>
+</body>
+</html>
