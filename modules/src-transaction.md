@@ -67,6 +67,48 @@ MVCC, WAL, 락, 리커버리, 부트를 담당하는 서버 측 최대 모듈. �
 - 부트 시퀀스는 서브시스템 초기화 순서가 엄격 — 순서 변경 주의.
 - ✅ **리뷰 체크포인트**: 부트 순서에 영향을 주는 초기화 변경이 아닌가?
 
+### 로그 매니저 전체 — vimkim 들여옴 (imports/vimkim/transaction/log-manager-*.md, 기준 4cfc8370e)
+
+- append 경로는 **워커가 `prior_lsa_mutex` 아래 prior list(메모리 목록)에 노드를 달고 → LOG_CS 에서 로그 페이지 버퍼로 드레인 → `fileio_write`+fsync → 활성 로그(_lgat, 링) → 아카이브** 순이며,
+  그룹 커밋은 로그 플러시 데몬(LFT) 의 브로드캐스트다. 16장 구성(LSA 좌표계, 온디스크 구조, 레코드 종류, 체크포인트, 아카이브 삭제 정책, 복구 analysis→redo→undo, Vacuum/HA/CDC 소비자,
+  파라미터, 파일 지도)은 `log-manager-overview_4cfc837.md`; printf 트레이스 8곳 실측과 **정적 문서 정정 사항(§6)** 은 `log-manager-append-flush-dynamic-analysis_4cfc837.md`.
+  WAL 을 만지는 리뷰는 overview §5(append)·§6(페이지 버퍼/flush)·§8(데이터 버퍼 연동)부터. — vimkim(원문 imports/vimkim/transaction/) 2026-09-30
+
+### log_Gl.hdr.append_lsa — whole-word atomic (CBRD-27320, #7875 `b319ce1ab`)
+
+- **해소된 경합의 기록**: 이전엔 `logpb_next_append_page` 가 `append_lsa.pageid++` / `.offset = 0` 두 store 로 페이지를 넘겼고, 락 없이 읽는 `log_get_undo_record`
+  (`oldest_prior_lsa = *log_get_append_lsa()`) 가 최적화 빌드에서 pageid·offset 을 두 load 로 읽어 `(옛 P, 새 페이지의 어린 offset)` 이라는 존재한 적 없는 주소를 조합 → `LSA_LT` 거짓 → assert.
+  40 스레드 JDBC 갱신·조회(`bug_bts_4633`) optdebug 에서 재현, release 는 찢어진 값이 조용히 판단에 쓰였다(2016년 `63378ed15c` 부터 잠복). 현행 develop 은 `log_Gl.hdr.append_lsa.load()/.store(LOG_LSA(...))`
+  (log_page_buffer.c) 로 한 워드 atomic. 해설은 `imports/vimkim/transaction/CBRD-27400-append-lsa-torn-read_a590292.md` (PR#7904 는 27320 에 흡수되어 close). — vimkim 2026-09-30; .51 대조 0d0809963
+  - ✅ **리뷰 체크포인트**: 두 필드로 된 LSA/좌표를 락 없이 읽는 곳이 새로 생기면 "쓰는 쪽이 두 store 인가" 를 본다 — x86 store 순서만으로는 못 막는다.
+
+### 체크포인트는 DWB 가 꺼져 있어도 데이터 볼륨을 fsync 해야 한다 (CBRD-27093, 해소 `60f3b5a96` #7521)
+
+- 체크포인트 계약은 "chkpt_lsa 이전 변경은 전부 **디스크에** 있다 → 그 이전 아카이브를 버려도 된다" 다. DWB(기본 on)가 볼륨 fsync 를 대신하던 구조라 `double_write_buffer_size=0` 이면
+  flush(OS 페이지 캐시) 만 하고 sync 없이 chkpt_lsa 를 전진·아카이브를 삭제해 **정전 시 커밋 데이터가 조용히 유실**될 수 있었다(10.2~11.4 전부). 프로세스 crash 만으로는 안 보이고 OS crash 에서만 드러나
+  오래 잠복. 배경·시나리오·수정 설계는 `imports/vimkim/transaction/CBRD-27093-*.md`. 11.0/11.3/11.4 백포트 머지. — vimkim 2026-09-30; .51 대조 git log
+  - ✅ **리뷰 체크포인트**: 내구성 경로(체크포인트·백업·복구)를 만지면 "DWB off" 조합을 따로 본다 — DWB 가 fsync 를 숨긴다.
+
+### log_sysop_start / log_sysop_commit / log_sysop_abort (log_manager.c)
+
+- TDES 의 topops 스택으로 중첩되는 시스템 오퍼레이션. abort 는 그 sysop 안의 로그만 undo 하고(부분 실패가 상위 트랜잭션을 깨지 않는 이유), commit 은 상위에 흡수되거나 `LOG_SYSOP_END` 로 독립 커밋.
+  crash 안전성·비용·다른 DBMS 의 대응 개념은 `imports/vimkim/transaction/sysop-explained_977cf18a4.md` §1~§10 (§6·§11·§12 의 예시는 feat/oos). — vimkim 2026-09-30 (미대조)
+
+### lock_manager.c — end-to-end 추적 패킷 (imports/vimkim/transaction/lock-manager-*.md, 기준 f30f1c260)
+
+- 자원·모드·계층·변환·에스컬레이션 / 대기·데드락·타임아웃·기상·해제·재시작 / MVCC SELECT·FOR UPDATE·DML 의 클래스-행 정책 / **MVCCID X self-lock 과 unique·FK 의 S wait→recheck** 네 추적과
+  claim 후보·negative search·안 한 실험 목록. 서버측 loaddb 의 `BU_LOCK` 과 트랜잭션 MVCCID self-lock 은 자원·소유자가 다른 두 락이라는 정리는 `imports/vimkim/loaddb/CBRD-27157-*.md`
+  (수정 PR#7588 은 feat/oos 에만). lock 을 건드리는 리뷰는 위 `lock_object` 항목 다음에 이 패킷의 trace 2·4 를 연다. — vimkim 2026-09-30 (미대조)
+
+### heap_get_visible_version_from_log — 구버전 읽기 경로 개선 제안 (미계측 초안)
+
+- 스냅샷보다 새 버전을 만나면 `prev_version_lsa` 를 따라 undo 로그에서 옛 버전을 읽는 경로의 비용 진단과 제안. **원문 스스로 "계측 선행 필요, 구현 착수 비권장"** 이라 적었다 —
+  측정 없이 최적화 제안하지 않는 우리 규칙과 같은 위치. `imports/vimkim/transaction/mvcc-version-read-path-improvement-proposal_f30f1c2.md`. — vimkim 2026-09-30
+
+### CDC × HA failover (log_manager.c CDC 부, 기준 4cfc8370e)
+
+- master → standby → master 전환 뒤 CDC 가 멈추는 원인 후보의 정적 분석 두 판(claude/codex)이 `imports/vimkim/transaction/cdc-ha-*.md`. 재현 로그 없이 쓴 원인 후보라 **미확인** 표기로 둔다. — vimkim 2026-09-30
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.

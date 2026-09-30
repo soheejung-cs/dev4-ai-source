@@ -19,8 +19,8 @@
 <li><a href="measurement.html" class="cur">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
-<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">23</span><span class="iss">⚠24</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
@@ -28,7 +28,7 @@
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
@@ -50,6 +50,11 @@
 <p><strong><span class="chip c51">.51 — 범위·난수 일반</span></strong></p>
 <ul>
 <li><code>drand48()*N</code>을 인덱스로 캐스팅하면 [0,N-1]이지만 <strong>경계 포함 의도라면 off-by-one</strong> — 샘플링 코드 리뷰 시 범위 의도(포함/배제)를 주석과 대조. (PR #7463 리뷰에서 실제 지적)</li>
+</ul>
+<p><strong>[vimkim 들여옴 — 바이너리 배치 민감도·빌드 비용, imports/vimkim/build-perf/]</strong></p>
+<ul>
+<li><strong>소스 로직과 무관한 16B 함수 이동만으로 짧은 질의 성능이 흔들린다</strong> (CBRD-26382): PR#6636 의 <code>std::function</code>→lambda 로 recovery cold code 가 7B 줄자 링크 정렬 도미노로 hot 함수들이 16B 이동, QA +10.56%(재현 +1.46%). 5회 Top-down 은 front-end bound 가 아니라 <strong>execution core bound 증가</strong>로 분류 — "DSB miss 가 전부" 가 아니다. 7B padding 으로 주소 phase 와 성능이 함께 복원됨을 확인. 함의: <strong>±수 % 회귀를 소스 변경 탓으로 돌리기 전에 <code>nm</code>/<code>objdump</code> 로 hot 함수 주소 phase 를 대조</strong>하고, 전 함수 큰 정렬은 해법이 아니다(입증된 함수만 <code>aligned(32)</code> 좁게). PGO 실험(빌드 비용·배치 증거·성능)은 <code>CBRD-26382-pgo-experiment_95b79e7ed.md</code>. — vimkim 2026-09-30</li>
+<li>클린 빌드 gcc 78.8s vs clang 50.9s 의 차이는 링커/LTO 가 아니라 GCC 컴파일 단계(플래그·PCH 실험 포함) — <code>debug-gcc-vs-clang-clean-build-analysis_2026-08-13.md</code>. 규칙집 20장 PHYS 와 같은 축. — vimkim 2026-09-30</li>
 </ul>
 </main></div></div>
 <script>

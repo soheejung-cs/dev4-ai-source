@@ -372,6 +372,43 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   BTREE_STATS reserved) 를 먼저 확인하면 버전 마커 없이도 구 레코드 판별이 가능하다. 통계 관련 카운트를 새로 추가하면 위 7단계 중
   어느 하나만 int 로 두어도 다시 잘린다.
 
+### page_buffer.c 전역 분석서 — vimkim 들여옴 (imports/vimkim/pgbuf/, 기준 e6ed61e87)
+
+- `page_buffer.c` 17.5K 줄을 자료구조/fix-latch/LRU-victim/flush-WAL-데몬/ordered-fix-dealloc/관측성 6장으로 나눈 분석서가
+  `imports/vimkim/pgbuf/00~06` 에 있다(각 주장에 `page_buffer.c:줄` 근거). pgbuf 를 건드리는 리뷰는 **00 §4 뮤텍스 계층·락 랭킹, 02 §3~§4(CAS 결정표), 04 §2(`pgbuf_bcb_flush_with_wal`)** 부터 연다. — vimkim(원문 imports/vimkim/pgbuf/00-overview.md) 2026-09-30
+- **AOUT(2Q 의 Aout 리스트)은 conf 와 무관하게 강제 비활성이다** — `prm_tune_parameters()` 가 conf 파싱 뒤 `data_aout_ratio` 를 "0" 으로 덮어쓴다
+  (`system_parameter.c:10159-10160`, "disable AOUT list until we fix CBRD-20741"; 경고 로그 없음). `page_buffer.c` 머리 주석의 "LRU + Aout of 2Q" 는 현행과 다르다.
+  `pgbuf_remove_private_from_aout_list` 는 호출자 없는 죽은 코드. — vimkim(원문 imports/vimkim/pgbuf/defects-report_5cd4f860e.md D7) 2026-09-30; .51 대조 develop 0d0809963
+  - ✅ **리뷰 체크포인트**: `data_aout_ratio` 를 만지는 실험·튜닝 제안은 무효 — 파라미터가 살아 있지 않다.
+- **`PSTAT_PB_NUM_IOWRITES` 는 DWB 를 거치지 않는 분기에서만 증가한다** (`pgbuf_bcb_flush_with_wal` :10804, `else` = DWB 미사용). DWB 활성(기본)이면 pgbuf 가
+  내보낸 페이지 수가 이 카운터에 안 잡히고, DWB 쪽 카운터와 의미가 갈린다. flush 량을 이 값으로 읽으면 과소 판정. — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md P5) 2026-09-30; .51 대조 develop 0d0809963
+- **lock-free RO fast path 의 구조** — `pgbuf_fix` 에서 `request_mode == READ && fetch_mode ∈ {OLD_PAGE, OLD_PAGE_PREVENT_DEALLOC, OLD_PAGE_MAYBE_DEALLOCATED}
+  && UNCONDITIONAL` 이면 `pgbuf_lockfree_fix_ro()` (:2267) 로 가고 성공 시 `goto fast_path` (:2279 → 라벨 :2447) 로 **해시 탐색·BCB mutex·holder 등록의 정규 경로를 전부 건넌다**.
+  이 경로가 들어온 커밋·동기·성능 수치와 되돌릴 때의 비용은 `imports/vimkim/pgbuf/research/lockfree-fix-origin.md`. 정규 경로만 하는 일(예: `register_avoid_deallocation` :2376)은
+  fast path 에서 빠진다 — §3 의 비대칭 항목 참조. — vimkim(원문 imports/vimkim/pgbuf/02-fix-unfix-latch.md) 2026-09-30; .51 대조 develop 0d0809963
+- **`OLD_PAGE_PREVENT_DEALLOC` 는 성능 장치가 아니라 정합성 장치다** — 호출자(heap_file.c 9곳 + locator_sr.c 1곳, 전부 `pgbuf_ordered_fix` 경유)가 보호를 믿고 dealloc 된 페이지에
+  접근하지 않는다는 전제로 쓰여 있어 제거 불가. `imports/vimkim/pgbuf/research/prevent-dealloc-necessity.md` (미대조, 원문 판정) — vimkim 2026-09-30
+- **flush/AIO 에 SX latch 는 필요 없다** — 현 `pgbuf_bcb_flush_with_wal` 은 BCB mutex 를 잡은 채 live frame 을 stack-local `FILEIO_PAGE` 로 복사하고(TDE 면 별도 버퍼, DWB 면 DWB slot 으로 재복사)
+  그 사본을 쓴다. SX 도입 논의(CBRD-27196)는 이 복사 비용을 없애려는 것이지 정합성 요구가 아니다. `imports/vimkim/pgbuf/CBRD-27196-sx-latch-flush-aio-source-trace_f799e05.md` (미대조) — vimkim 2026-09-30
+
+### bestspace.cpp — CBRD-26176 재설계 (PR#7353, e84a7f6dc) 전후 레퍼런스
+
+- 현행 `src/storage/bestspace.{cpp,hpp}` 의 구조(shard·L1/L2/L3 탐색·registry·온디스크·30초 sync·재시작 rebuild·파라미터·복구)는
+  `imports/vimkim/storage/CBRD-26176-bestspace-02-tobe-architecture.md`, 그 이전 `heap_Bestspace`(HEAP_HDR_STATS 온디스크 + 인메모리 캐시, 고동시성 INSERT 병목 원인)는 `-01-asis-legacy.md`,
+  gdb/printf 실측 콜플로우와 **실측으로 드러난 미해결 이슈(§10)** 는 `-03-callflows.md`. bestspace 관련 리뷰·이슈는 여기부터. — vimkim(원문 imports/vimkim/storage/) 2026-09-30
+- `bestspace::shard::L1_fix()` 는 `LK_FORCE_ZERO_WAIT` 뒤 `pgbuf_ordered_fix()` 를 부르고 busy 면 `status::CONTENDED` 로 건너뛴다 — **busy 를 정상 결과로 쓰는 호출자**의 대표
+  (위 "스레드 스코프 wait override" 항목과 같은 축). 반대로 `file_temp_alloc`·`disk_reserve_sectors`·`disk_volume_expand`·복구 경로 6곳은 UNCONDITIONAL fix 실패를 `assert_release` 로 취급한다 —
+  호출부 표는 `imports/vimkim/storage/survey-unconditional-page-latch-assumptions_d9ceb53.md`. — vimkim(원문 imports/vimkim/storage/survey-unconditional-page-latch-assumptions_d9ceb53.md) 2026-09-30
+
+### 볼륨 온디스크 포맷 · backupdb — 조사 문서 포인터
+
+- 데이터 볼륨은 고정 크기 물리 페이지 배열(`byte_offset = N * volume_io_page_size`), 볼륨 헤더·섹터 테이블·file 소유 재구성·TDE 가시 범위·LSA 워터마크(체크섬 아님)를
+  `imports/vimkim/storage/cubrid-volume-read-only-parser_e6ed61e.md` 가 정리 — 볼륨을 열지 않고 진단할 때. — vimkim 2026-09-30
+- `cubrid backupdb -l 0` 는 볼륨 파일을 페이지 0..N-1 로 `pread` 전수 복사(할당 상태 무시)하되, 볼륨마다 체크포인트·flush·DWB sync 를 선행하고, 기본 consistency check 와 LZ4 압축이 붙는다.
+  `-t N` 병렬은 압축 병렬이지 I/O 병렬이 아니다(pread·write 가 공유 mutex 하). `imports/vimkim/storage/survey-backupdb-level-0_cd593bc.md` — vimkim 2026-09-30
+- heap/btree 스캔에 사용자 질의 경로용 page prefetch 는 없다(`prefetch` 는 vacuum 로그·파서 클래스 락·커서 OID·`__builtin_prefetch` 뿐); `posix_fadvise` 는 볼륨 open 시 1회 hint(`file_io.c`, `data_file_os_advise`).
+  도입 검토는 `imports/vimkim/storage/CBRD-26788-prefetch-survey.md` (CBRD-26788, PR 없음). — vimkim 2026-09-30
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
@@ -408,6 +445,27 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   오검사, 파티션 합산 double→int UB, `statistics_cl.c:233` `assert (keys >= 0)` 가 debug SA 에서 음수에도 발화하지 않은 현상(원인 미추적).
 - **[테스트 하네스 결함]** FI 테스트 `exclude_core()` 스윕이 foreground 직후에만 돌아 비동기 vacuum
   워커 발화 FI 코어를 놓침 — CI 산발 NOK. TC 이슈화는 사용자 판단 대기.
+
+- **[미수정 — pgbuf flush 조기 실패 경로의 FLUSHING 플래그 누수]** `pgbuf_bcb_flush_with_wal()` 은 진입 시 `pgbuf_bcb_mark_is_flushing()` (:10714) 으로
+  `FLUSHING_TO_DISK` 를 세우고 `DIRTY` 를 미리 끄는데, TDE 암호화 실패(:10728)·`dwb_set_data_on_next_slot` 실패(:10740) 두 `return error` 가 원복 없이 나간다.
+  정규 write 실패 경로(:10823 `pgbuf_bcb_mark_was_not_flushed`)와 비대칭. 결과: 그 BCB 는 영구 victim 불가(`INVALID_VICTIM_CANDIDATE_MASK`), `PGBUF_LATCH_FLUSH` 대기자는
+  타임아웃 없이 영원히 대기 → 체크포인트가 그 페이지에서 멈출 수 있다. 발생 조건은 TDE 환경의 암호화 실패 또는 DWB 슬롯 실패로 드묾. 수정 방향: 두 조기 반환을 정규 실패 경로와 같게
+  (`mark_was_not_flushed(was_dirty)` + `oldest_unflush_lsa` 복원 + `wake_flush_waiters`). 원문 D1/P2. — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md) 2026-09-30; .51 대조 develop 0d0809963
+- **[미수정 — `pgbuf_direct_victims_maintenance()` 루프가 한 번도 돌지 않음]** private/shared 두 `for` 가 `index = prv_index` 로 시작해 조건 `index != prv_index` 가 첫 평가부터 거짓.
+  100ms maintenance 데몬의 "victim 대기 스레드 구제 backup plan"이 통째로 no-op — 평상시엔 flush/post-flush/unfix 경로의 다른 donor 가 감당해 증상이 안 보인다(원문 실측).
+  같은 계열로 `pgbuf_panic_assign_direct_victims_from_lru` 호출부가 직전에 NULL 이 된 `prev_BCB` 를 넘겨 즉시 0 반환(원문 주장, 미대조). 원문 D3/P3. — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md) 2026-09-30; .51 대조 develop 0d0809963
+- **[미수정 — lock-free fast path 의 dealloc 보호 카운터 반쪽 회계, CBRD-27263]** fast path(`goto fast_path` :2279 → :2447)는 `register_avoid_deallocation` (:2376, 라벨 앞) 을 건너뛰고
+  공통 꼬리의 `unregister_avoid_deallocation` (:2465, 라벨 뒤, `fetch_mode == OLD_PAGE_PREVENT_DEALLOC` 조건) 은 실행한다. `pgbuf_ordered_fix` 1차 시도가 원래 fetch_mode 를 그대로 넘기고
+  보유 페이지가 없으면 UNCONDITIONAL 이 되어 fast path 조건을 충족하므로 **heap 스캔에서 일상 도달**. 0-방어가 있어 카운터가 0 이면 막히지만, vacuum 등 타 스레드가 등록한 보호를
+  훔쳐 감소시킨다 — 원문이 라이브 서버에서 재현(등록 없는 해제 40회, 타인 보호 탈취 7회). 해법 후보 3(fast path 경유 플래그로 unregister 스킵 권장 / 진입 조건에서 PREVENT_DEALLOC 제외 /
+  fast path 에서도 등록) 비교는 `imports/vimkim/pgbuf/10-CBRD-27263-repro-proof-and-solutions.md`. PR 없음(2026-09-30). — vimkim(원문 imports/vimkim/pgbuf/10-CBRD-27263-repro-proof-and-solutions.md) 2026-09-30; .51 대조 develop 0d0809963
+- **[미머지 — CBRD-26500 page buffer hit ratio uint64 언더플로]** PR#7157 OPEN(approved, 2026-08-14 이후 정지). 옵션 비교는 `imports/vimkim/pgbuf/CBRD-26500-PR-7157-hit-ratio-underflow-explanation.md`. — vimkim 2026-09-30
+- **[미머지 — CBRD-27151 섹터 단위 bulk `file_destroy` 와 복구 시 재실행]** 영구 파일 destroy 가 **인메모리 헤더**의 섹터 목록으로 bulk 해제하는데 복구가 `file_destroy` 를 재실행하면
+  메타데이터가 어긋나는 정합성 구멍 — 원문 판정 CONFIRMED(`file_manager.c:4139` 기준 93f11fb3f). PR#7785 OPEN(2026-09-30). `imports/vimkim/storage/CBRD-27151-bulk-destroy-recovery-metadata_93f11fb3f.md` — vimkim 2026-09-30
+- **[구조적 — `page_latch_timeout_in_msecs`(숨은 파라미터, 300s) 와 `lock_timeout` 의 관계]** 양수 `lock_timeout` 은 래치 대기 시간을 정하지 않는다 — 0 이 아닌 모든 wait 정책이 300s 래치 타임아웃을 쓰고,
+  트랜잭션 lock 정책은 그 뒤 어떤 에러/abort 가 나는지만 바꾼다. zero-wait 트랜잭션의 UNCONDITIONAL → CONDITIONAL 강등(위 §3 "래치 타임아웃이 서버 abort" 항목의 원인 축)은
+  PR#7630(CBRD-27198, 머지 `b203b6c9d`)이 disk manager 경로에서 막았고, 근본 분리(호출자가 wait/try/ordered-retry 를 명시)는 CBRD-27356 으로 남아 있다(원문). `imports/vimkim/storage/CBRD-27198-*.md` — vimkim 2026-09-30
+- **[관측 — 300초 WRITE latch 점유 원인 규명 계측안, CBRD-26325]** holder 추적·breadcrumb·강제 스택 덤프 4단계 — 래치 타임아웃 코어를 다시 만나면 `imports/vimkim/pgbuf/CBRD-26325-latch-timeout-instrumentation-proposal.md` 부터. — vimkim 2026-09-30
 
 **CBRD-24094(10a1df3e6, OID-ordered overflow chains + separator directory)는 온디스크
 포맷 비호환** — 구 포맷 볼륨을 새 빌드로 열면 **읽기는 되지만 뷰 생성 등 카탈로그 쓰기에서

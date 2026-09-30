@@ -90,7 +90,9 @@ bison/flex 문법 기반 대량 적재기. `load_grammar.yy` + `load_lexer.l`(�
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
 
-- (현재 등록된 예비 이슈 없음)
+- **[미머지 — CBRD-27441 서버측 loaddb 의 파티션 범위 검증]** PR#7982 OPEN(2026-09-30). 해설 `imports/vimkim/loaddb/CBRD-27441-validate-partition-range-server-loaddb_109f16a.md`. — vimkim 2026-09-30
+- **[feat/oos 전용 — CBRD-27157 loaddb 워커 MVCCID self-lock]** PR#7588 은 feat/oos 에만 머지. develop 의 `load_server_loader.cpp` 에 같은 문제가 있는지는 **미확인**.
+  `BU_LOCK` vs MVCCID self-lock 구분은 `imports/vimkim/loaddb/CBRD-27157-server-loaddb-locking-source-trace_f11fc42.md`. — vimkim 2026-09-30
 
 ## 4. 진행중인 작업
 

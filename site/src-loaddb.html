@@ -19,8 +19,8 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠17</span></span></a></li>
-<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">23</span><span class="iss">⚠24</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
@@ -28,7 +28,7 @@
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-loaddb.html" class="cur"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html" class="cur"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/loaddb</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 3건</p>
+<h1>src/loaddb</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 5건</p>
 <blockquote>기준: upstream/develop 5f3a30d09 (2026-09-02)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>bison/flex 문법 기반 대량 적재기. <code>load_grammar.yy</code> + <code>load_lexer.l</code>(입력 포맷 파싱), <code>load_driver.cpp</code>(오케스트레이션), <code>load_session.cpp</code>(배치), <code>load_worker_manager.cpp</code>(병렬 워커), <code>load_server_loader.cpp</code>(서버 측 직접 힙/인덱스 삽입), <code>load_sa_loader.cpp</code>(SA 모드 클라이언트 로더), <code>load_db_value_converter.cpp</code>(문자열→DB_VALUE), <code>load_db.c</code>(유틸 진입점).</p>
@@ -102,7 +102,8 @@
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
 <ul>
-<li>(현재 등록된 예비 이슈 없음)</li>
+<li><strong>[미머지 — CBRD-27441 서버측 loaddb 의 파티션 범위 검증]</strong> PR#7982 OPEN(2026-09-30). 해설 <code>imports/vimkim/loaddb/CBRD-27441-validate-partition-range-server-loaddb_109f16a.md</code>. — vimkim 2026-09-30</li>
+<li><strong>[feat/oos 전용 — CBRD-27157 loaddb 워커 MVCCID self-lock]</strong> PR#7588 은 feat/oos 에만 머지. develop 의 <code>load_server_loader.cpp</code> 에 같은 문제가 있는지는 <strong>미확인</strong>. <code>BU_LOCK</code> vs MVCCID self-lock 구분은 <code>imports/vimkim/loaddb/CBRD-27157-server-loaddb-locking-source-trace_f11fc42.md</code>. — vimkim 2026-09-30</li>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
