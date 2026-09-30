@@ -104,7 +104,8 @@ MVCC, WAL, 락, 리커버리, 부트를 담당하는 서버 측 최대 모듈. �
 - **락 자원 종류는 넷이다 — `LOCK_RESOURCE_INSTANCE / CLASS / ROOT_CLASS / TRANSACTION`** (lock_manager.h:139-142). `TRANSACTION` 은 **inserter 의 MVCCID 를 키로 하는 self-lock**: 트랜잭션이 자기 MVCCID 에 X 를 잡고
   (`lock_transaction_mvccid` :6468, 키 `lock_create_mvccid_search_key` :739, 해제 `lock_unlock_transaction_mvccid` :6521, 조회 `lock_has_lock_on_transaction_mvccid` :6584), MVCC INSERT 가 새 행마다 row X 를 잡는 대신 이 X 로
   `INSERT_IN_PROGRESS` 수명을 대표한다. unique/FK 검사에서 그 MVCCID 를 만난 다른 트랜잭션은 같은 자원에 S 를 요청해(X 와 비호환) commit/abort/서브트랜잭션 완료까지 기다린 뒤 **인덱스를 root 부터 다시 탐색**한다.
-  class hierarchy·escalation 은 이 자원에 적용되지 않는다. (원문 C030~C037 요지; 자원 종류·API 는 .51 대조, btree 쪽 wait/recheck 줄 범위는 미대조) — vimkim(원문 imports/vimkim/transaction/lock-manager-source-trace-packet_f30f1c2.md) 2026-09-30; .51 대조 develop 0d0809963
+  class hierarchy·escalation 은 이 자원에 적용되지 않는다. **도입: CBRD-26942 #7266 `741734a8f`(2026-07-25)** — 그 전엔 INSERT 가 새 행마다 row X 를 잡았고(MVCC 와 중복, 고정 크기 락 해시맵 체인을 늘려 전 트랜잭션을 느리게 함; 재현 미커밋 INSERT 600만 = X 600만),
+  unique/FK 대기는 행 OID 의 X 에 S 를 거는 식이었다. 폐기 enum `LOCK_RESOURCE_OBJECT` 자리를 이 타입이 대체. inserter X 는 `log_tran_table.c:4086`, observer S 는 `btree.c:27365`. (원문 C030~C037 요지; 자원 종류·API 는 .51 대조, btree 쪽 wait/recheck 줄 범위는 미대조) — vimkim(원문 imports/vimkim/transaction/lock-manager-source-trace-packet_f30f1c2.md) 2026-09-30; .51 대조 develop 0d0809963
   - ✅ **리뷰 체크포인트**: "self-lock 을 건너뛴다"(CBRD-27157 류) 는 unique/FK observer 의 대기 상대를 없애는 변경이다 — 그 경로가 정말 unique/FK 검사 대상이 아닌지 먼저 본다.
 - **commit 은 로그 flush 를 기다리고 abort 는 기다리지 않는다; ABORT 레코드는 후속 flush 에 편승하고, 그룹 커밋의 fsync 병합은 ≈1s 지연 특성을 가진다** — vimkim 의 printf 트레이스 실측(4cfc8370e, CS 모드, debug). `imports/vimkim/transaction/log-manager-append-flush-dynamic-analysis_4cfc837.md` §5~§6. 수치는 원문 조건 한정. — vimkim 2026-09-30
 
