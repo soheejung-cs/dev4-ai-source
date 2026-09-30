@@ -206,7 +206,7 @@
     <svg viewBox="0 0 900 170" role="img" aria-label="호출자가 pgbuf_fix 로 페이지를 빌려 래치와 함께 받고 unfix 로 돌려주는 흐름">
       <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
         <rect x="20" y="40" width="200" height="70" rx="6" fill="none" stroke="currentColor"/><text x="34" y="66">① 호출자</text><text x="34" y="88" font-size="12" opacity=".7">heap · btree · catalog</text>
-        <rect x="350" y="30" width="220" height="90" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="364" y="56" fill="#14706b" font-weight="600">② 페이지 버퍼</text><text x="364" y="78" font-size="12" opacity=".8">메모리에 없으면 디스크에서 읽고</text><text x="364" y="98" font-size="12" opacity=".8">교체되지 않게 고정(fix)</text>
+        <rect x="350" y="30" width="220" height="90" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="364" y="56" fill="#14706b" font-weight="600">② 페이지 버퍼</text><text x="364" y="78" font-size="12" fill="#1f3d3a">메모리에 없으면 디스크에서 읽고</text><text x="364" y="98" font-size="12" fill="#1f3d3a">교체되지 않게 고정(fix)</text>
         <rect x="680" y="40" width="200" height="70" rx="6" fill="none" stroke="currentColor"/><text x="694" y="66">③ 페이지 포인터</text><text x="694" y="88" font-size="12" opacity=".7">+ READ 또는 WRITE 래치</text>
         <text x="230" y="60" font-size="12">"이 페이지(vpid) 를</text><text x="230" y="76" font-size="12">READ 로 빌려줘"</text>
         <text x="580" y="62" font-size="12" fill="#14706b">래치와 함께 준다</text>
@@ -237,16 +237,16 @@
   <div class="eyebrow"><span class="num">04</span><span>래치 · 빠른 길</span><span class="bar"></span><span>page_buffer.c:2267</span></div>
   <h2>읽기 전용 fix 는 <b>해시 탐색도 BCB 뮤텍스도 건너뛴다</b> — 빠르지만 빠지는 게 있다</h2>
   <div class="figbox"><figure>
-    <svg viewBox="0 0 900 190" role="img" aria-label="pgbuf_fix 가 조건에 따라 lock-free 빠른 경로 또는 정규 경로로 가는 분기">
+    <svg viewBox="0 0 900 215" role="img" aria-label="pgbuf_fix 가 조건에 따라 lock-free 빠른 경로 또는 정규 경로로 가는 분기">
       <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
-        <rect x="20" y="60" width="220" height="70" rx="6" fill="none" stroke="currentColor"/><text x="34" y="86">pgbuf_fix</text><text x="34" y="108" font-size="12" opacity=".7">READ + 기존 페이지 + 무조건?</text>
-        <rect x="360" y="20" width="250" height="60" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="374" y="44" fill="#14706b" font-weight="600">빠른 길 pgbuf_lockfree_fix_ro</text><text x="374" y="66" font-size="12" opacity=".8">CAS 한 번, 뮤텍스 없음 → goto fast_path</text>
-        <rect x="360" y="110" width="250" height="60" rx="6" fill="none" stroke="currentColor"/><text x="374" y="134">정규 길</text><text x="374" y="156" font-size="12" opacity=".7">해시 탐색 → BCB mutex → holder 등록</text>
-        <rect x="700" y="60" width="180" height="70" rx="6" fill="none" stroke="currentColor"/><text x="714" y="86">공통 꼬리</text><text x="714" y="108" font-size="12" opacity=".7">fast_path: 라벨 :2447</text>
-        <text x="250" y="48" font-size="12" fill="#14706b">예</text><text x="250" y="150" font-size="12">아니오</text>
-        <text x="380" y="98" font-size="12" fill="#a85b16">✂ 정규 길만 하는 일(dealloc 보호 등록 :2376)은 빠진다</text>
+        <rect x="20" y="70" width="220" height="70" rx="6" fill="none" stroke="currentColor"/><text x="34" y="96">pgbuf_fix</text><text x="34" y="118" font-size="12" opacity=".7">READ + 기존 페이지 + 무조건?</text>
+        <rect x="340" y="20" width="280" height="66" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="354" y="44" fill="#14706b" font-weight="600">빠른 길 pgbuf_lockfree_fix_ro</text><text x="354" y="66" font-size="12" fill="#1f3d3a">CAS 한 번, 뮤텍스 없음 → goto fast_path</text>
+        <rect x="340" y="124" width="280" height="66" rx="6" fill="none" stroke="currentColor"/><text x="354" y="148">정규 길</text><text x="354" y="170" font-size="12" opacity=".7">해시 탐색 → BCB mutex → holder 등록</text>
+        <rect x="690" y="70" width="190" height="70" rx="6" fill="none" stroke="currentColor"/><text x="704" y="96">공통 꼬리</text><text x="704" y="118" font-size="12" opacity=".7">fast_path: 라벨 :2447</text>
+        <text x="252" y="58" font-size="12" fill="#14706b">예</text><text x="252" y="146" font-size="12" opacity=".7">아니오</text>
+        <text x="20" y="208" font-size="12" fill="#a85b16">✂ 정규 길만 하는 일(예: dealloc 보호 등록 :2376)은 빠른 길에서 빠진다 — 그런데 꼬리(:2465)는 두 길 공통</text>
       </g>
-      <g stroke="currentColor" fill="none" opacity=".5" marker-end="url(#ar)"><line x1="242" y1="80" x2="356" y2="50"/><line x1="242" y1="110" x2="356" y2="140"/><line x1="612" y1="50" x2="696" y2="85"/><line x1="612" y1="140" x2="696" y2="105"/></g>
+      <g stroke="currentColor" fill="none" opacity=".5" marker-end="url(#ar)"><line x1="242" y1="95" x2="336" y2="53"/><line x1="242" y1="115" x2="336" y2="157"/><line x1="622" y1="53" x2="686" y2="95"/><line x1="622" y1="157" x2="686" y2="115"/></g>
     </svg>
     <figcaption>같은 함수의 두 길이 공통 꼬리로 합쳐진다 — 꼬리가 "정규 길에서 등록한 것"을 해제하면 빠른 길은 반쪽 회계가 된다.</figcaption>
   </figure></div>
@@ -277,7 +277,7 @@
   <div class="figbox"><figure>
     <svg viewBox="0 0 900 200" role="img" aria-label="클래스에 IX 를 잡고 그 아래 행에 X 를 잡는 인텐트 계층">
       <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
-        <rect x="330" y="20" width="240" height="56" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="344" y="44" fill="#14706b" font-weight="600">클래스 t — IX</text><text x="344" y="64" font-size="12" opacity=".8">"이 테이블 어딘가에 쓰는 사람 있음"</text>
+        <rect x="330" y="20" width="240" height="56" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="344" y="44" fill="#14706b" font-weight="600">클래스 t — IX</text><text x="344" y="64" font-size="12" fill="#1f3d3a">"이 테이블 어딘가에 쓰는 사람 있음"</text>
         <rect x="80" y="120" width="200" height="50" rx="6" fill="none" stroke="currentColor"/><text x="94" y="142">행 #1 — X</text><text x="94" y="162" font-size="12" opacity=".7">UPDATE 중</text>
         <rect x="350" y="120" width="200" height="50" rx="6" fill="none" stroke="currentColor" opacity=".5"/><text x="364" y="142" opacity=".7">행 #2 — 락 없음</text><text x="364" y="162" font-size="12" opacity=".6">SELECT 는 스냅샷</text>
         <rect x="620" y="120" width="200" height="50" rx="6" fill="none" stroke="currentColor"/><text x="634" y="142">행 #3 — X</text><text x="634" y="162" font-size="12" opacity=".7">DELETE 중</text>
@@ -308,9 +308,9 @@
   <div class="figbox"><figure>
     <svg viewBox="0 0 900 150" role="img" aria-label="MVCC 행 헤더의 세 필드와 INSERT DELETE UPDATE 가 각각 무엇을 적는지">
       <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
-        <rect x="20" y="30" width="180" height="50" rx="6" fill="#ece8f4" stroke="#5b4b8a" stroke-width="1.5"/><text x="34" y="52" fill="#5b4b8a" font-weight="600">mvcc_insid</text><text x="34" y="70" font-size="12" opacity=".8">넣은 트랜잭션</text>
-        <rect x="210" y="30" width="180" height="50" rx="6" fill="#ece8f4" stroke="#5b4b8a" stroke-width="1.5"/><text x="224" y="52" fill="#5b4b8a" font-weight="600">mvcc_delid</text><text x="224" y="70" font-size="12" opacity=".8">지운/갱신한 트랜잭션</text>
-        <rect x="400" y="30" width="220" height="50" rx="6" fill="#ece8f4" stroke="#5b4b8a" stroke-width="1.5"/><text x="414" y="52" fill="#5b4b8a" font-weight="600">prev_version_lsa</text><text x="414" y="70" font-size="12" opacity=".8">옛 버전이 undo 로그 어디에</text>
+        <rect x="20" y="30" width="180" height="50" rx="6" fill="#ece8f4" stroke="#5b4b8a" stroke-width="1.5"/><text x="34" y="52" fill="#5b4b8a" font-weight="600">mvcc_insid</text><text x="34" y="70" font-size="12" fill="#3a2f5c">넣은 트랜잭션</text>
+        <rect x="210" y="30" width="180" height="50" rx="6" fill="#ece8f4" stroke="#5b4b8a" stroke-width="1.5"/><text x="224" y="52" fill="#5b4b8a" font-weight="600">mvcc_delid</text><text x="224" y="70" font-size="12" fill="#3a2f5c">지운/갱신한 트랜잭션</text>
+        <rect x="400" y="30" width="220" height="50" rx="6" fill="#ece8f4" stroke="#5b4b8a" stroke-width="1.5"/><text x="414" y="52" fill="#5b4b8a" font-weight="600">prev_version_lsa</text><text x="414" y="70" font-size="12" fill="#3a2f5c">옛 버전이 undo 로그 어디에</text>
         <rect x="630" y="30" width="250" height="50" rx="6" fill="none" stroke="currentColor"/><text x="644" y="60">데이터 …</text>
         <text x="20" y="112" font-size="12">INSERT → 새 행, insid = 나</text>
         <text x="300" y="112" font-size="12">DELETE → 행은 두고 delid = 나</text>
@@ -329,9 +329,9 @@
   <div class="figbox"><figure>
     <svg viewBox="0 0 900 150" role="img" aria-label="스냅샷의 세 구간과 행 가시성 판정 순서">
       <g fill="currentColor" font-family="IBM Plex Mono, monospace" font-size="13">
-        <rect x="20" y="30" width="270" height="44" rx="6" fill="#d9ebe9" stroke="#14706b"/><text x="34" y="50" fill="#14706b">&lt; lowest_active</text><text x="34" y="68" font-size="12" opacity=".8">전부 끝남 (커밋 or 중단)</text>
+        <rect x="20" y="30" width="270" height="44" rx="6" fill="#d9ebe9" stroke="#14706b"/><text x="34" y="50" fill="#14706b">&lt; lowest_active</text><text x="34" y="68" font-size="12" fill="#1f3d3a">전부 끝남 (커밋 or 중단)</text>
         <rect x="300" y="30" width="330" height="44" rx="6" fill="none" stroke="currentColor"/><text x="314" y="50">그 사이</text><text x="314" y="68" font-size="12" opacity=".8">비트맵으로 "아직 활성인가" 개별 판정</text>
-        <rect x="640" y="30" width="240" height="44" rx="6" fill="#f3e4d4" stroke="#a85b16"/><text x="654" y="50" fill="#a85b16">&gt; highest_completed</text><text x="654" y="68" font-size="12" opacity=".8">전부 안 시작함</text>
+        <rect x="640" y="30" width="240" height="44" rx="6" fill="#f3e4d4" stroke="#a85b16"/><text x="654" y="50" fill="#a85b16">&gt; highest_completed</text><text x="654" y="68" font-size="12" fill="#5a3410">전부 안 시작함</text>
         <text x="20" y="108" font-size="12">① insid 가 커밋됐나? 아니면 <tspan fill="#a85b16">안 보임</tspan></text>
         <text x="330" y="108" font-size="12">② delid 가 있고 커밋됐나? 그러면 <tspan fill="#a85b16">안 보임</tspan></text>
         <text x="680" y="108" font-size="12">③ 그 외 <tspan fill="#14706b">보임</tspan></text>
