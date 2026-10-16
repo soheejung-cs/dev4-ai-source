@@ -198,7 +198,7 @@
 
 - 인터럽트 검사는 페이지 단위로 올바름(:840). `shared_ptr`는 src/query 전체 0건.
 
-### expr_compile 계열 (develop에 없음 — feature/expression-compile 브랜치 한정)
+### expr_compile 계열 (**develop `b8199438e` 에 머지됨 — PR#7658 squash, 2026-10-16**; 아래 서술은 브랜치 시절 리비전 기준)
 
 > 아래 항목의 심볼(`expr_compile.c`/`.h`, `expr_scan_pred_compile`, `expr_k_fallback`,
 > `EXPR_ARG_ENCODE`, 캐리어 필드 `eval_prog`/`operand_prog`/`scan_prog`/`acc_kernel`/`sum_state`,
