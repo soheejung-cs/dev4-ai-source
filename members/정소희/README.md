@@ -22,6 +22,3 @@ GitHub `soheejung-cs` · JIRA `soheejung` · 컨테이너 **.50 / .51 / .52** (h
 ## 담당
 - 하루 1회 `staging/*.md` → 모듈 §2·§3 환류 배치, `python3 tools/gen_site.py`, 8825 사이트 재생성(.51).
 - 다른 컨테이너/팀원의 모듈 노트 기여 병합.
-
-## 참조 DBMS 소스 위치 (.52 만)
-- `~/dev/database-reference/` — 다른 컨테이너에서 scp 로 들여온 참조 DBMS 소스 트리(헤더 중심, 실행기 `.cc` 부재). 비교 문서는 `reference-dbms/database-reference/`, 표기 규칙은 그 README(제품명 금지).

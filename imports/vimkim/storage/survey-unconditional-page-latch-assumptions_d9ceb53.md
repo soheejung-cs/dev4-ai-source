@@ -55,18 +55,9 @@ pgbuf_fix(..., PGBUF_UNCONDITIONAL_LATCH)
 
 한 transaction 필드가 “반드시 기다려야 한다”와 “절대 기다리면 안 된다”라는 반대 계약을 동시에 전달하는 것이 근본 문제다. 따라서 CBRD-27356에서는 호출자가 wait/try/ordered-retry를 명시하도록 page-buffer 경계를 바꾸고, B-tree/best-space의 nonblocking 의미를 보존해야 한다.
 
-## PostgreSQL and MySQL
-
-| 시스템 | transaction lock timeout과 내부 latch 관계 | 이 패턴과의 대응 |
-|--------|--------------------------------------------|------------------|
-| PostgreSQL | `lock_timeout`은 heavyweight lock에 적용되고 LWLock/buffer content lock은 별도 blocking/conditional API를 사용 | transaction timeout 때문에 unconditional 내부 latch가 try-lock으로 바뀌는 대응 패턴 없음 |
-| MySQL/InnoDB | `innodb_lock_wait_timeout`은 record/table lock에 적용되고 page rw-lock/mutex는 별도 wait/nowait API를 사용 | transaction timeout이 internal latch caller의 실패 집합을 바꾸는 대응 패턴 없음 |
-
-세 DBMS의 상세 근거는 기존 [lock-vs-latch timeout 보고서](../../cbrd-27198/research/lock-vs-latch-timeout-survey_d9ceb53_codex.md)에 정리되어 있다.
-
 ## Runtime Probe
 
-새 probe는 실행하지 않았다. CBRD-27198의 기존 재현에서 `file_temp_alloc()` → `disk_reserve_sectors()` 경로로 `ER_LK_PAGE_TIMEOUT`이 assert에 도달하는 현상이 이미 확인됐고, 이번 질문은 같은 정적 호출 패턴의 범위를 찾는 것이므로 추가 instrumentation이 결론을 바꾸지 않는다. CUBRID, PostgreSQL, MySQL 소스는 수정하지 않았다.
+새 probe는 실행하지 않았다. CBRD-27198의 기존 재현에서 `file_temp_alloc()` → `disk_reserve_sectors()` 경로로 `ER_LK_PAGE_TIMEOUT`이 assert에 도달하는 현상이 이미 확인됐고, 이번 질문은 같은 정적 호출 패턴의 범위를 찾는 것이므로 추가 instrumentation이 결론을 바꾸지 않는다. CUBRID 소스는 수정하지 않았다.
 
 ## Unknowns
 
@@ -77,5 +68,3 @@ pgbuf_fix(..., PGBUF_UNCONDITIONAL_LATCH)
 ## Source Revisions
 
 - CUBRID: `/home/vimkim/gh/cb/review-CBRD-27198-no-wait-demote`, `d9ceb5317c4d5bf15d2bcd2e89c08c2db9de3530`, tracked files clean
-- PostgreSQL: `/home/vimkim/gh/pg/postgres`, `fd2b89854d93d70fe8c9a69d5b8fafd5b9302cfc`, tracked files clean; pre-existing `.omc/`
-- MySQL: `/home/vimkim/gh/mysql/mysql-server`, `06a5c1c99c377fc41b2eba1ea244e8b220bdc3c8`, tracked files clean

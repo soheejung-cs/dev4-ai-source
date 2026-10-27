@@ -207,7 +207,7 @@
 
 ### stats_analyze_mcv_list (statistics_ndv.c:205)
 
-- **PG analyze_mcv_list의 통계 검정 이식본이며 "1% 고정 규칙"으로 퇴행한 전례가 있다**:
+- **통계 검정 로직이며 "1% 고정 규칙"으로 퇴행한 전례가 있다**:
   `stats_analyze_mcv_list`(statistics_ndv.c:205 — 원 메모의 `:202`는 행 번호 확인 필요, 당시 소스와
   불일치)는 초기하분포 기반 연속성 보정 Wald 신뢰구간 하한
   (`mcv_counts[num_mcv-1] > selec * samplerows + 2 * stddev + 0.5`)으로 MCV 채택 개수를 정한다.
@@ -216,12 +216,12 @@
   MCV 300캡 중 12개만 채택되어 'Horror' 1,466배·6개 장르 IN 1,477배·cast_info.note
   '(voice: English version)' 839배 과소추정이 났고 이것이 JOB 30건 divergence의 1순위 원인이었다
   (격차 약 106초; 직접 원인 18b 18c 31a 31c 25a 25c 30a 30c 28b 8a, 잠재 9d/12/13). 리버트 커밋
-  bb9b53e46으로 PG 기준이 복원되며 mi.info MCV 12→300개, Horror 추정 오차 1,466배→7%가 되었다
+  bb9b53e46으로 원래 기준이 복원되며 mi.info MCV 12→300개, Horror 추정 오차 1,466배→7%가 되었다
   (퇴행 기준 바이너리 ba0d955ee). 호출부는 src/optimizer/histogram/histogram_sampler_sr.cpp:312
   (원 메모의 `:290`은 행 번호 확인 필요 — 당시 소스와 불일치)이며, 전수 reservoir 스캔에서
   stadistinct=모집단 비null NDV, stanullfrac=0.0, samplerows=reservoir 비null 크기, totalrows=정확한
   모집단 비null 행수로 매핑해 넘긴다. (기준: CBRD-27094 @ faf5a3b2a, 행번호 재검증됨)
-- ✅ **리뷰 체크포인트**: MCV 채택 로직 변경이면 PG analyze_mcv_list와의 수식 동치성, 시그니처의
+- ✅ **리뷰 체크포인트**: MCV 채택 로직 변경이면 시그니처의
   stadistinct/stanullfrac/samplerows/totalrows가 실제 계산에 쓰이는지(다시 `(void)` 처리되지
   않았는지), 전수 스캔의 비null 공간 매핑 규약(stanullfrac=0, totalrows=비null 모집단) 유지를 모두
   확인할 것.

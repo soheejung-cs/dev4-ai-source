@@ -1,7 +1,7 @@
 # 이벤트 position은 결정적 아이템 카운터로 합성 — offset 4키·_version UInt64 (§7.4 개정)
 
-CUBRID→ClickHouse HTAP POC(지도: xmilex-git/workspace#30, 판정 티켓: #36)에서 Debezium
-offset과 ClickHouse `_version`의 재료가 될 **이벤트 position**을, 커넥터가 유지하는
+CUBRID HTAP POC(지도: xmilex-git/workspace#30, 판정 티켓: #36)에서 Debezium
+offset과 `_version`의 재료가 될 **이벤트 position**을, 커넥터가 유지하는
 **결정적 비-TIMER 아이템 카운터**로 합성하기로 했다.
 
 근거가 된 P0 실측(#33 덤프 9종):
@@ -17,7 +17,7 @@ offset과 ClickHouse `_version`의 재료가 될 **이벤트 position**을, 커�
   스트림 내 충돌은 없다.
 
 배치 out_lsa를 position으로 쓰면 재시작 시 배치 경계가 달라져 **같은 이벤트가 원본보다
-낮은 version을 받는 역전**이 가능하다(늦은 이벤트가 이른 이벤트에게 짐 → RMT 오수렴).
+낮은 version을 받는 역전**이 가능하다(늦은 이벤트가 이른 이벤트에게 짐).
 카운터는 이 문제가 없다: 로그는 append-only라 **고정 LSA에서의 비-TIMER 아이템 시퀀스는
 결정적**이므로, offset에 카운터를 영속화해 재시작 시 이어 세면 같은 이벤트는 언제나 같은
 번호를 받는다.
@@ -32,8 +32,7 @@ offset과 ClickHouse `_version`의 재료가 될 **이벤트 position**을, 커�
 
 - `page_id`/`lsa_offset`: 재시작 anchor. **아직 COMMIT되지 않은 가장 오래된 in-flight
   트랜잭션의 첫 DML이 도착한 배치의 경계 LSA** (없으면 마지막 배치 out_lsa). COMMIT
-  위치에서 재개하면 그보다 먼저 시작한 진행 중 트랜잭션의 DML을 잃는다 — Debezium
-  Oracle(LogMiner)의 restart SCN과 같은 구조.
+  위치에서 재개하면 그보다 먼저 시작한 진행 중 트랜잭션의 DML을 잃는다.
 - `seq`: anchor 시점의 누적 비-TIMER 아이템 카운터. 재시작 시 이 값부터 이어 센다.
 - `epoch`: HA failover 세대 자리 예약. POC에서는 상수 0 (HA는 지도 범위 밖).
 
@@ -58,7 +57,7 @@ ABORT DCL 수신 시 폐기. COMMIT 전 publish 금지. 버퍼는 **in-memory �
 
 **재전송 semantics**: 커넥터는 at-least-once를 보장한다. 재시작 시 anchor부터 재추출하며
 그 이후의 committed 트랜잭션 전부가 재발행될 수 있다. 재발행 이벤트는 원본과 동일한
-event_counter(따라서 동일한 `_version`)와 동일한 내용을 가지므로 RMT canonical view에서
+event_counter(따라서 동일한 `_version`)와 동일한 내용을 가지므로
 정확히 수렴한다. exactly-once·중복 억제는 하지 않는다(#31 결정 유지). ABORT된
 트랜잭션은 원 실행이든 재전송이든 발행되지 않는다.
 
@@ -92,7 +91,7 @@ event_counter(따라서 동일한 `_version`)와 동일한 내용을 가지므�
   선택적 방어(무해)로 강등한다.
 - **savepoint 부분 rollback은 정합성 미보장 — POC 알려진 제약.** s06 실측: `ROLLBACK TO
   SAVEPOINT`로 취소된 DML이 보상 이벤트 없이 스트림에 그대로 남고 COMMIT까지 도착한다.
-  COMMIT-publish 규칙은 이 경우 **팬텀 행**(커밋된 적 없는 INSERT/UPDATE)을 ClickHouse에
+  COMMIT-publish 규칙은 이 경우 **팬텀 행**(커밋된 적 없는 INSERT/UPDATE)을
   싣는다. 스트림만으로는 식별이 원천 불가능해 커넥터 측 완화가 없다. POC 완료 계약
   (differential check)의 워크로드에서 savepoint를 배제하고, 프로덕션 경로는 supplemental
   log에 savepoint 마커/보상 이벤트를 추가하는 엔진 보강이 필요하다(지도 fog에 기록).

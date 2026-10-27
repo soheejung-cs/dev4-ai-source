@@ -25,7 +25,6 @@
 7. [왜 partial failure가 문제가 안 되는가](#7-왜-partial-failure가-문제가-안-되는가)
 8. [Crash 시 안전성](#8-crash-시-안전성)
 9. [비용 분석](#9-비용-분석)
-10. [다른 DBMS의 비슷한 개념](#10-다른-dbms의-비슷한-개념)
 11. [PR #6986에서의 활용](#11-pr-6986에서의-활용)
 12. [Forward-walk sysop 불변식 유지 방식](#12-forward-walk-sysop-불변식-유지-방식)
 13. [요약](#13-요약)
@@ -330,14 +329,6 @@ WAL 규율(페이지 변경 이전에 log 기록, log 순차 기록, 각 로그�
 실전에서 abort는 드물고, 정상 경로는 `start + commit` = 사실상 O(1) 두 번. PR #6986의 forward-walk inline 정리는 HAS_OOS가 참일 때만 sysop에 진입하므로 OOS-less 테이블에서 아예 발동하지 않는다.
 
 ---
-
-## 10. 다른 DBMS의 비슷한 개념
-
-| DBMS | 대응 개념 | 비교 |
-|---|---|---|
-| PostgreSQL | subtransaction (`SAVEPOINT` + `ROLLBACK TO SAVEPOINT`) | 개념적으로 유사. SQL 레벨 노출. |
-| Oracle | savepoint | SQL 레벨 노출. 내부적으로 유사한 스택 + undo 메커니즘. |
-| MySQL / InnoDB | savepoint + mini-transaction (mtr) | mtr이 CUBRID sysop에 가장 가깝다. |
 
 CUBRID sysop의 특징은 **Recovery index별 undo 핸들러**와 결합되어 동작한다는 점이다. 각 로그 타입이 자기 자신을 되돌릴 방법을 안다 (`recovery.c`의 `RV_fun[]` 테이블).
 

@@ -56,7 +56,7 @@
 - 포맷 의존 부분은 두 가지뿐: (a) 열 위치 탐색(`qfile_locate_tuple_value`) — 새 접근자(deform)로 대체해야 함; (b) `QFILE_GET_TUPLE_LENGTH(tuple) != tuple_record_p->size` sanity check(7269-7273) — 새 포맷에서 길이 워드 최상위 비트가 has-null 플래그가 되므로 `QFILE_GET_TUPLE_LENGTH`가 마스킹된 길이를 돌려주면 그대로 성립. 페이지 분할·memcpy는 페이지 레이아웃이라 포맷 무관.
 - 유지 조건: 덮어쓰기가 튜플 길이를 바꾸지 않을 것(= 동일 크기 계약). 복사본 갱신 후 통째로 쓰기 방식 자체는 새 포맷에서도 유효하다. 참고로 `qexec_ordby_put_next`의 오버플로 분기(3893-3910)는 덮어쓰기가 아니라 복사본 갱신 후 `qfile_add_tuple_to_list`로 새 리스트에 추가하므로 계약과 무관하다.
 
-### 2.3 (v) PG식 1B 짧은 헤더 도입 시 parent_pos BIT
+### 2.3 (v) 1B 짧은 헤더 도입 시 parent_pos BIT
 
 - parent_pos 본문은 `pr_type` 인코딩(floating BIT: 4B 비트길이 접두 + 40B) = **44B로 컴파일타임 상수**. 자리표시자(17918)와 덮어쓰기(19473/19508/19539) 모두 `sizeof(QFILE_TUPLE_POSITION) * 8`을 쓰고, ORDER SIBLINGS 재읽기도 `bit_length`를 그대로 보존(13205-13226)하므로 44B가 깨질 경로가 없다.
 - 44 ≤ 127이므로 짧은 헤더 규칙이 어떻게 정해지든(길이 기준이면) 양쪽 모두 1B 헤더. 새 포맷이 pr_type 내부의 4B 접두를 떼고 튜플 헤더 길이만 쓰기로 해도 40B로 여전히 상수. `tp_Bit.alignment = 1`(object_primitive.c:13458)이라 자연정렬에서 BIT 본문 앞 패딩은 없고, 뒤따르는 열의 패딩은 크기가 같으므로 불변.

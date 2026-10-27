@@ -76,7 +76,7 @@ typedef enum
   QFILE_VAR_SCRATCH		/* index_readval == NULL : 본문 L 바이트를 8B 정렬 스크래치로 memcpy 후 data_* */
 } QFILE_VAR_ACCESS;
 
-/* 컬럼 단위 레이아웃 — #181 D-181-3/4 로 8B 확정 (PG CompactAttribute 선례). hot 필드는 마스킹 없음.
+/* 컬럼 단위 레이아웃 — #181 D-181-3/4 로 8B 확정. hot 필드는 마스킹 없음.
  * off 는 data_off 기준 상수 오프셋; 첫 가변 컬럼 이후 또는 off>INT16_MAX 이후는 -1 (캐시 종료). */
 typedef struct qfile_col_layout QFILE_COL_LAYOUT;
 struct qfile_col_layout

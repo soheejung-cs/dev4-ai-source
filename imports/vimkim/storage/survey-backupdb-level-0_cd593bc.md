@@ -32,14 +32,6 @@ The checked-out manual says level 0 includes all database pages (`en/admin/backu
 
 Operationally, if the concern is runtime cost: `--no-check` avoids the broad pre-backup consistency traversal, and `--no-compress` avoids compression CPU, but neither changes level 0 into a raw disk copy nor avoids the full ordinary-volume page scan and recovery-consistency work.
 
-## PostgreSQL and MySQL
-
-| Engine mechanism | Mapping | Relevant difference |
-|---|---|---|
-| CUBRID level-0 `backupdb` | Exact subject | Scans every page of ordinary permanent volume files, after per-volume flush preparation, into a CUBRID backup archive with needed logs. |
-| PostgreSQL full `BASE_BACKUP` / `pg_basebackup` | Partial analogy | Also enters backup mode/checkpoints and reads files directly while the server runs (`src/backend/backup/basebackup.c:234-356,982-1065`). It recursively packages selected PGDATA/tablespace files, deliberately excluding items such as temporary relations and `pg_wal` contents (`basebackup.c:1176-1240,1330-1406`), rather than scanning fixed-size CUBRID volumes page by page. The surveyed client/server base-backup path has no CUBRID-like parallel reader-count option; `pg_basebackup` can stream WAL concurrently in a separate process/thread (`src/bin/pg_basebackup/pg_basebackup.c:612-740`). |
-| MySQL InnoDB Clone | Partial analogy | It is a physical online copy, but its consistency protocol is explicitly staged: file copy, changed-page copy, then redo copy (`storage/innobase/clone/clone0snapshot.cc:176-203`). Multiple clone tasks reserve and process distinct chunks, with an implementation maximum of 128 tasks (`storage/innobase/include/clone0desc.h:51`; `storage/innobase/clone/clone0clone.cc:1032-1105`; `storage/innobase/clone/clone0copy.cc:1365-1448`). This differs from CUBRID's ordered reader/compressor-to-single-writer pipeline. |
-
 ## Runtime Probe
 
 No runtime probe was useful for the central question. The branch condition (`isincremental == false`), complete page loop, file-size bound, checkpoint/flush calls, and packaging calls directly establish the behavior. A black-box backup would confirm output size and timing but would not distinguish all of those internal steps without instrumentation. No source or database state was changed.
@@ -52,5 +44,3 @@ The exact wall-clock split among the default consistency check, checkpoint/flush
 
 - CUBRID: `/home/vimkim/gh/cb/develop`, branch `develop`, `WORKTREE` based on `cd593bcf2d8643b4698f1cb311c4c23af23a9d57`. The worktree had unrelated changes (`cubrid-cci`, `PLAN.md`, `insert.sql`, `test.sh`); the traced engine files were not modified.
 - CUBRID manual: `/home/vimkim/gh/cubrid-manual`, branch `develop`, `3b6ae97bfbdc664b010ffa933ded5a05b291ae03` (`v11.3-177-g3b6ae97b`).
-- PostgreSQL: `/home/vimkim/gh/pg/postgres`, `fd2b89854d93d70fe8c9a69d5b8fafd5b9302cfc`.
-- MySQL: `/home/vimkim/gh/mysql/mysql-server`, `06a5c1c99c377fc41b2eba1ea244e8b220bdc3c8`.

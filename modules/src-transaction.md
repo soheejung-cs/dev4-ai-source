@@ -92,7 +92,7 @@ MVCC, WAL, 락, 리커버리, 부트를 담당하는 서버 측 최대 모듈. �
 ### log_sysop_start / log_sysop_commit / log_sysop_abort (log_manager.c)
 
 - TDES 의 topops 스택으로 중첩되는 시스템 오퍼레이션. abort 는 그 sysop 안의 로그만 undo 하고(부분 실패가 상위 트랜잭션을 깨지 않는 이유), commit 은 상위에 흡수되거나 `LOG_SYSOP_END` 로 독립 커밋.
-  crash 안전성·비용·다른 DBMS 의 대응 개념은 `imports/vimkim/transaction/sysop-explained_977cf18a4.md` §1~§10 (§6·§11·§12 의 예시는 feat/oos). `log_sysop_start` (:3667) 는 디스크 I/O·WAL 레코드 없이
+  crash 안전성·비용은 `imports/vimkim/transaction/sysop-explained_977cf18a4.md` §1~§9 (§6·§11·§12 의 예시는 feat/oos). `log_sysop_start` (:3667) 는 디스크 I/O·WAL 레코드 없이
   `tdes->topops.stack[last].lastparent_lsa = tail_lsa` 만 밀어 넣고(O(1), `lock_topop` 1회), 종료는 `LOG_SYSOP_END` 한 종류에 `LOG_SYSOP_END_TYPE` 이 `COMMIT / ABORT / LOGICAL_UNDO / LOGICAL_COMPENSATE / LOGICAL_RUN_POSTPONE`
   (log_record.hpp:67~, 진입 `log_sysop_commit` :3984, `log_sysop_end_logical_undo` :4009, `_compensate` :4052, `_run_postpone` :4071). — vimkim 2026-09-30; .51 대조 develop 0d0809963
 

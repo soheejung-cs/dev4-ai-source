@@ -1,7 +1,7 @@
 # CBRD-27365 연구: 자연 정렬(INT 4B 등)이 pr_type / OR_* (역)직렬화에 안전한가
 
 - 티켓: xmilex-git/workspace #183 (지도 #179 의 일부)
-- 대상 소스: `/home/cubrid/dev/cubrid` develop `77bd76bab` (2026-09-02), PostgreSQL `/home/cubrid/dev/postgres` `5713b437abe` (20devel)
+- 대상 소스: `/home/cubrid/dev/cubrid` develop `77bd76bab` (2026-09-02)
 - 작성일: 2026-09-02
 - 모든 경로는 특별한 언급이 없으면 CUBRID 체크아웃 기준.
 
@@ -9,7 +9,7 @@
 
 1. **안전하다.** `pr_type::data_readval/data_writeval` 는 모두 `or_get_*/or_put_*` 를 거치며, 그 함수들이 요구(assert)하는 정렬은 **INT_ALIGNMENT(4)** 이 최대다(SHORT/ENUM 은 2). 8바이트 타입(BIGINT/DOUBLE)조차 4바이트 정렬만 assert 한다. 자연 정렬(INT 4, SHORT 2, BIGINT/DOUBLE 8)은 이 요구를 모두 만족하므로 기존 (역)직렬화 코드를 **수정 없이** 그대로 쓸 수 있다.
 2. **현재의 `DB_ALIGN(disk_size, MAX_ALIGNMENT)`(8B)는 관성이다.** 어떤 접근자도 8바이트 정렬을 요구하지 않는다. 원저자 주석 "I don't know if the following is still true." 가 이를 자백하고 있고, git 이력상 2014 초기 import 이전(레거시)부터 있던 규칙이다. 실제 비용은 INT 컬럼 하나가 16B(헤더 8 + 값 4 + 패딩 4)를 차지하는 것.
-3. **가변 값은 "정렬하지 않고 길이 헤더로만 판별"이 더 단순하고 안전하다.** PG 의 패딩바이트 피크 트릭은 "4B 헤더 varlena 는 정렬하고 1B 헤더 varlena 는 정렬하지 않는" PG 고유의 혼합 규칙 때문에 필요한 것이다. 가변 값을 항상 비정렬로 두면 판별 자체가 불필요해지고, 트릭이 의존하는 두 불변식(패딩은 0, 1B 헤더는 비영)도 유지할 필요가 없다.
+3. **가변 값은 "정렬하지 않고 길이 헤더로만 판별"이 더 단순하고 안전하다.**
 4. **함정 하나(중요):** 문자열 계열 `data_writeval` 은 값 뒤를 **절대 주소 기준**으로 4B 패딩(`or_put_align32`)하고, `data_lengthval` 은 버퍼 시작이 4B 정렬이라는 가정으로 크기를 계산한다. 가변 값을 비정렬 위치에 두면서 `data_writeval` 을 그대로 호출하면 **lengthval ≠ 실제 기록 크기** 가 된다. 새 포맷의 가변 값 기록은 `index_*` 계열(CHAR_ALIGNMENT, 패딩 없음)이나 전용 원시 복사를 써야 한다.
 
 ---
@@ -132,24 +132,11 @@ B-tree midxkey 요소는 널맵/오프셋 헤더 뒤에 패딩 없이 연속 패
 - **BIT(n)** 은 `variable_p = 0` 이지만 `disksize = 0` 이고 `mr_data_lengthval_bit` 가 있어 `is_size_computed() == true` (`:13458`, `:13051-13088`) → 지도의 결정대로 가변 취급이 맞다. NUMERIC(`:1639`, `variable_p=1`), CHAR(n)(`:12733`) 도 동일.
 - `is_always_variable()` 은 신뢰 불가라는 헤더 주석(`object_primitive.h:440-443`) 이 판정 기준을 `is_size_computed()` 로 잡은 것을 뒷받침.
 
-**설계 함의:** 자연 정렬을 "가장 큰 필드" 기준으로 두면 실제로 8 이 필요한 타입은 **BIGINT/DOUBLE 둘뿐**이고, 나머지 8·12B 복합 타입(DATETIME, TIMESTAMPTZ, OID, DATETIMETZ, MONETARY)은 4 다. 레이아웃 디스크립터에는 "disksize" 와 별도로 "alignby" 를 타입별 상수로 두는 것이 맞으며(PG `CompactAttribute.attalignby` 와 동일 개념), 값은 위 표의 "자연 정렬" 열을 권고한다. 4 로 통일(힙 관례)도 코드상 안전하나 `OR_GET_DOUBLE` 캐스트 UB 를 새 포맷까지 가져가는 셈이라 권하지 않는다.
+**설계 함의:** 자연 정렬을 "가장 큰 필드" 기준으로 두면 실제로 8 이 필요한 타입은 **BIGINT/DOUBLE 둘뿐**이고, 나머지 8·12B 복합 타입(DATETIME, TIMESTAMPTZ, OID, DATETIMETZ, MONETARY)은 4 다. 레이아웃 디스크립터에는 "disksize" 와 별도로 "alignby" 를 타입별 상수로 두는 것이 맞으며, 값은 위 표의 "자연 정렬" 열을 권고한다. 4 로 통일(힙 관례)도 코드상 안전하나 `OR_GET_DOUBLE` 캐스트 UB 를 새 포맷까지 가져가는 셈이라 권하지 않는다.
 
 ---
 
-## 4. (d) PG 1B 짧은 varlena 헤더 패딩바이트 피크 트릭 vs "가변 값은 정렬하지 않음"
-
-### 4.1 PG 트릭의 정확한 전제
-
-- `src/include/access/tupmacs.h:363-378` (`att_align_pointer`): varlena(attlen == -1)를 만나면 현재 바이트를 **피크**해 `VARATT_NOT_PAD_BYTE(ptr)` (= `*(uint8*)ptr != 0`, `varatt.h:205-206`) 이면 정렬 없이 그 자리에서 읽고, 0 이면 `att_align_nominal` 로 정렬한 뒤 읽는다.
-- 성립 조건 (`varatt.h:156-180` 주석): (1) 4B 헤더 varlena 는 **정렬되어** 저장, (2) 1B 헤더는 헤더 자신을 길이에 포함해 **절대 0 이 아님**, (3) **패딩 바이트는 반드시 0** ("We now *require* pad bytes to be filled with zero!"), (4) 리틀엔디안에서 4B 헤더의 첫 바이트 하위 2비트가 00 이므로 첫 바이트가 0 이면 어차피 정렬된 4B 헤더거나 패딩 → 정렬해도 안전.
-- 쓰기 측 (`src/backend/access/common/heaptuple.c:349-367`, `heap_compute_data_size` 동 파일): 짧게 만들 수 있으면 헤더 1B 로 변환하고 **정렬 생략**, 아니면 `att_nominal_alignby` 로 정렬 후 4B 헤더 그대로 복사. 즉 **같은 컬럼이 튜플마다 정렬 여부가 달라진다** — 피크가 필요한 이유는 정확히 이것이다.
-
-### 4.2 우리 자연 정렬 규칙 하에서
-
-- 고정 값은 레이아웃 디스크립터의 `alignby` 로 `att_align_nominal` 식 정렬 → 피크 불필요(PG 도 고정 타입은 피크하지 않음).
-- 가변 값을 **"항상 비정렬(이전 값 끝 = 시작)"** 로 두면, 가변 값 앞에는 패딩이 존재할 수 없다 → 피크할 대상이 없다. 헤더 1B/4B 판별은 **헤더 첫 바이트의 플래그 비트**로 하면 되고(PG 는 LE 하위 비트, CUBRID varchar 는 `0xFF` 이스케이프 — `or_varchar_length_internal` `object_representation.h:2326-2340`, `pr_write_compressed_string_to_buffer` `object_primitive.c:14713`), 4B 헤더는 memcpy 로 읽으면 정렬 무관.
-- PG 트릭을 그대로 얹어도 **논리적으로는 여전히 성립**한다(4B 헤더 첫 바이트를 비영으로 인코딩하면 피크가 항상 "not pad" → 정렬 안 함 → 우리 규칙과 동일 결과). 그러나 그 경우 트릭은 항상 같은 분기를 타는 **죽은 코드**이며, 대신 "패딩은 0 으로 채워야 한다", "1B 헤더는 0 일 수 없다(빈 문자열 길이 0 을 헤더 값 1 로 시프트)" 라는 두 불변식을 코드 전체가 지켜야 하는 부담만 남는다. 이는 오늘의 CUBRID 가 지키지 않는 불변식이다(패딩 memset 은 `!NDEBUG` 에서만: `query_opfunc.c:401-404`).
-- 우리 규칙의 유일한 추가 비용: 가변 값 뒤에 오는 **고정 값** 앞에 정렬 패딩이 생길 수 있음(PG 도 동일). 가변 값 뒤 오프셋은 접두 증분 deform 캐시로 해결(지도 결정과 일치).
+## 4. (d) "가변 값은 정렬하지 않음"
 
 ### 4.3 CUBRID 고유 함정 — 문자열 `data_writeval` 의 절대 주소 패딩
 
@@ -166,8 +153,8 @@ B-tree midxkey 요소는 널맵/오프셋 헤더 뒤에 패딩 없이 연속 패
 **D-183-1 고정 값 정렬:** 레이아웃 디스크립터에 타입별 `alignby` 상수를 두고 §3 "자연 정렬" 열을 채택 — SHORT/ENUM 2, INT/FLOAT/DATE/TIME/TIMESTAMP(+LTZ) 4, TIMESTAMPTZ/DATETIME(+LTZ)/DATETIMETZ/OID/OBJECT/MONETARY 4, **BIGINT/DOUBLE 8**. 기존 `data_readval/data_writeval` 및 `data_cmpdisk` 를 무수정으로 재사용 가능(assert 최대 4 충족). 8 은 힙 관례(4)보다 보수적이며 `OR_GET_DOUBLE` 캐스트 UB 를 새 포맷에서 제거한다. 비용은 4B→8B 타입 전환 지점당 ≤4B.
 - 이유: §1.2, §1.4, §3. 대안(모두 4): 안전하나 UB 잔존. 롤백: `alignby` 테이블 값만 바꾸면 되므로 포맷 상수 한 줄 변경.
 
-**D-183-2 가변 값:** "정렬하지 않음, 길이 헤더로만 판별". PG 피크 트릭은 채택하지 않음(우리 규칙에서 항상 동일 분기 → 죽은 코드 + 불필요한 불변식 2개). 1B/4B 헤더 판별은 첫 바이트 플래그 비트(예: bit7=0 → 1B 길이 0..127, bit7=1 → 4B 네트워크 오더 길이 & 0x7FFFFFFF, memcpy 로 읽기). 빈 문자열 헤더 0x00 허용(피크가 없으므로 0 금지 불필요).
-- 이유: §4.1-4.2. 대안(PG 트릭 유지): 이점 없음. 롤백: 헤더 판별 함수 하나에 국한.
+**D-183-2 가변 값:** "정렬하지 않음, 길이 헤더로만 판별". 1B/4B 헤더 판별은 첫 바이트 플래그 비트(예: bit7=0 → 1B 길이 0..127, bit7=1 → 4B 네트워크 오더 길이 & 0x7FFFFFFF, memcpy 로 읽기). 빈 문자열 헤더 0x00 허용.
+- 롤백: 헤더 판별 함수 하나에 국한.
 
 **D-183-3 가변 값 기록 경로:** `data_writeval` 을 비정렬 위치에 호출 금지. `index_*` 계열 또는 접근자 API 내 직접 복사 사용, `data_lengthval` 대신 `index_lengthval`(CHAR_ALIGNMENT) 로 크기 계산. 접근자에 `assert` 로 "기록 크기 == 계산 크기" 명문화.
 - 이유: §4.3. 이것을 놓치면 튜플 길이 불일치가 릴리스 빌드에서 조용히 데이터를 깨뜨린다.

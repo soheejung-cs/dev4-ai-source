@@ -17,7 +17,6 @@ Status: FROZEN
 3. MVCC의 snapshot read가 lock-free에 가까워져도 DDL, writer-writer 충돌, `SELECT ... FOR UPDATE`, unique/FK 검사가 잠금을 요구하는 이유를 설명한다.
 4. “MVCC lock”은 하나의 고유 lock mode가 아니라 MVCC 경로에서 선택되는 class/row/transaction lock 정책이라는 점을 설명한다.
 5. MVCCID self-lock의 `X_LOCK` holder와 `S_LOCK` waiter가 inserter 종료를 rendezvous하는 과정과 `active publication -> unlock -> wakeup/recheck` 순서를 설명한다.
-6. PostgreSQL과 MySQL/InnoDB의 가장 가까운 메커니즘을 `equivalent`, `partial analogy`, `no equivalent`로 구분한다.
 
 ## 포함하는 Module과 Interface
 
@@ -58,8 +57,6 @@ Status: FROZEN
 - transaction/MVCC lifecycle seam: `src/transaction/log_tran_table.c`, `log_manager.c`, `mvcc.c`, `mvcc_table.cpp`
 - deadlock seam: `src/transaction/wait_for_graph.c`
 - configuration/observability seam: `src/base/system_parameter.c`, `perf_monitor.c`, lock dump와 event log
-- PostgreSQL: heavyweight lock manager, relation/tuple/transaction-ID 및 speculative insertion wait
-- MySQL/InnoDB: metadata/table intention/record locks, transaction lock wait, read view와 unique/FK checks
 
 ## 명시적으로 제외하는 범위
 
@@ -69,13 +66,12 @@ Status: FROZEN
 - wait-for graph 구현의 모든 최적화와 모든 victim tie-break 규칙
 - WAL, checkpoint, ARIES, vacuum의 전체 설계와 on-disk MVCC record layout
 - distributed lock, HA replication lock, client/broker protocol 전체
-- PostgreSQL/MySQL 서버 실행 실험
 - CUBRID 소스 수정, instrumentation, PR/JIRA/commit/push/publish
 - ABI, on-disk byte format, exact error code, exact timing, starvation-free 또는 bit-for-bit 호환성
 
 제외 항목도 Lock Manager Interface의 caller obligation이나 실패·restart 경계를 설명하는 데 필요한 만큼은 다룬다. Lock table은 volatile하므로 crash 뒤 복원되는 persistent lock state를 약속하지 않으며, WAL 자체의 재구현은 이 범위에 포함하지 않는다.
 
-## 세 데이터베이스가 공유하는 시나리오
+## 시나리오
 
 테이블 `account(id PRIMARY KEY, balance)`에 대해 T1이 기존 행을 갱신하고 새 unique key를 삽입하는 동안 T2가 다음 네 동작을 시도한다고 가정한다.
 
@@ -83,10 +79,6 @@ Status: FROZEN
 2. `SELECT ... FOR UPDATE`로 같은 행을 읽고 쓰기 권리를 예약한다.
 3. 같은 행을 `UPDATE`한다.
 4. T1이 아직 commit하지 않은 동일 unique key를 `INSERT`한다.
-
-세 DBMS에서 relation/table/class, tuple/record/instance, transaction identity 중 무엇이 resource가 되는지, 누가 기다리고 무엇을 다시 검사하는지, commit/abort가 어떻게 wait를 끝내는지 비교한다.
-
-공통 비교 축은 responsibility와 Module, Interface와 caller obligation, resource identity, owner/lifetime, state transition, compatibility/wait protocol, deadlock/timeout, durability/restart 경계, configuration/observability, 성능 trade-off이다.
 
 ## 모든 장이 답해야 하는 질문
 
@@ -99,7 +91,6 @@ Status: FROZEN
 7. commit, abort, subtransaction 종료, shutdown에서 누가 해제·회수하는가?
 8. MVCC visibility, object lock, self-lock, page latch는 각각 어떤 race를 막는가?
 9. source fact, runtime observation, inference, unknown, analogy 중 어떤 근거 등급인가?
-10. PostgreSQL/MySQL의 대응은 책임과 불변식까지 같은가, 일부만 비슷한가, 대응이 없는가?
 
 ## Central Behaviors
 
@@ -108,13 +99,13 @@ Status: FROZEN
 3. `mvcc-lock-policy`: snapshot read, locked read, DML에서 MVCC visibility와 class/row lock이 역할을 나누는 정책과 writer-writer 보호.
 4. `mvccid-self-lock-rendezvous`: inserter가 자기 MVCCID에 가진 `X_LOCK`과 unique/FK observer의 `S_LOCK` wait/recheck가 per-row lock 수를 줄이면서 정확성을 보존하는 rendezvous.
 
-각 Central Behavior는 CUBRID/PostgreSQL/MySQL/비교 Claim, 하나 이상의 안전한 CUBRID runtime Experiment, 재현 가능한 Quiz, Book anchor, Live Grill concept에 연결한다.
+각 Central Behavior는 CUBRID Claim, 하나 이상의 안전한 CUBRID runtime Experiment, 재현 가능한 Quiz, Book anchor, Live Grill concept에 연결한다.
 
 ## Coverage Matrix
 
 | Coverage Obligation | 계획된 답변 위치와 질문 |
 |---|---|
-| orientation | 01장: 범위, 학습 경로, 핵심 결론, 세 revision과 dirty provenance는 무엇인가? |
+| orientation | 01장: 범위, 학습 경로, 핵심 결론, revision과 dirty provenance는 무엇인가? |
 | mental-model | 02장: mutex·latch·transaction lock·MVCC visibility를 어떤 보호 대상으로 구분하는가? |
 | scope-interface-seams | 03장: caller가 알아야 할 Lock Manager Interface와 query/storage/transaction seam은 무엇인가? |
 | data-ownership-lifetime | 04장: resource, holder, waiter, transaction hold list를 누가 만들고 회수하는가? |
@@ -126,9 +117,6 @@ Status: FROZEN
 | errors-resource-pressure | 06·09장: allocation 실패, timeout, deadlock, interrupt, shutdown race의 전파와 cleanup은 무엇인가? |
 | performance-observability | 09장: hash contention, waiter cost, row-lock 절감, escalation, counters/dumps/tuning과 측정 한계는 무엇인가? |
 | experimental-validation | 10장: 네 Central Behavior를 어떤 owned database와 oracle로 관찰했는가? |
-| postgresql-analysis | 11장: heavyweight relation/tuple/transaction-ID mechanism이 같은 시나리오를 어떻게 처리하는가? |
-| mysql-analysis | 12장: MySQL server와 InnoDB가 책임을 어떻게 나누고 table/record/trx wait를 수행하는가? |
-| cross-database-comparison | 13장: 동일한 책임·resource·wait/recheck를 어떤 analogy class로 매핑하는가? |
 | reimplementation-blueprint | 14장: Interface, abstract model, total transitions, 오류, 순서, conformance test를 무엇부터 구현하는가? |
 | glossary-evidence-unknowns | 14장: 용어, claim/evidence index, experiment transcript, unknown, compatibility limit, readiness는 무엇인가? |
 | teaching-map | 01·10·14장: 각 central behavior와 claim이 Quiz 및 Live Grill mastery에 어떻게 연결되는가? |
@@ -136,7 +124,5 @@ Status: FROZEN
 ## Provenance Freeze
 
 - CUBRID: `/home/vimkim/gh/cb/cubrid-analysis` @ `f30f1c26003e5aa8e93182648e06cad76fc77064` (`WORKTREE`, dirty fingerprint는 `provenance.json` 참조)
-- PostgreSQL: `/home/vimkim/gh/pg/postgres` @ `fd2b89854d93d70fe8c9a69d5b8fafd5b9302cfc` (untracked `.omc/`만 존재하는 dirty fingerprint)
-- MySQL: `/home/vimkim/gh/mysql/mysql-server` @ `06a5c1c99c377fc41b2eba1ea244e8b220bdc3c8` (clean)
 
 이 범위는 SHA-256으로 고정한다. source가 새로운 필수 seam을 드러내면 넓힌 이유를 기록하되 검증을 통과하려고 의무를 조용히 줄이지 않는다.

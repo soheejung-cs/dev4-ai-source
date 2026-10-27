@@ -23,7 +23,7 @@
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-query.html" class="cur"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠21</span></span></a></li>
 <li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
@@ -164,7 +164,7 @@
 <ul>
 <li>인터럽트 검사는 페이지 단위로 올바름(:840). <code>shared_ptr</code>는 src/query 전체 0건.</li>
 </ul>
-<h4>expr_compile 계열 (develop에 없음 — feature/expression-compile 브랜치 한정)</h4>
+<h4>expr_compile 계열 (<strong>develop <code>b8199438e</code> 에 머지됨 — PR#7658 squash, 2026-10-16</strong>; 아래 서술은 브랜치 시절 리비전 기준)</h4>
 <blockquote>아래 항목의 심볼(<code>expr_compile.c</code>/<code>.h</code>, <code>expr_scan_pred_compile</code>, <code>expr_k_fallback</code>,</blockquote>
 <blockquote><code>EXPR_ARG_ENCODE</code>, 캐리어 필드 <code>eval_prog</code>/<code>operand_prog</code>/<code>scan_prog</code>/<code>acc_kernel</code>/<code>sum_state</code>,</blockquote>
 <blockquote><code>qdata_numeric_sum_flush</code>, <code>EXPR_COMPILE</code> trace 덤프)은 <strong>develop 95b79e7ed에 존재하지 않는다</strong></blockquote>

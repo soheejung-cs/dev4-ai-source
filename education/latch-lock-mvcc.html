@@ -256,38 +256,22 @@ pgbuf_unfix (thread_p, pgptr);</code></pre>
 <figcaption>그림 4. 남긴 것 = unique/FK 직렬화. 버린 것 = MVCC 와 중복이던 행 단위 읽기 격리.</figcaption>
 </figure>
 
-<h2>6. Oracle 은 어떻게 다른가 — "행마다 버전을 안 적는다"</h2>
-<p>사용자 질문: "Oracle 은 MVCC 를 행마다 적지 않는다던데." 맞다. 아래 표에서 <b>매뉴얼로 확인한 것</b>과 <b>일반 지식(매뉴얼 미확인)</b>을 구분했다. 로컬에 있는 Oracle 매뉴얼은 SQL Reference 10gR1 뿐이라 내부 구조(ITL·undo·SCN)는 Concepts 가이드 확인 전까지 <b>매뉴얼 미확인</b>으로 표기한다.</p>
-<table>
-<thead><tr><th>항목</th><th>Oracle</th><th>CUBRID</th><th>차이가 뜻하는 것</th></tr></thead>
-<tbody>
-<tr><td>버전 메타데이터 위치</td><td>행 헤더에 트랜잭션 ID 를 직접 적지 않는다. <b>블록 헤더의 ITL(Interested Transaction List) 슬롯</b>에 그 블록을 만진 트랜잭션(XID·undo 위치·commit SCN)을 두고, 행은 그 슬롯 번호(lock byte)만 가리킨다. <span class="src">(매뉴얼 미확인 — Concepts 가이드 없음)</span></td><td>행마다 <code>mvcc_insid</code>/<code>mvcc_delid</code>/<code>prev_version_lsa</code> (mvcc.h:38). 블록 단위 슬롯 없음</td><td>CUBRID 는 행 하나만 봐도 가시성이 결정되고 vacuum 이 행 단위로 정리한다. Oracle 은 블록 단위 슬롯이라 헤더가 작지만 슬롯이 모자라면(ITL 부족) 대기가 생긴다</td></tr>
-<tr><td>옛 버전은 어디에</td><td>테이블 블록엔 최신만. 옛 이미지는 <b>undo 세그먼트</b>. 읽기는 블록의 SCN 이 질의 SCN 보다 새로우면 블록을 복제해 undo 를 역적용한 <b>consistent read 블록</b>을 만든다. <span class="src">(매뉴얼 미확인)</span></td><td>같은 방향 — 힙엔 최신 버전, 옛 버전은 <b>undo 로그</b>에 있고 <code>prev_version_lsa</code> 로 따라간다 (<code>heap_get_visible_version_from_log</code>)</td><td>둘 다 "제자리 갱신 + undo 에서 재구성" 계열. PG 처럼 힙에 여러 버전을 쌓는 방식이 아니다. CUBRID 의 특이점은 <b>undo 가 WAL(트랜잭션 로그) 안에</b> 있다는 것 — 그래서 로그 append 위치(<code>append_lsa</code>)를 읽기 경로가 본다(CBRD-27400)</td></tr>
-<tr><td>시점 좌표</td><td>SCN (System Change Number) 하나</td><td>MVCCID (64비트 단조) + 스냅샷(lowest_active / highest_completed / 비트맵)</td><td>CUBRID 는 "활성 집합" 을 비트맵으로 들고 다녀 "커밋됐나" 를 SCN 비교가 아니라 집합 검사로 푼다</td></tr>
-<tr><td>읽기와 락</td><td><b>"A query never places a lock on a table. Readers never block writers and writers never block readers."</b> <span class="src">(SQL Reference 10gR1, LOCK TABLE, 18-85 / p.1565)</span></td><td>SELECT 는 클래스 IS 만 잡고 행 락 없음 (§4). 읽기가 쓰기를 막지 않는 점은 같다. 단 DDL(SCH_M) 은 SCH_S/IS 와 부딪힌다</td><td>둘 다 reader/writer 비차단. CUBRID 의 IS 는 "DDL 을 막기 위한" 인텐트지 행 보호가 아니다</td></tr>
-<tr><td>DML 의 테이블 락</td><td>UPDATE/INSERT/DELETE 는 자동으로 <b>ROW EXCLUSIVE</b>(=RX) 테이블 락. 모드는 ROW SHARE / ROW EXCLUSIVE / SHARE / SHARE ROW EXCLUSIVE / EXCLUSIVE, <code>LOCK TABLE … IN … MODE [NOWAIT]</code> 로 수동 지정 가능 <span class="src">(18-87~88 / p.1567-1568)</span></td><td>UPDATE/DELETE/INSERT 는 클래스 <b>IX</b> (§4). 수동 테이블 락 문은 없고 <code>lock_timeout</code>·no-wait 는 세션/트랜잭션 속성</td><td>RX ≈ IX, SHARE ≈ S, EXCLUSIVE ≈ X 로 대응. 이름만 다르고 계층 구조(인텐트 → 행)는 같다</td></tr>
-<tr><td>행 락의 실체</td><td>별도 락 매니저 테이블이 아니라 <b>블록 안의 lock byte + ITL</b> (TX 락은 트랜잭션당 enqueue 하나). 행 락 수에 비례해 커지는 전역 구조가 없다. <span class="src">(매뉴얼 미확인)</span></td><td>전역 해시맵의 <code>LK_ENTRY</code> — 행 락 수에 비례. 그래서 INSERT 600만 건이 문제가 됐고 self-lock(§5.1)이 나왔다</td><td>Oracle 의 "트랜잭션당 TX enqueue 하나 + 행은 슬롯 포인터" 가 CUBRID self-lock 의 발상과 닮았다 — CUBRID 는 INSERT 에만 적용했고 UPDATE/DELETE 는 여전히 행 X</td></tr>
-<tr><td>정리(청소)</td><td>undo 는 undo 세그먼트에서 순환 재사용(retention). 테이블 블록은 delayed block cleanout 으로 커밋 표시가 뒤늦게 반영 <span class="src">(매뉴얼 미확인)</span></td><td>vacuum 데몬이 로그를 따라가며 delid 가 오래된 버전을 물리 삭제, 산 행은 ALL_VISIBLE 표시 (vacuum.c)</td><td>CUBRID 는 청소 주체가 별도 데몬이라 "vacuum 이 지금 이 페이지를 치울 수 있다" 를 힙 코드가 항상 전제해야 한다(§7 ③)</td></tr>
-</tbody></table>
-<p class="src">Oracle 인용은 로컬 매뉴얼 <code>dev4-oracle-manual/sql-reference-10gR1</code> 의 쪽 번호. "매뉴얼 미확인" 항목은 Oracle Database Concepts 가이드가 리포에 들어오면 절 번호로 바꿔야 한다.</p>
-
-<h2>7. 신입이 밟는 함정 셋 (전부 실제 사례)</h2>
+<h2>6. 신입이 밟는 함정 셋 (전부 실제 사례)</h2>
 <div class="grid3">
 <div class="card latch"><h3>① 래치로 락을, 락으로 래치를 대신하려 함</h3><p>래치는 함수 안에서 끝나야 하고 락은 트랜잭션 끝까지 간다. 페이지 래치를 쥔 채 <code>lock_object</code> 대기에 들어가면 래치 데드락(감지 없음) → 300초 코어. <span class="src">모듈 노트 src-storage §2 리뷰 체크포인트</span></p></div>
 <div class="card latch"><h3>② no-wait 트랜잭션 안의 무조건 래치</h3><p>조용히 조건부가 되어 NULL 이 돌아온다(page_buffer.c:2227). <code>bestspace::L1_fix</code> 처럼 busy 를 정상으로 다루는 호출자와 <code>disk_reserve_sectors</code> 처럼 assert 하는 호출자가 같은 코드에 섞여 있다. <span class="src">CBRD-27198 / PR#7630, imports/vimkim/storage/survey-unconditional-page-latch-assumptions</span></p></div>
 <div class="card mvcc"><h3>③ MVCCID 와 tran_index 혼동 · vacuum 동시성</h3><p>스냅샷·헤더·self-lock 키는 MVCCID(재사용 안 됨), 락 엔트리·TDES 슬롯은 tran_index(재사용됨). 그리고 vacuum 은 활성 트랜잭션과 동시에 도니 <code>OLD_PAGE_PREVENT_DEALLOC</code> 같은 보호가 <b>정합성 장치</b>다 — lock-free fast path 가 그 카운터를 반쪽만 회계하는 결함이 열려 있다. <span class="src">CBRD-27263, src-storage §3</span></p></div>
 </div>
 
-<h2>8. 확인 퀴즈 — 읽었으면 바로 맞출 수 있는 것</h2>
+<h2>7. 확인 퀴즈 — 읽었으면 바로 맞출 수 있는 것</h2>
 <p>답은 접혀 있다. 먼저 스스로 답한 뒤 연다. 못 맞추면 해당 절을 다시 읽는다.</p>
 <details><summary>Q1. 평범한 <code>SELECT</code> 가 잡는 락과 잡지 않는 락은?</summary><p>클래스 <b>IS</b>(+컴파일 시 SCH_S)만 잡고, <b>행 락은 잡지 않는다</b>. 행의 가시성은 스냅샷으로 판정한다. → §4 표 1행, <code>heap_file.c:6437</code></p></details>
 <details><summary>Q2. unique 검사 중 남의 미커밋 삽입 행을 만난 트랜잭션은 무엇을 키로 어떤 모드의 락을 요청하고, 깨어난 뒤 반드시 무엇을 하는가?</summary><p><b>inserter 의 MVCCID</b> 를 키로 <b>S</b> 를 요청해 inserter 가 끝날 때까지 기다리고, 깨어나면 S 를 놓고 <b>인덱스를 root 부터 다시 탐색</b>한다. → §5.1, <code>btree.c:27365-27375</code></p></details>
 <details><summary>Q3. INSERT 가 새 슬롯 행의 X 락을 생략할 수 있는 이유 — 그 락이 하던 두 역할 중 MVCC 가 이미 대신하던 쪽은?</summary><p><b>읽기 격리</b>(남이 미커밋 행을 못 보게 하는 것). 이건 insid 가 스냅샷에 안 보이는 것으로 이미 보장된다. 남은 역할인 unique/FK 직렬화는 self-lock 이 이어받았다. → §5.1</p></details>
 <details><summary>Q4. 래치 데드락은 어떻게 처리되는가?</summary><p><b>감지하지 않는다.</b> 같은 파일 안 페이지 번호 순서(<code>pgbuf_ordered_fix</code>)로 회피하고, 그래도 꼬이면 300초 타임아웃(<code>page_latch_timeout_in_msecs</code>)으로 한쪽을 죽인다. 디버그 빌드는 그 자리에서 assert. → §1</p></details>
 <details><summary>Q5. READ COMMITTED 와 REPEATABLE READ 의 차이를 락과 스냅샷 두 축으로 말하면?</summary><p>스냅샷: RC 는 문장마다, RR 은 트랜잭션에 한 번. S 락: RC 는 문장 끝에 놓고, RR 은 트랜잭션 끝까지 쥔다. → §4.1, <code>lock_manager.c:7213-7230</code></p></details>
-<details><summary>Q6. Oracle 이 "행마다 버전을 안 적는다" 는 말의 정확한 뜻은? CUBRID 와 같은 점 하나, 다른 점 하나.</summary><p>Oracle 은 블록 헤더의 ITL 슬롯에 트랜잭션 정보를 두고 행은 슬롯 번호만 가리킨다(매뉴얼 미확인, Concepts 가이드 필요). 같은 점: 옛 버전을 테이블이 아니라 undo 에서 재구성한다. 다른 점: CUBRID 는 행마다 insid/delid 를 적고 별도 vacuum 데몬이 청소한다. → §6</p></details>
 
-<h2>9. 더 읽을 곳</h2>
+<h2>8. 더 읽을 곳</h2>
 <ul>
 <li>모듈 노트 <a href="../src-storage.html">src-storage</a> §2 pgbuf 항목 · <a href="../src-transaction.html">src-transaction</a> §2 락 자원·self-lock·MVCC 항목</li>
 <li><code>imports/vimkim/pgbuf/00-overview.md</code> §4 뮤텍스 계층·락 랭킹, <code>02-fix-unfix-latch.md</code> (lock-free 경로)</li>

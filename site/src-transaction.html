@@ -23,7 +23,7 @@
 <li><a href="src-transaction.html" class="cur"><span>src/transaction</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠21</span></span></a></li>
 <li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
@@ -114,7 +114,7 @@
 </ul>
 <h4>log_sysop_start / log_sysop_commit / log_sysop_abort (log_manager.c)</h4>
 <ul>
-<li>TDES 의 topops 스택으로 중첩되는 시스템 오퍼레이션. abort 는 그 sysop 안의 로그만 undo 하고(부분 실패가 상위 트랜잭션을 깨지 않는 이유), commit 은 상위에 흡수되거나 <code>LOG_SYSOP_END</code> 로 독립 커밋. crash 안전성·비용·다른 DBMS 의 대응 개념은 <code>imports/vimkim/transaction/sysop-explained_977cf18a4.md</code> §1~§10 (§6·§11·§12 의 예시는 feat/oos). <code>log_sysop_start</code> (:3667) 는 디스크 I/O·WAL 레코드 없이 <code>tdes-&gt;topops.stack[last].lastparent_lsa = tail_lsa</code> 만 밀어 넣고(O(1), <code>lock_topop</code> 1회), 종료는 <code>LOG_SYSOP_END</code> 한 종류에 <code>LOG_SYSOP_END_TYPE</code> 이 <code>COMMIT / ABORT / LOGICAL_UNDO / LOGICAL_COMPENSATE / LOGICAL_RUN_POSTPONE</code> (log_record.hpp:67~, 진입 <code>log_sysop_commit</code> :3984, <code>log_sysop_end_logical_undo</code> :4009, <code>_compensate</code> :4052, <code>_run_postpone</code> :4071). — vimkim 2026-09-30; .51 대조 develop 0d0809963</li>
+<li>TDES 의 topops 스택으로 중첩되는 시스템 오퍼레이션. abort 는 그 sysop 안의 로그만 undo 하고(부분 실패가 상위 트랜잭션을 깨지 않는 이유), commit 은 상위에 흡수되거나 <code>LOG_SYSOP_END</code> 로 독립 커밋. crash 안전성·비용은 <code>imports/vimkim/transaction/sysop-explained_977cf18a4.md</code> §1~§9 (§6·§11·§12 의 예시는 feat/oos). <code>log_sysop_start</code> (:3667) 는 디스크 I/O·WAL 레코드 없이 <code>tdes-&gt;topops.stack[last].lastparent_lsa = tail_lsa</code> 만 밀어 넣고(O(1), <code>lock_topop</code> 1회), 종료는 <code>LOG_SYSOP_END</code> 한 종류에 <code>LOG_SYSOP_END_TYPE</code> 이 <code>COMMIT / ABORT / LOGICAL_UNDO / LOGICAL_COMPENSATE / LOGICAL_RUN_POSTPONE</code> (log_record.hpp:67~, 진입 <code>log_sysop_commit</code> :3984, <code>log_sysop_end_logical_undo</code> :4009, <code>_compensate</code> :4052, <code>_run_postpone</code> :4071). — vimkim 2026-09-30; .51 대조 develop 0d0809963</li>
 </ul>
 <h4>lock_manager.c — end-to-end 추적 패킷 (imports/vimkim/transaction/lock-manager-*.md, 기준 f30f1c260)</h4>
 <ul>

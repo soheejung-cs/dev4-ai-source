@@ -9,13 +9,11 @@ CI 실패 분석 보고서(`ci_analysis_report_*`)·코드 리뷰 보고서·리
 OLAP/HTAP 로드맵·JIT 입문서. 원 리포에서 본다.
 
 모듈 노트(`modules/src-*.md` §2·§3)로 옮길 때는 항목 끝에 `— vimkim(원문 imports/vimkim/<파일>) YYYY-MM-DD` 로 출처를 남기고 원문은 여기 둔다.
-**타 DBMS 비교 절이 있는 문서**(`reference-dbms/`, `storage/survey-*`, `pgbuf/CBRD-27196-*`)를 우리 노트에 인용할 때는
-`claude-workspace/memory/rules/참조DB-표기.md` 대로 제품명 대신 "database-reference 참고" 로 쓴다.
 
 원문 파일명의 `_<7자리 SHA>_<agent>` 접미사는 **분석 기준 CUBRID 커밋과 작성 에이전트**다(vimkim 규약). 여기서는 SHA 만 남기고 agent 접미사는
 대부분 뗐다(같은 주제의 claude/codex 두 판이 있는 `transaction/cdc-*` 만 유지).
 
-## 1. 들여온 파일 (54개, 약 29.8K 줄)
+## 1. 들여온 파일 (51개, 약 26.5K 줄)
 
 ### pgbuf/ — `src/storage/page_buffer.c` 전역 분석 (기준 develop `e6ed61e87`, 2026-08)
 | 파일 | 내용 |
@@ -47,7 +45,6 @@ OLAP/HTAP 로드맵·JIT 입문서. 원 리포에서 본다.
 | `cubrid-volume-read-only-parser_e6ed61e.md` | 데이터 볼륨 온디스크 포맷(페이지 프레이밍·볼륨 헤더·섹터 테이블·file 소유 재구성·TDE·LSA) 과 읽기 전용 파서 설계 |
 | `survey-unconditional-page-latch-assumptions_d9ceb53.md` | `PGBUF_UNCONDITIONAL_LATCH` 실패를 `assert_release` 로 취급하는 호출부 표(file_manager·disk_manager·recovery) vs busy 를 정상으로 쓰는 곳(bestspace `L1_fix`, `btree_set_error`) |
 | `survey-backupdb-level-0_cd593bc.md` | `backupdb -l 0` 이 실제로 하는 일 — 볼륨 파일 페이지 전수 `pread`, 체크포인트/flush/DWB sync 선행, 멀티스레드는 압축 병렬이지 I/O 병렬이 아님 |
-| `CBRD-27198-lock-vs-latch-timeout-survey_d9ceb53.md` | `lock_timeout`(트랜잭션) 과 `page_latch_timeout_in_msecs`(300s, 숨은 파라미터)의 분리 — `pgbuf_fix_internal` 이 zero-wait 트랜잭션의 UNCONDITIONAL 을 CONDITIONAL 로 강등하는 설계 누수 |
 | `CBRD-27198-PR-7630-preserve-lk-force-zero-wait_d9ceb53.md` / `-blocking-refutation_1185f16.md` | PR#7630(머지됨 `b203b6c9d`) 의 설계 근거: `LK_FORCE_ZERO_WAIT` 의 no-wait 의미 보존, 대안 설계 |
 
 ### transaction/ — WAL·sysop·락·MVCC·CDC
@@ -73,9 +70,6 @@ OLAP/HTAP 로드맵·JIT 입문서. 원 리포에서 본다.
 | `build-perf/cubrid-third-party-ci-cache-design_2026-09-22.md` | k8s CI 용 third-party 캐시 설계 |
 | `arch/SA_MODE-libcubridsa-removal-roadmap.md` | SA_MODE 컴파일 모드·libcubridsa 제거 로드맵 제안(파일럿 loaddb, 성능 게이트, 단계) |
 | `arch/CBRD-27074-csql-sa-pl-startup-delay.md` | csql SA 모드 PL 시작의 고정 지연 |
-
-### reference-dbms/
-`innodb-bufpool.md`(2072줄) · `postgres-bufmgr.md`(762줄) — 페이지 버퍼 대조 팩트시트. 인용 시 표기 규칙 위 참조.
 
 ## 2. 소스 사실 — develop `0d0809963`(2026-09-30) 대조 결과와 모듈 반영
 

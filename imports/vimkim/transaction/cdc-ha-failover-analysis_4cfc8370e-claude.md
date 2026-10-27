@@ -94,8 +94,6 @@ pageid + offset)** 다.
 
 HA에서는 같은 논리적 변경이 노드마다 **완전히 다른 LSA**에 기록된다. 즉 이
 북마크는 A 노드에서만 의미가 있고, failover를 가로질러 이동할 수 없다.
-(MySQL이 binlog file/position 복제의 같은 문제를 GTID로 해결한 것과 정확히
-같은 종류의 문제다.)
 
 ### 2.4 재접속 시 북마크 검증 (`cdc_validate_lsa`)
 

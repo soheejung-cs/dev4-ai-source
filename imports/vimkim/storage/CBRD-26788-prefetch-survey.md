@@ -297,7 +297,7 @@ CUBRID 는 이미 hint 형 insertion 지점을 세 가지 제공한다(`page_buf
 
 Prefetch 한 페이지가 곧 사용될 가능성이 높지만 다른 working set 보다 hot 하지는 않다는 의도를 반영하려면 **prefetch path 는 to_middle 로 두되, scan worker 가 실제 fix 한 시점에 정상적 boost 정책이 적용되도록 두는 것** 이 적절하다. 단 6.1 의 AOUT 승급 위험 때문에 large repetitive scan 워크로드에서는 zone 1 직승 회피 flag 도입을 추후 검토한다.
 
-특별히 large scan 의 sequential page 에 대해 *bottom insertion* 을 강제하는 옵션(예: `BTS_LARGE_SCAN_BOTTOM_HINT`)은 향후 §8.2 sketch B 에서 부가 옵션으로 도입 검토 가능하다. PostgreSQL 의 `BAS_BULKREAD` ring buffer 와 유사한 효과를 노릴 수 있으나, CUBRID 의 LRU 3-zone 구조에서는 zone 3 (victim) 의 회전이 충분히 빠르므로 1차 prefetch 도입 단계에서는 default insertion 그대로 두는 것이 안전하다.
+특별히 large scan 의 sequential page 에 대해 *bottom insertion* 을 강제하는 옵션(예: `BTS_LARGE_SCAN_BOTTOM_HINT`)은 향후 §8.2 sketch B 에서 부가 옵션으로 도입 검토 가능하다. CUBRID 의 LRU 3-zone 구조에서는 zone 3 (victim) 의 회전이 충분히 빠르므로 1차 prefetch 도입 단계에서는 default insertion 그대로 두는 것이 안전하다.
 
 ---
 

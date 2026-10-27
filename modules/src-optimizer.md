@@ -36,10 +36,10 @@ optimizer(QO_PLAN) → parser/xasl_generation.c(XASL_NODE).
 | `qo_mjoin_cost` | query_planner.c:3705 | 머지 조인 비용 | 조인 플랜 vtbl |
 | `qo_hjoin_cost` | query_planner.c:3784 | 해시 조인 비용(빌드/프로브/스필) | 조인 플랜 vtbl(:397-403) |
 | `qo_follow_cost` | query_planner.c:4089 | follow(경로식) 비용 | follow 플랜 vtbl |
-| `histogram_get_equal_selectivity` | histogram/histogram_cl.cpp:1032 | attr=const 선택도(MCV+버킷, eqsel 상당) | qo_equal_selectivity(:10634/:10683), histogram_cl.cpp:2653/:2762 |
-| `histogram_get_join_selectivity` | histogram/histogram_cl.cpp:1528 | attr=attr 등가조인 선택도(PG eqjoinsel_inner 이식) | qo_equal_selectivity(:10602) |
+| `histogram_get_equal_selectivity` | histogram/histogram_cl.cpp:1032 | attr=const 선택도(MCV+버킷) | qo_equal_selectivity(:10634/:10683), histogram_cl.cpp:2653/:2762 |
+| `histogram_get_join_selectivity` | histogram/histogram_cl.cpp:1528 | attr=attr 등가조인 선택도 | qo_equal_selectivity(:10602) |
 | `histogram_get_like_selectivity` | histogram/histogram_cl.cpp:1824 | LIKE 선택도(MCV+버킷 경계+휴리스틱) | qo_like_selectivity(:10406) |
-| `comp_parts` | histogram/histogram_cl.cpp:908 | 범위 비교의 버킷 보간 템플릿(scalarineqsel 상당) | :1299-1311 에서 int64/double/string_view/uint64 인스턴스화 |
+| `comp_parts` | histogram/histogram_cl.cpp:908 | 범위 비교의 버킷 보간 템플릿 | :1299-1311 에서 int64/double/string_view/uint64 인스턴스화 |
 | `HistogramReader::reset` | histogram/histogram_reader.cpp:72 | HST2 blob 파싱·유효성 가드 | histogram_init_reader_from_lhs(histogram_cl.cpp:623), :2977 |
 | `qo_extract_or_restrictions` | rewriter/query_rewrite_term.c:4795 | 멀티 spec OR 에서 단일 spec 제약 추출(CBRD-27171 #7613) | rewriter/query_rewrite.c:480 |
 
@@ -74,16 +74,15 @@ optimizer(QO_PLAN) → parser/xasl_generation.c(XASL_NODE).
 **저장된 btree NDV 는 실제와 크게 어긋날 수 있다** (실측 587K vs 실제 11) — NDV 기반 선택도·비용을 만지기 전에 통계 신선도부터 확인.
 
 **비용 추정값이 실제 실행시간과 비단조 — 절대 비용 모델이 깨져 있다** — 추정 비용과 실측 시간이 크게 어긋나고 순서(단조성)조차 보존되지 않는다: 17a est ~2494 / 실측 ~41s, 29a est ~1877 / ~68s, 8c est 8.24M / 47s. 즉 비용값은 플랜 간 상대 비교에도 신뢰하기 어렵다.
-- ✅ **리뷰 체크포인트**: 'CUBRID 비용이 더 낮으니 이 플랜이 맞다'는 논거는 단독으로 채택하지 말고, 비용 모델 변경의 성패는 절대 비용값이 아니라 PG 와의 조인 순서 일치로 판단할 것.
+- ✅ **리뷰 체크포인트**: 'CUBRID 비용이 더 낮으니 이 플랜이 맞다'는 논거는 단독으로 채택하지 말 것.
 
-**per-term 선택도가 PG 와 일치해도 격차가 남는다 → 병목은 카디널리티 전파/비용 모델** — eqjoinsel 도입 후 항목별 조인 선택도가 PG 와 수치까지 일치함을 확인했는데도(`n.id=ci.person_id` 2.40e-7 등) 전체 성능 격차는 PG 대비 2.72x 로 불변이었다(2026-07-03 A/B: 순서 매칭 28→30/113, 686.0→701.5s(+2.3%), 기하평균비 1.001). 즉 남은 격차의 원인은 개별 term 의 선택도가 아니라 조인 트리를 따라 올라가는 카디널리티 전파와 비용 모델 쪽이고, 실제로 17e 는 조인 순서가 PG 와 MATCH 로 바뀌었는데도 8.6초 느려졌다 — 순서 일치가 곧 성능 개선은 아니다.
+**per-term 선택도를 고쳐도 전체 성능은 그대로였다 → 병목은 카디널리티 전파/비용 모델** — 조인 선택도(`histogram_get_join_selectivity`) 도입 후 항목별 조인 선택도 값(`n.id=ci.person_id` 2.40e-7 등)이 바뀌었는데도 전체 시간은 불변이었다(2026-07-03 A/B: 순서 매칭 28→30/113, 686.0→701.5s(+2.3%), 기하평균비 1.001). 즉 성능을 좌우하는 것은 개별 term 의 선택도가 아니라 조인 트리를 따라 올라가는 카디널리티 전파와 비용 모델 쪽이고, 실제로 17e 는 조인 순서가 바뀌었는데도 8.6초 느려졌다 — 순서 변화가 곧 성능 개선은 아니다.
 - ✅ **리뷰 체크포인트**: 선택도 함수 하나를 고치는 PR 이 '카디널리티가 맞아졌으니 빨라질 것'이라 주장하면 의심하고, 개별 sel 정확도와 최종 플랜 품질을 분리해 검증할 것.
 
-**값↔조인 팬아웃 상관 미모델링으로 인한 '정확도 역설'** — 히스토그램 필터 선택도는 uniform 기본값보다 훨씬 정확하다: `k.keyword IN(흔한 키워드 7개)` 5.22e-5 vs uniform 0.00698(134x), `cn.name~'Lionsgate'` 5.21e-5 vs 0.01(192x), `mc.note LIKE '%(Blu-ray)%'` 0.0032 vs 0.1(31x). 그런데 더 느린 순서를 고른다 — 필터가 살려낸 7개 키워드가 mk 에서 팬아웃이 매우 큰 값들인데, 조인 선택도는 값과 무관한 평균 1/NDV 라서 '어떤 값이 살아남았는지'로 조건화되지 않아 k⋈mk 를 과소추정한다(31b 계열; 22a k⋈mk 추정 CUBRID 35 / PG 135 / 실제 37,091). uniform 은 k 필터를 과대추정해 우연히 함정을 피할 뿐이고, per-MCV-value 조인 통계는 CUBRID 에도 PG 에도 없으므로 이는 단순 버그가 아니라 근본적 옵티마이저 한계다.
+**값↔조인 팬아웃 상관 미모델링으로 인한 '정확도 역설'** — 히스토그램 필터 선택도는 uniform 기본값보다 훨씬 정확하다: `k.keyword IN(흔한 키워드 7개)` 5.22e-5 vs uniform 0.00698(134x), `cn.name~'Lionsgate'` 5.21e-5 vs 0.01(192x), `mc.note LIKE '%(Blu-ray)%'` 0.0032 vs 0.1(31x). 그런데 더 느린 순서를 고른다 — 필터가 살려낸 7개 키워드가 mk 에서 팬아웃이 매우 큰 값들인데, 조인 선택도는 값과 무관한 평균 1/NDV 라서 '어떤 값이 살아남았는지'로 조건화되지 않아 k⋈mk 를 과소추정한다(31b 계열; 22a k⋈mk 추정 CUBRID 35 / 실제 37,091). uniform 은 k 필터를 과대추정해 우연히 함정을 피할 뿐이고, per-MCV-value 조인 통계가 없는 것은 단순 버그가 아니라 근본적 옵티마이저 한계다.
 - ✅ **리뷰 체크포인트**: 필터 선택도 정확도 개선이 오히려 느려지는 회귀는 조인 선택도의 값-조건화 부재를 먼저 의심하고, 필터 선택도 코드를 되돌려 '고치는' 변경에는 반대할 것.
 
-**PG 와 공통인 오차는 패리티 목표에서 손대지 않는다 (sarg×조인 독립 가정, uniform eq-join)** — `mi.info='Horror'` 같은 sarg 가 사실상 `info_type_id=genres` 를 함의하는데도 it1 조인 선택도에서 1/113 이 또 곱해지는 구조적 과소추정이 남아 있지만, PG 도 동일한 독립 가정을 쓰므로 CUBRID 고유 결함이 아니다(19d 의 divergence 도 voice ⊂ actress 상관 때문이며 양 엔진 공통). 같은 맥락으로 4a 의 `it⋈mi_idx` eq-join 선택도는 CUBRID·PG 모두 uniform 1/max(NDV)(~1/113)로 나와 둘 다 실제 대비 ~1000x 과소추정하며, 4-계열 leaf 순서 차이는 주로 플랜 모양 차이(PG 가 1행짜리 `it` 를 상위 outer 로 감쌈)이고 구동 체인 k→mk→mi_idx 는 양쪽 동일하다. 17a 도 k⋈mk 스큐 과소추정(est 28 vs 실제 41,840)이 실행시간을 지배하지만 PG 도 같은 과소추정(est 34)이라 발산 요인이 아니다.
-- ✅ **리뷰 체크포인트**: '추정이 실제보다 1000배 작다'만으로 CUBRID 버그로 단정하지 말고 PG 추정값과 나란히 비교해 발산 여부를 먼저 확인할 것 — 상관관계를 보정하는 커스텀 휴리스틱은 PG 기준 이탈이므로 거부 대상이고, leaf 순서 차이는 attachment-order 기준으로 재확인할 것.
+**sarg×조인 독립 가정·uniform eq-join 의 구조적 과소추정** — `mi.info='Horror'` 같은 sarg 가 사실상 `info_type_id=genres` 를 함의하는데도 it1 조인 선택도에서 1/113 이 또 곱해지는 구조적 과소추정이 남아 있다(19d 의 divergence 도 voice ⊂ actress 상관 때문). 같은 맥락으로 4a 의 `it⋈mi_idx` eq-join 선택도는 uniform 1/max(NDV)(~1/113)로 나와 실제 대비 ~1000x 과소추정한다. 17a 도 k⋈mk 스큐 과소추정(est 28 vs 실제 41,840)이 실행시간을 지배한다.
 
 ### 비용 상수 (query_planner.c 상단)
 
@@ -96,8 +95,8 @@ optimizer(QO_PLAN) → parser/xasl_generation.c(XASL_NODE).
 **QO_EFFECTIVE_CACHE_PAGES 는 512MB 하드코딩 (develop 에 없음 — CBRD-27094/PR#7622 계열)** — `QO_EFFECTIVE_CACHE_PAGES = 32768.0`(=512MB, 브랜치 query_planner.c:112)은 하드코딩된 가정값이며 코드 주석이 한계를 자백한다: "matches the data_buffer_pages default … The real parameter is server-only, so the client-side optimizer cannot read it". 같은 값이 `qo_mackert_lohman_pages()` 안의 `b`(:3611-3613)로 다시 나타난다. 서버를 16GB 버퍼로 운영하면 이 가정값이 실제와 32배 어긋난 상태로 비용이 계산된다.
 - ✅ **리뷰 체크포인트**: 버퍼 크기 `b` 에 의존하는 비용식 변경은 대용량 버퍼 실측으로 튜닝했다는 주장을 32배 괴리를 감안해 재검토할 것.
 
-**기본 선택도 상수가 PG 와 불일치 (EQ 0.001 / COMP 0.1)** — 통계가 없을 때 쓰는 기본 상수는 `DEFAULT_EQUAL_SELECTIVITY 0.001`(query_planner.h:116), `DEFAULT_COMP_SELECTIVITY 0.1`(:118)인 반면 PG 는 각각 0.005, 0.3333 이다(develop 재확인; 그 외 :113-121 에 NULL 0.01/EXISTS 0.1/EQUIJOIN 0.001/BETWEEN 0.01/IN 0.01/RANGE 0.1). 통계 없는 컬럼에서 CUBRID 가 PG 보다 훨씬 선택적이라고 가정하므로, 히스토그램이 없거나 폴백된 경로에서 카디널리티가 체계적으로 과소평가된다.
-- ✅ **리뷰 체크포인트**: 폴백 경로 질의의 카디널리티가 지나치게 작으면 이 상수 차이를 의심하고, 상수를 PG 쪽으로 맞추는 변경은 영향 범위가 넓으므로 단독 변경으로 A/B 할 것.
+**기본 선택도 상수 (EQ 0.001 / COMP 0.1)** — 통계가 없을 때 쓰는 기본 상수는 `DEFAULT_EQUAL_SELECTIVITY 0.001`(query_planner.h:116), `DEFAULT_COMP_SELECTIVITY 0.1`(:118)이다(develop 재확인; 그 외 :113-121 에 NULL 0.01/EXISTS 0.1/EQUIJOIN 0.001/BETWEEN 0.01/IN 0.01/RANGE 0.1).
+- ✅ **리뷰 체크포인트**: 폴백 경로 질의의 카디널리티가 지나치게 작으면 이 상수를 의심하고, 상수를 바꾸는 변경은 영향 범위가 넓으므로 단독 변경으로 A/B 할 것.
 
 - ✅ **리뷰 체크포인트**: 비용식에 새 상수를 넣을 때 ①sscan/iscan 대칭인가 ②기존 프리미티브(cost_seq_page 등)로 합성 가능한가(신규 파라미터 남발 금지) ③NCARD=0 극한에서 발산하지 않는가.
 
@@ -105,7 +104,7 @@ optimizer(QO_PLAN) → parser/xasl_generation.c(XASL_NODE).
 
 **PREDICATE_TERM 에서 term 별 히스토그램 사용 여부를 진단 플래그로 남긴다** — `env->sel_hist_used`/`env->sel_hist_fallback`(query_graph.h:977-978)을 term 별로 리셋·검사해 `QO_TERM_SEL_FROM_HISTOGRAM`(query_graph.h:756)을 세운다(develop query_graph.c:2815-2822). 어느 term 이 히스토그램을 실제로 탔는지 이 플래그로 구분할 수 있고, plan_generation.c:3213 에서도 소비된다.
 
-**혼합 OR 조건은 join term 으로만 분류되어 단일 릴레이션 sarg 가 0개가 된다** — TPC-H q19 의 큰 OR 는 각 분기 안에 part 컬럼과 lineitem 컬럼이 섞여 있어 CUBRID 의 term 분류가 OR 전체를 join term 으로만 취급한다. 그 결과 part 에 sarg 가 0개가 되어 part 를 줄이는 인덱스 프로브 자체가 성립하지 않는다 — PG 는 `optimizer/util/orclauses.c` 의 `extract_restriction_or_clauses()` 로 각 분기에서 part 전용 조건만 뽑아 중복 제약으로 추가해 part 를 ~2천 행으로 줄인다. 각 분기의 part 조건 OR 를 WHERE 에 수동 중복 추가하면 결과값 동일(30104438.0911)하면서 5.6s → 0.618s 로 개선됨을 실증했고(cubrid-tpch/exp/q19_orext.sql, develop b572177a1), `l_partkey` 선두 인덱스는 CUBRID 에도 이미 있어 추출을 못 해서 못 쓰는 것이 핵심이었다. → 현재 develop 은 rewriter 의 `qo_extract_or_restrictions()` 로 이를 해소(해당 절 참조).
+**혼합 OR 조건은 join term 으로만 분류되어 단일 릴레이션 sarg 가 0개가 된다** — TPC-H q19 의 큰 OR 는 각 분기 안에 part 컬럼과 lineitem 컬럼이 섞여 있어 CUBRID 의 term 분류가 OR 전체를 join term 으로만 취급한다. 그 결과 part 에 sarg 가 0개가 되어 part 를 줄이는 인덱스 프로브 자체가 성립하지 않는다. 각 분기의 part 조건 OR 를 WHERE 에 수동 중복 추가하면 결과값 동일(30104438.0911)하면서 5.6s → 0.618s 로 개선됨을 실증했고(cubrid-tpch/exp/q19_orext.sql, develop b572177a1), `l_partkey` 선두 인덱스는 CUBRID 에도 이미 있어 추출을 못 해서 못 쓰는 것이 핵심이었다. → 현재 develop 은 rewriter 의 `qo_extract_or_restrictions()` 로 이를 해소(해당 절 참조).
 - ✅ **리뷰 체크포인트**: 인덱스가 있는데 안 쓰이는 사례는 term 분류 결과(sarg 개수)를 먼저 의심할 것.
 
 ### qo_expr_selectivity (query_planner.c:10126)
@@ -121,19 +120,19 @@ attr=attr 은 `histogram_get_join_selectivity`(:10602) 우선, 실패 시 `qo_in
 
 ### qo_between_selectivity / qo_range_selectivity (query_planner.c:11157 / :11231)
 
-**BETWEEN 은 대부분 PT_RANGE 로 정규화되고, 남는 형태는 이제 히스토그램으로 추정한다** — 과거(CBRD-27094 @ faf5a3b2a 기준) `qo_between_selectivity()` 는 아무 계산 없이 `DEFAULT_BETWEEN_SELECTIVITY`(0.01)를 반환하고 `env->sel_hist_fallback` 만 세우는 사실상 죽은 경로였다(BETWEEN 이 재작성 단계에서 PT_RANGE 로 정규화되어 `qo_range_selectivity` 가 쓰이므로). develop 은 CBRD-27037(#7570, dde911f48) 머지로 달라졌다: 재작성되지 않고 도달하는 형태 — 특히 NOT BETWEEN — 를 `qo_between_range_histogram_selectivity()` 로 히스토그램 추정한다. 주석이 근거를 명시한다: "what reaches here is the form that was not rewritten -- notably NOT BETWEEN, whose complement is not a single range"(develop :11168-11173). col<col(컬럼 대 컬럼 비교)은 PG 도 기본값을 쓰므로 패리티 상태다.
+**BETWEEN 은 대부분 PT_RANGE 로 정규화되고, 남는 형태는 이제 히스토그램으로 추정한다** — 과거(CBRD-27094 @ faf5a3b2a 기준) `qo_between_selectivity()` 는 아무 계산 없이 `DEFAULT_BETWEEN_SELECTIVITY`(0.01)를 반환하고 `env->sel_hist_fallback` 만 세우는 사실상 죽은 경로였다(BETWEEN 이 재작성 단계에서 PT_RANGE 로 정규화되어 `qo_range_selectivity` 가 쓰이므로). develop 은 CBRD-27037(#7570, dde911f48) 머지로 달라졌다: 재작성되지 않고 도달하는 형태 — 특히 NOT BETWEEN — 를 `qo_between_range_histogram_selectivity()` 로 히스토그램 추정한다. 주석이 근거를 명시한다: "what reaches here is the form that was not rewritten -- notably NOT BETWEEN, whose complement is not a single range"(develop :11168-11173). col<col(컬럼 대 컬럼 비교)은 기본값을 쓴다.
 - ✅ **리뷰 체크포인트**: PT_BETWEEN 경로를 '버그'로 지적하기 전에 PT_RANGE 정규화 이후에도 도달 가능한 형태인지 확인하고, 반대로 정규화를 바꾸는 변경은 이 경로의 도달 집합을 바꿀 수 있으니 주의할 것.
 
 관련 develop 머지 이력: 양측 범위 히스토그램 추정의 1행 플로어(#7726, 7e65be797), 버킷의 `<` vs `<=` 구분(#7741, 44c199cee), 측정된 인덱스 스캔 선택도의 1행 플로어(CBRD-27192, 05522fac8).
 
 ### qo_all_some_in_selectivity (query_planner.c:11431)
 
-**scalararraysel(IN 리스트) 미구현 — 원소별 MCV 프로브가 없다** — IN 리스트 선택도는 원소 개수 × 등호 선택도로만 계산하고(`list_card = pt_length_of_list(...)` develop :11486/:11490, 서브쿼리는 XASL cardinality :11497, 실패 시 legacy 1000), PG 의 `scalararraysel` 처럼 원소별로 MCV/히스토그램을 프로브하지 않는다. 따라서 선택적인 IN 리스트(희소값)에서 선택도가 크게 과대평가된다. develop 은 하드 상한 0.5 를 그대로 유지한다(`in_selectivity > 0.5 ? 0.5 : in_selectivity`, :11507-11508 "compute selectivity--cap at 0.5"); 상한을 `MIN(in_selectivity, 1.0)` 으로 바꾸고 "the former hard cap of 0.5 had no distributional basis" 주석을 단 것은 CBRD-27094 브랜치다(develop 에 없음 — CBRD-27094/PR#7622 계열).
-- ✅ **리뷰 체크포인트**: IN 조건 질의의 플랜이 이상하면 `list_card * equal_selectivity` 근사를 먼저 확인하고, 개선 시 원소별 MCV 프로브 후 중복 보정을 포함해 합산하는 PG 동작을 따를 것.
+**IN 리스트 선택도 — 원소별 MCV 프로브가 없다** — IN 리스트 선택도는 원소 개수 × 등호 선택도로만 계산하고(`list_card = pt_length_of_list(...)` develop :11486/:11490, 서브쿼리는 XASL cardinality :11497, 실패 시 legacy 1000), 원소별로 MCV/히스토그램을 프로브하지 않는다. 따라서 선택적인 IN 리스트(희소값)에서 선택도가 크게 과대평가된다. develop 은 하드 상한 0.5 를 그대로 유지한다(`in_selectivity > 0.5 ? 0.5 : in_selectivity`, :11507-11508 "compute selectivity--cap at 0.5"); 상한을 `MIN(in_selectivity, 1.0)` 으로 바꾸고 "the former hard cap of 0.5 had no distributional basis" 주석을 단 것은 CBRD-27094 브랜치다(develop 에 없음 — CBRD-27094/PR#7622 계열).
+- ✅ **리뷰 체크포인트**: IN 조건 질의의 플랜이 이상하면 `list_card * equal_selectivity` 근사를 먼저 확인하고, 개선 시 원소별 MCV 프로브 후 중복 보정을 포함해 합산할 것.
 
 ### planner_visit_node (query_planner.c:7564)
 
-**조인 카디널리티의 MAX(1.0) 바닥이 분수 카디널리티를 없애 조인 순서를 노이즈로 만든다** — 조인 결과 card 를 1.0 으로 바닥 처리하는 지점은 `planner_visit_node()` 안의 `cardinality = MAX (1.0, cardinality);`(develop :8124, :8134, :8158)와 `total_rows = MAX (1.0, total_rows);`(:8160)이다. 그 결과 25/30 계열 쿼리는 조인 2단계부터 모든 중간 결과가 card=1 이 되고, 이후 조인 순서는 ±1~4 코스트 틱 수준의 노이즈로 결정된다 — PG 는 1 미만 분수 카디널리티를 그대로 유지한다는 점이 근본 차이다.
+**조인 카디널리티의 MAX(1.0) 바닥이 분수 카디널리티를 없애 조인 순서를 노이즈로 만든다** — 조인 결과 card 를 1.0 으로 바닥 처리하는 지점은 `planner_visit_node()` 안의 `cardinality = MAX (1.0, cardinality);`(develop :8124, :8134, :8158)와 `total_rows = MAX (1.0, total_rows);`(:8160)이다. 그 결과 25/30 계열 쿼리는 조인 2단계부터 모든 중간 결과가 card=1 이 되고, 이후 조인 순서는 ±1~4 코스트 틱 수준의 노이즈로 결정된다.
 - ✅ **리뷰 체크포인트**: 조인 카디널리티 계산 변경 시 MAX(1.0) 바닥이 어디서 걸리는지, 분수 카디널리티를 보존해야 하는 경로에 적용돼 순서 결정이 코스트 노이즈에 좌우되지 않는지 확인할 것.
 
 **조인 순서 결정이 완전 동률(tie) / RBO dead zone 에 몰려 있어 통계 미세 변화에 취약하다** — eqjoin 선택도가 상류 카디널리티를 1~2 로 압축해버리기 때문에 부착 순서 결정이 비용 동률 구간에서 tie-break 로 결정된다 — 17a 의 t-vs-mc 부착은 1915 vs 1915 완전 동률(추정상 probe multiset 이 동일), 22a 는 1265 vs 1273(Δ8) 이었다. 그래서 아주 작은 통계 변화가 순서를 뒤집는다: Duj1 도입으로 `mk.keyword_id` sel 이 6.197e-6 → 6.698e-6 으로 바뀌자 pattern-C 계열(16b/17a/17e/2d)이 다시 DIFF 로 뒤집히고 20b/20c/9d 가 새로 일치해 order-match v2 가 38→34 로 회귀했다. 동률 판정은 `QO_COST_EQ(x, y)`(develop query_planner.c:115, 상대오차 1e-6; CBRD-27139 #7572 로 반대칭·부동소수 내성 확보), RBO 게이트는 `RBO_CHECK_COST 50`/`RBO_CHECK_RATIO 1.2`/`RBO_CHECK_LIMIT_RATIO 10`(:108-110, 사용처 :4396-4400, :4757)으로 구현돼 있다.
@@ -157,10 +156,10 @@ attr=attr 은 `histogram_get_join_selectivity`(:10602) 우선, 실패 시 `qo_in
 **develop 현행 heap-fetch 모델: 완전 클러스터 object_IO + MIN(heap_rows, opages) 캡의 per-row 서차지** — 커버링 스캔이면 `object_IO = 1.0`, heap_access = 0. 아니면 `object_IO = opages * heap_sel` 에 CBRD-27113(#7527, a81193c9b)이 도입한 per-extra-row 서차지 `heap_fanout = (heap_rows > 1.0) ? MAX(0, MIN(heap_rows, opages) - 1.0) * FETCH_HEAP_COST : 0.0`(:2459)을 더한다 — 단일행(unique/pk) 프로브는 0 을 더해 기존 비용을 정확히 유지(blast-radius safe, 상수 주석 :85-88). 캡의 물리적 근거는 주석 그대로다: "fetching more rows than there are heap pages cannot touch more distinct pages"(:2455-2458). leaf IO 는 fixed/variable 로 분리된다: 하강이 닿는 첫 leaf 는 fixed(`fixed_io_cost = index_IO + first_leaf`, :2475), `leaves - first_leaf`·`iss_leaves`·heap_fanout 은 variable 측 `object_IO = MAX (1.0, object_IO) + ...`(:2469). PR#7622 는 이 MIN 캡 모델을 Mackert-Lohman 으로 교체하며 "MIN 이 k≈T 근처에서 최대 58% 과대추정"을 근거로 들었다 — 판단 쟁점은 "단일 스캔에 (재읽기를 포함하는) T>b 분기를 적용하는 것이 타당한가"로 귀결된다(develop 미머지).
 - ✅ **리뷰 체크포인트**: heap-fetch 추정식 교체 PR 은 새 모델이 distinct-page 상한 불변식을 깨는지 먼저 확인하고, 과대추정 개선 주장과 상한 붕괴 위험을 함께 저울질할 것.
 
-**옛 완전 클러스터 가정의 NL 프로브 고정 비용 문제 (역사)** — 인덱스 스캔 비용에서 object_IO 를 `opages × sel`(대상 행이 페이지에 완전 클러스터돼 있다는 가정)로만 계산하고 `ISCAN_IO_HIT_RATIO 0.5` 할인까지 곱해지던 시절, NL 내부 프로브 비용이 inner 관계 크기·fanout 과 거의 무관한 ~3~4 로 고정됐다 — 36M행 cast_info 프로브와 7행 kind_type 프로브가 같은 값으로 평가됐다. 이것이 JOB divergence 2순위 원인으로 10c(57.7s) 8c(37.3s) 18a(58.9s) 19a-c 의 주범이었고, 브랜치 커밋 c31d3b2f6 에서 object_IO 를 PG 의 무상관 가정 `MIN(heap_rows, opages)` 로 바꿔 총 683→455.2초(-33%), 8c 96.9→8.7, 8d 103→3.3, 10c 65→5.3 으로 개선됐다(PK 프로브는 카디널리티 MAX(1.0) 바닥 때문에 불변). 회귀도 동반됐다: 19c/d +4~5s, 9c/5c/13b/13c/7a +2~3s, 1a 0.03→0.59(소형 쿼리의 해시 오버헤드). develop 은 위의 FETCH_HEAP_COST 서차지 형태로 흡수했다.
-- ✅ **리뷰 체크포인트**: 인덱스 스캔/NL 프로브 비용식 변경은 (1) 프로브 비용이 inner 크기·fanout 에 단조 증가하는지, (2) 클러스터링 가정이 PG(무상관)에서 임의로 벗어나지 않았는지, (3) PK/유니크 단건 프로브가 MAX(1.0) 바닥으로 여전히 불변인지, (4) 1a 류 소형 쿼리 회귀는 없는지 확인할 것.
+**옛 완전 클러스터 가정의 NL 프로브 고정 비용 문제 (역사)** — 인덱스 스캔 비용에서 object_IO 를 `opages × sel`(대상 행이 페이지에 완전 클러스터돼 있다는 가정)로만 계산하고 `ISCAN_IO_HIT_RATIO 0.5` 할인까지 곱해지던 시절, NL 내부 프로브 비용이 inner 관계 크기·fanout 과 거의 무관한 ~3~4 로 고정됐다 — 36M행 cast_info 프로브와 7행 kind_type 프로브가 같은 값으로 평가됐다. 이것이 JOB divergence 2순위 원인으로 10c(57.7s) 8c(37.3s) 18a(58.9s) 19a-c 의 주범이었고, 브랜치 커밋 c31d3b2f6 에서 object_IO 를 무상관 가정 `MIN(heap_rows, opages)` 로 바꿔 총 683→455.2초(-33%), 8c 96.9→8.7, 8d 103→3.3, 10c 65→5.3 으로 개선됐다(PK 프로브는 카디널리티 MAX(1.0) 바닥 때문에 불변). 회귀도 동반됐다: 19c/d +4~5s, 9c/5c/13b/13c/7a +2~3s, 1a 0.03→0.59(소형 쿼리의 해시 오버헤드). develop 은 위의 FETCH_HEAP_COST 서차지 형태로 흡수했다.
+- ✅ **리뷰 체크포인트**: 인덱스 스캔/NL 프로브 비용식 변경은 (1) 프로브 비용이 inner 크기·fanout 에 단조 증가하는지, (2) 클러스터링 가정이 무상관에서 임의로 벗어나지 않았는지, (3) PK/유니크 단건 프로브가 MAX(1.0) 바닥으로 여전히 불변인지, (4) 1a 류 소형 쿼리 회귀는 없는지 확인할 것.
 
-**iscan 힙 fetch 비용의 MAX(1.0) 플로어가 페이지 비용 계수를 삼킨다** — `QO_RANDOM_PAGE_COST 4.0` 실험 결과 두 배치 모두 실패했다: (i) MAX(1.0) 플로어 **이전**에 곱하면 완전히 무력하다 — 선택적 probe 는 `opages × sel ≪ 1` 이라 플로어가 계수를 통째로 삼킨다(19d 만 순서가 흔들림). (ii) 플로어 **이후**에 적용해 probe 당 최소 4.0 을 강제하면 order-match v2 가 40→35 로 회귀했다(3a/3c/5c/7a/9d 상실) — 균일한 probe 패널티가 driver-vs-seqscan 균형을 PG 에서 멀어지게 만들기 때문. 둘 다 되돌렸고, 결론은 probe 비용 구조에 PG 식 per-tuple 비용 세분화가 선행돼야 한다는 것이다(`QO_RANDOM_PAGE_COST` 심볼은 현재 소스에 없음).
+**iscan 힙 fetch 비용의 MAX(1.0) 플로어가 페이지 비용 계수를 삼킨다** — `QO_RANDOM_PAGE_COST 4.0` 실험 결과 두 배치 모두 실패했다: (i) MAX(1.0) 플로어 **이전**에 곱하면 완전히 무력하다 — 선택적 probe 는 `opages × sel ≪ 1` 이라 플로어가 계수를 통째로 삼킨다(19d 만 순서가 흔들림). (ii) 플로어 **이후**에 적용해 probe 당 최소 4.0 을 강제하면 order-match v2 가 40→35 로 회귀했다(3a/3c/5c/7a/9d 상실). 둘 다 되돌렸고, 결론은 probe 비용 구조에 per-tuple 비용 세분화가 선행돼야 한다는 것이다(`QO_RANDOM_PAGE_COST` 심볼은 현재 소스에 없음).
 - ✅ **리뷰 체크포인트**: 스캔 비용 상수를 추가·조정하는 변경은 그 항이 MAX/floor 뒤에서 실제로 살아남는지 먼저 확인하고(살아남지 못하면 no-op), 살아남는 위치라면 probe 전반의 균일 패널티로 스캔 방식 선택이 뒤집히지 않는지 확인할 것.
 
 **LIKE prefix 파생 범위와의 중복 상쇄** — rewriter 가 prefix LIKE 에서 파생한 BETWEEN 범위(`PT_EXPR_INFO_LIKE_DERIVED_RANGE`, CBRD-27036 계열 bd835423b/a67a38674)는 유지된 LIKE 의 부분집합이므로, `qo_iscan_cost()` 가 같은 곱에 LIKE 가 참여하는 경우에만 범위를 상쇄한다(rewriter/query_rewrite_term.c:2369-2374 주석). 파생 술어 쌍의 플래그를 모르면 선택도 이중계상으로 오독하기 쉽다.
@@ -197,7 +196,7 @@ attr=attr 은 `histogram_get_join_selectivity`(:10602) 우선, 실패 시 `qo_in
 
 ### qo_mackert_lohman_pages (develop 에 없음 — CBRD-27094/PR#7622 계열)
 
-**T>b 분기에는 캡이 없어 N 에 선형·무상한으로 커진다** — `qo_mackert_lohman_pages(T, N)`(브랜치 query_planner.c:3608-3636)은 PG `costsize.c` 의 `index_pages_fetched()` 이식본이고, 구조적 비대칭이 있다: `T <= b` 분기에는 `if (pages_fetched > T) pages_fetched = T;` 캡이 있으나 `T > b` 분기(`b + (N-lim)*(T-b)/T`)에는 캡이 없다. 이 함수는 `qo_iscan_cost` 의 단일 스캔 object_IO(브랜치 :2480)와 `qo_nljoin_cost` 의 반복 프로브 포화(브랜치 :3741-3742) 양쪽에서 쓰인다. 실측: cast_info(힙 129,909 페이지)에서 N=3,018,730 일 때 2,262,020 페이지 = 힙 전체의 17.41배가 나오며, 동일 입력에서 develop 의 `MIN(heap_rows, opages)` 캡은 129,909 로 상한을 지킨다. 버퍼 크기 `b` 는 하드코딩된 `QO_EFFECTIVE_CACHE_PAGES`(비용 상수 절 참조).
+**T>b 분기에는 캡이 없어 N 에 선형·무상한으로 커진다** — `qo_mackert_lohman_pages(T, N)`(브랜치 query_planner.c:3608-3636)에는 구조적 비대칭이 있다: `T <= b` 분기에는 `if (pages_fetched > T) pages_fetched = T;` 캡이 있으나 `T > b` 분기(`b + (N-lim)*(T-b)/T`)에는 캡이 없다. 이 함수는 `qo_iscan_cost` 의 단일 스캔 object_IO(브랜치 :2480)와 `qo_nljoin_cost` 의 반복 프로브 포화(브랜치 :3741-3742) 양쪽에서 쓰인다. 실측: cast_info(힙 129,909 페이지)에서 N=3,018,730 일 때 2,262,020 페이지 = 힙 전체의 17.41배가 나오며, 동일 입력에서 develop 의 `MIN(heap_rows, opages)` 캡은 129,909 로 상한을 지킨다. 버퍼 크기 `b` 는 하드코딩된 `QO_EFFECTIVE_CACHE_PAGES`(비용 상수 절 참조).
 - ✅ **리뷰 체크포인트**: 단일 스캔에서 힙 페이지 수를 초과하는 fetch 추정이 나오면 T>b 분기의 캡 부재가 의도된 것인지(재읽기 포함 의미인지) 검토를 요구할 것.
 
 ### qo_nljoin_cost (query_planner.c:3548)
@@ -218,12 +217,12 @@ inner 반복 프로브의 IO 는 `ISCAN_IO_HIT_RATIO 0.5` 할인(develop :3619) 
 
 ### qo_mjoin_cost (query_planner.c:3705)
 
-**mergejoinscansel 미구현** — 머지 조인에서 양쪽 입력을 어디까지 스캔하게 되는지(PG 의 `mergejoinscansel`)를 히스토그램으로 추정하는 로직이 없다. 즉 머지 조인은 항상 양쪽 전체 스캔 비용으로 계산되어, 한쪽이 조기 종료되는 경우를 과대 비용으로 본다.
+**머지 조인 스캔 범위 추정 미구현** — 머지 조인에서 양쪽 입력을 어디까지 스캔하게 되는지를 히스토그램으로 추정하는 로직이 없다. 즉 머지 조인은 항상 양쪽 전체 스캔 비용으로 계산되어, 한쪽이 조기 종료되는 경우를 과대 비용으로 본다.
 - ✅ **리뷰 체크포인트**: 머지 조인 비용 변경은 스캔 범위 추정 부재를 전제하는지 확인하고, 새로 도입한다면 히스토그램 경계와 조인 키 범위의 교집합을 기준으로 할 것.
 
 ### qo_hjoin_cost / qo_examine_hash_join (query_planner.c:3784 / :6818)
 
-**해시 조인 게이트는 뒤집혔다 — 옛 default-disable 이 아니라 현재는 force-enable 디버그 스위치** — 과거 분석 시점에는 `TEST_HASH_JOIN_ENABLE 0` 으로 해시 조인 선택이 컴파일 아웃되어 있었고, `qo_examine_hash_join` 이 기본 차단하여 옵티마이저가 좌편향(left-deep) 인덱스-NL 체인만 만들 수 있었다 — JOB 113 질의에서 CUBRID 는 864 조인 전부 idx-join(hash 0/merge 0), PG 는 NL 791 + Hash 65 + Merge 8 이었고, 8c 의 `rt⋈ci`(role='writer')는 추정이 사실상 일치(CUBRID ~3.01M / PG ~3.02M / 실제 2.73M)하는데도 플랜 모양이 갈렸다. PR CUBRID#6782(CBRD-26475, 머지 커밋 1608d670e)가 default-disable 게이트를 제거해 `qo_hjoin_cost` 가 활성화됐고, 현재 매크로는 의미가 반대다 — `TEST_HASH_JOIN_FORCE_ENABLE 0`(develop :63)이 1 이면 vtbl 이 `qo_zero_cost` 로 바뀌어 해시 조인을 **강제**한다(develop :397-403). 활성화 당시 전체 측정은 615.5→749.2초(+21.7%), PG 대비 2.48→2.52x, 순서 매칭 31→33 으로 결과가 극명히 갈렸다(18a 61.5→22.5s 개선 vs 8c 44→96.9s, 8d 5.4→103.1s).
+**해시 조인 게이트는 뒤집혔다 — 옛 default-disable 이 아니라 현재는 force-enable 디버그 스위치** — 과거 분석 시점에는 `TEST_HASH_JOIN_ENABLE 0` 으로 해시 조인 선택이 컴파일 아웃되어 있었고, `qo_examine_hash_join` 이 기본 차단하여 옵티마이저가 좌편향(left-deep) 인덱스-NL 체인만 만들 수 있었다 — JOB 113 질의에서 CUBRID 는 864 조인 전부 idx-join(hash 0/merge 0)이었다. PR CUBRID#6782(CBRD-26475, 머지 커밋 1608d670e)가 default-disable 게이트를 제거해 `qo_hjoin_cost` 가 활성화됐고, 현재 매크로는 의미가 반대다 — `TEST_HASH_JOIN_FORCE_ENABLE 0`(develop :63)이 1 이면 vtbl 이 `qo_zero_cost` 로 바뀌어 해시 조인을 **강제**한다(develop :397-403). 활성화 당시 전체 측정은 615.5→749.2초(+21.7%), 순서 매칭 31→33 으로 결과가 극명히 갈렸다(18a 61.5→22.5s 개선 vs 8c 44→96.9s, 8d 5.4→103.1s).
 - ✅ **리뷰 체크포인트**: 해시 조인 관련 변경은 매크로가 force-enable 의미임을 전제하는지, NL 선호 오프셋 `HJ_MEM_ALLOC_CONSTANT 1500`(develop :93, 적용 :3834/:3842)이 의도대로인지, 채택 여부가 갈리는 쿼리군에서 개선/회귀를 함께 측정했는지 확인할 것.
 
 **CBRD-26475 가 의도적으로 고정한 hash-join 선택을 되돌리는 회귀는 재블레스 대상이 아니다** — `sql/_35_fig_cake/cbrd_24044/cbrd_25060/cases/cbrd_25060_2.sql` 의 해당 쿼리는 커밋 `bdd75ed8b [CBRD-26475] The optimizer selects a hash join execution plan (#2987)`(2026-07-16)이 hash-join 선택을 검증하려고 새로 추가한 것이다. 비용모델 변경으로 이 쿼리가 idx-join 으로 넘어가면 바로 위에 있는 `no_use_hash` 변형의 기대 플랜과 문자 단위로 동일해져 테스트가 자기 목적을 완전히 상실한다. 따라서 이 케이스는 재블레스가 아니라 코드로 풀어야 한다.
@@ -242,10 +241,10 @@ inner 반복 프로브의 IO 는 `ISCAN_IO_HIT_RATIO 0.5` 할인(develop :3619) 
 
 ### 히스토그램 일반 (histogram/)
 
-**현재 히스토그램이 커버하는 범위 (equi-depth + MCV + HLL NDV)** — `feature/reservoir-sampling`(0b84bbaac, CBRD-26936) 계열 기준으로 equi-depth 히스토그램(HST2 blob, 카탈로그 `_db_histogram`) + MCV(1% 임계) + HLL 기반 NDV + 정확한 null_frequency 가 구현돼 있다(통계 수집 후속은 develop 532ce4b6d CBRD-26959 #7476). 선택도 함수는 eqsel(MCV 매칭 + 잔여 분산, `histogram_get_equal_selectivity` :1032), scalarineqsel(버킷 보간 — 템플릿 `comp_parts()` develop histogram_cl.cpp:908, :1299-1311 에서 int64/double/string_view/uint64 인스턴스화), LIKE(:1824), nulltestsel 까지 PG 상당 수준이다.
-- ✅ **리뷰 체크포인트**: 새 선택도 경로 추가 시 기존 eqsel/scalarineqsel/LIKE/nulltestsel 과 중복 구현하지 말고, 버킷 보간이 필요하면 `comp_parts()` 를 재사용할 것.
+**현재 히스토그램이 커버하는 범위 (equi-depth + MCV + HLL NDV)** — `feature/reservoir-sampling`(0b84bbaac, CBRD-26936) 계열 기준으로 equi-depth 히스토그램(HST2 blob, 카탈로그 `_db_histogram`) + MCV(1% 임계) + HLL 기반 NDV + 정확한 null_frequency 가 구현돼 있다(통계 수집 후속은 develop 532ce4b6d CBRD-26959 #7476). 선택도 함수는 등호(MCV 매칭 + 잔여 분산, `histogram_get_equal_selectivity` :1032), 범위(버킷 보간 — 템플릿 `comp_parts()` develop histogram_cl.cpp:908, :1299-1311 에서 int64/double/string_view/uint64 인스턴스화), LIKE(:1824), NULL 검사까지 갖췄다.
+- ✅ **리뷰 체크포인트**: 새 선택도 경로 추가 시 기존 등호/범위/LIKE/NULL 검사 선택도와 중복 구현하지 말고, 버킷 보간이 필요하면 `comp_parts()` 를 재사용할 것.
 
-**표현식 f(col) 에는 히스토그램이 적용되지 않는다 (PT_NAME 만 인정)** — 히스토그램 조회는 피연산자가 `PT_NAME` 인 경우에만 성립한다(`if (lhs == NULL || lhs->node_type != PT_NAME)` develop histogram_cl.cpp:598, :2524). `UPPER(col) = 'X'`, `col + 1 > 10` 같은 표현식은 히스토그램을 못 타고 기본 상수로 떨어진다(PG 의 expression statistics 상당 기능 없음).
+**표현식 f(col) 에는 히스토그램이 적용되지 않는다 (PT_NAME 만 인정)** — 히스토그램 조회는 피연산자가 `PT_NAME` 인 경우에만 성립한다(`if (lhs == NULL || lhs->node_type != PT_NAME)` develop histogram_cl.cpp:598, :2524). `UPPER(col) = 'X'`, `col + 1 > 10` 같은 표현식은 히스토그램을 못 타고 기본 상수로 떨어진다(표현식 통계 기능 없음).
 - ✅ **리뷰 체크포인트**: 선택도 변경이 표현식 노드를 다루려 하면 PT_NAME 제한을 우회/확장하는지 확인하고, 확장 시 파스트리 노드 타입별 안전성(부작용 있는 함수 등)을 같이 볼 것.
 
 **develop 의 히스토그램 센티널 버그(-1 vs 0) — '4버킷 통계'의 정체** — 실험에서 '4버킷 통계'로 관측되던 상태는 실제로는 당시 develop 의 센티널 값 버그(-1 과 0 혼동)로 히스토그램이 의도대로 쓰이지 않던 것이며, CBRD-26959 의 커밋 c4bb4b04a 에서 수정됐다. 따라서 그 이전 develop 에서 얻은 '4버킷이 더 빠르다'는 관측은 통계 정밀도의 효과가 아니라 버그로 인한 우연이다.
@@ -264,7 +263,7 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
 **히스토그램 리더의 행수 스케일은 샘플 스케일로 자기일관적이다** — 리더의 `total_rows()` 는 마지막 버킷의 누적값이며 샘플 스케일 기준이다. 덤프의 버킷 행수와 같은 스케일이므로 내부적으로 일관되는데, 전체 테이블 실제 행수를 분모로 놓고 손계산하면 ×2 수준의 '스케일 버그'처럼 보인다 — 실제로는 계산자의 분모 선택 오류였다(과거 오진 사례).
 - ✅ **리뷰 체크포인트**: 선택도 손검증 시 분모를 전체 테이블 행수가 아니라 SHOW HISTOGRAM 덤프의 샘플 스케일 행수로 맞추고, '스케일이 2배 틀렸다'는 지적은 분모 확인 전에 채택하지 말 것.
 
-**Duj1(Haas-Stokes) NDV 추정기의 구현 위치와 계약** — Duj1 은 전적으로 `HISTOGRAM_WITH_SAMPLING_SCAN_QUERY_TEMPLATE`(histogram_cl.hpp) 안에서 SQL 로 구현돼 있다: `sampq` CTE 가 `q = LEAST(1, sample_rows / <클래스 행수>)` 를 계산하고, hist_grouped 의 approx_ndv = `CAST(ROUND(LEAST(n/q, GREATEST(d, n*d/(n - f1 + f1*q)))) AS BIGINT)`, 여기서 f1 = SUM(count=1 케이스). C 쪽(histogram_cl.cpp `get_histogram`)은 `sm_find_class` + `sm_get_class_with_statistics` → `stats->heap_num_objects` 로 클래스 카디널리티를 추가 `%lld` 인자로 전달하며, 이를 위해 query_buf 를 3072+ 로 키웠다. FULLSCAN 템플릿은 q=1 이면 Duj1 이 d 로 자연 퇴화하므로 손대지 않았고, PG 가드(f1==n, f1==0, clamp)가 필요하다는 점이 설계 전제다. *(행번호·상세는 CBRD-27094 @ faf5a3b2a 기준 재검증 — develop 반영 여부/위치 재확인 필요)*
+**Duj1(Haas-Stokes) NDV 추정기의 구현 위치와 계약** — Duj1 은 전적으로 `HISTOGRAM_WITH_SAMPLING_SCAN_QUERY_TEMPLATE`(histogram_cl.hpp) 안에서 SQL 로 구현돼 있다: `sampq` CTE 가 `q = LEAST(1, sample_rows / <클래스 행수>)` 를 계산하고, hist_grouped 의 approx_ndv = `CAST(ROUND(LEAST(n/q, GREATEST(d, n*d/(n - f1 + f1*q)))) AS BIGINT)`, 여기서 f1 = SUM(count=1 케이스). C 쪽(histogram_cl.cpp `get_histogram`)은 `sm_find_class` + `sm_get_class_with_statistics` → `stats->heap_num_objects` 로 클래스 카디널리티를 추가 `%lld` 인자로 전달하며, 이를 위해 query_buf 를 3072+ 로 키웠다. FULLSCAN 템플릿은 q=1 이면 Duj1 이 d 로 자연 퇴화하므로 손대지 않았고, 가드(f1==n, f1==0, clamp)가 필요하다는 점이 설계 전제다. *(행번호·상세는 CBRD-27094 @ faf5a3b2a 기준 재검증 — develop 반영 여부/위치 재확인 필요)*
 - ✅ **리뷰 체크포인트**: 템플릿 문자열에 포맷 인자를 추가/변경했다면 query_buf 크기, 모든 호출부의 %lld 개수·순서, fullscan 템플릿과의 인자 불일치, 그리고 `sm_get_class_with_statistics` 로 얻은 통계 포인터의 수명/해제를 함께 확인할 것.
 
 **Duj1 의 보정 한계 — 페이지 단위 SAMPLING_SCAN 클러스터링** — Duj1 적용으로 NDV(mc.company_id)가 160,692 → 199,557 로 올라갔으나 실제값 234,997 에는 못 미친다(sum bucket ndv 160,656 vs 234,997 @50% sample). 원인은 페이지 단위 SAMPLING_SCAN 이라 같은 페이지 내 값들이 클러스터링되어 f1(1회 등장 값) 통계가 실제 무작위 표본과 다르기 때문이다. 즉 추정기를 고쳐도 표본 추출 방식이 남은 오차의 상한을 결정한다.
@@ -273,33 +272,33 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
 ### comp_parts (histogram_cl.cpp:908)
 
 **min/max·avg_width 미저장 → 첫 버킷 하한이 없어 근사 핵을 쓴다** — 히스토그램에 컬럼 min/max 와 avg_width 를 저장하지 않아 첫 버킷의 하한 경계값을 알 수 없고, 이는 범위 조건의 하단 경계 근처 선택도가 원리적으로 부정확한 원인이다. develop 주석이 문제를 그대로 서술한다: "The first bucket has no previous endpoint stored (its lower bound is unknown), so bucket_hi (b - 1) would read bucket record (uint) -1 -> assert in debug / out-of-bounds in release"(develop histogram_cl.cpp:923-930). 우회 방식: 옛 half-mass(절반 질량) 근사는 두 번째 버킷 폭을 아래로 미러링하는 방식으로 대체됐다("instead of half the first bucket's mass"). 근본 해결은 여전히 min/max 수집·저장이라 통계 수집 포맷 변경이 선행돼야 한다. *(원 메모의 histogram_cl.cpp:756-759 / 커밋 56e3aabf8 half-mass 는 행 번호 확인 필요 — 현재 소스와 불일치)*
-- ✅ **리뷰 체크포인트**: 범위 선택도(scalarineqsel) 버그는 histogram_cl.cpp:918-935 의 첫 버킷 하한 근사가 원인인지 먼저 의심할 것.
+- ✅ **리뷰 체크포인트**: 범위 선택도 버그는 histogram_cl.cpp:918-935 의 첫 버킷 하한 근사가 원인인지 먼저 의심할 것.
 
 ### histogram_get_join_selectivity (histogram_cl.cpp:1528)
 
-**PG eqjoinsel_inner 이식본 — develop 머지됨(10d0aa0e7, CBRD-26746 #7508)** — 양쪽 MCV 를 정렬해 투포인터로 매칭 → 매칭 MCV 기여분 + 잔여 확률을 `잔여/(nd - nmatches)` 로 분배(develop :1619-1639; many-to-many collation-aware 매칭은 양측 분모에서 각자의 matched distinct 를 제외한다는 주석 포함) → 최종적으로 `min(totalsel1, totalsel2)` 선택(:1641, 주석 "the smaller estimate is the view from the larger-NDV side") → 양쪽 (1-nf) 로 나눠 반환(:1643-1656, qo_expr_selectivity 절 참조) → 0 이면 `1/(total_rows1*total_rows2)` 바닥(:1660-1663). 히스토그램/MCV 부재 시 폴백은 기존 `1/max(icard)`. 검증: `t.kind_id=mc.company_type_id` sel 0.147469(손계산 일치), `cn.id=ci.person_role_id` 카디널리티 17.57M(null 제외 실제치 부합), `n.id=ci.person_id` 2.40e-7 이 PG 수치와 일치.
+**MCV 투포인터 조인 선택도 — develop 머지됨(10d0aa0e7, CBRD-26746 #7508)** — 양쪽 MCV 를 정렬해 투포인터로 매칭 → 매칭 MCV 기여분 + 잔여 확률을 `잔여/(nd - nmatches)` 로 분배(develop :1619-1639; many-to-many collation-aware 매칭은 양측 분모에서 각자의 matched distinct 를 제외한다는 주석 포함) → 최종적으로 `min(totalsel1, totalsel2)` 선택(:1641, 주석 "the smaller estimate is the view from the larger-NDV side") → 양쪽 (1-nf) 로 나눠 반환(:1643-1656, qo_expr_selectivity 절 참조) → 0 이면 `1/(total_rows1*total_rows2)` 바닥(:1660-1663). 히스토그램/MCV 부재 시 폴백은 기존 `1/max(icard)`. 검증: `t.kind_id=mc.company_type_id` sel 0.147469(손계산 일치), `cn.id=ci.person_role_id` 카디널리티 17.57M(null 제외 실제치 부합).
 - ✅ **리뷰 체크포인트**: 조인 선택도 변경 시 세 단계(MCV 투포인터 / 잔여를 nd-nmatches 로 분배 / min(totalsel1,totalsel2))가 모두 보존되고 MCV·히스토그램 부재 시 폴백 경로가 살아있는지 확인할 것.
 
-**eqjoinsel 에 NDV clamp 가 없어 조인 선택도가 과대 계산된다 (20a 회귀)** — eqjoinsel 도입(ba0d955ee) 후 17a/17d/20a 가 base 에서는 PG 와 일치하던 조인 순서를 이탈했다 — per-term 선택도 값 자체는 PG 에 더 가까워졌으나(`n.id=ci.person_id` 2.4e-7 등) 평평한 비용 모델과 결합되어 순서가 악화됐다. 20a 의 직접 원인은 mk-cc 선택도가 3.53e-6→6.81e-6 으로 배증한 것이고, 그 원인은 `cc.movie_id` 의 NDV 가 93,514 인데 조인 상대인 title 도메인은 2.5M 이라 NDV clamp(작은 쪽 NDV 를 상대 도메인/조인 대상 크기로 제한)가 없기 때문이다(develop 코드에도 clamp 없음 — 재확인).
-- ✅ **리뷰 체크포인트**: eqjoinsel 관련 변경은 양쪽 NDV clamp 적용 여부를 확인하고, per-term 선택도가 PG 에 가까워졌다는 것만으로 성공 판정하지 말고 최종 조인 순서/시간까지 확인할 것.
+**조인 선택도에 NDV clamp 가 없어 과대 계산된다 (20a 회귀)** — 조인 선택도 도입(ba0d955ee) 후 17a/17d/20a 의 조인 순서가 base 와 달라졌다 — per-term 선택도 값(`n.id=ci.person_id` 2.4e-7 등)이 평평한 비용 모델과 결합되어 순서가 악화됐다. 20a 의 직접 원인은 mk-cc 선택도가 3.53e-6→6.81e-6 으로 배증한 것이고, 그 원인은 `cc.movie_id` 의 NDV 가 93,514 인데 조인 상대인 title 도메인은 2.5M 이라 NDV clamp(작은 쪽 NDV 를 상대 도메인/조인 대상 크기로 제한)가 없기 때문이다(develop 코드에도 clamp 없음 — 재확인).
+- ✅ **리뷰 체크포인트**: 조인 선택도 관련 변경은 양쪽 NDV clamp 적용 여부를 확인하고, per-term 선택도 값만으로 성공 판정하지 말고 최종 조인 순서/시간까지 확인할 것.
 
-**histogram_get_eqjoin_selectivity Stage 3 의 버킷 오버랩 MIN 언더컷 (Card-cost defect #2) (develop 에 없음 — CBRD-27094 이전 실험 계열)** — `histogram_get_eqjoin_selectivity`(실험 브랜치 histogram_cl.cpp Stage 3)는 버킷쌍 기반 `overlap_residual_mass` 를 계산해 건전한 전역 fallback 값과 MIN 을 취했고, 이 때문에 선택도가 부당하게 낮아졌다. 17a 에서 `mc.company_id=cn.id`(FK→PK) sel 이 오버랩값 3.065e-6 로 전역 fallback 3.58e-6 을 언더컷했고(uniform 4.26e-6), 그 결과 t-vs-mc 부착 결정이 비용 1915 vs 1915 완전 동률이 되어 tie-break 가 순서를 결정했다 — PG 의 eqjoinsel 에는 버킷 오버랩 메커니즘 자체가 없다. 오버랩 MIN 을 제거하자 attachment-order 매치 34→38/113, leaf 27→31/113, 회귀 0 이며 16b/17a/17e/2d(pattern-C 계열)가 새로 일치했다(검증: `SHOW HISTOGRAM movie_companies ON company_id` / `company_name ON id` 덤프). *(이 심볼은 CBRD-27094 브랜치에도 develop 에도 없다 — `histogram_get_join_selectivity` 만 존재)*
-- ✅ **리뷰 체크포인트**: eqjoin 선택도 경로에 PG 에 없는 보정항(오버랩/잔여질량 등)을 MIN/MAX 로 끼워넣는 변경은 거부하고, 추가 항이 건전한 전역 추정을 아래로 끌어내리지 않는지 확인할 것.
+**histogram_get_eqjoin_selectivity Stage 3 의 버킷 오버랩 MIN 언더컷 (Card-cost defect #2) (develop 에 없음 — CBRD-27094 이전 실험 계열)** — `histogram_get_eqjoin_selectivity`(실험 브랜치 histogram_cl.cpp Stage 3)는 버킷쌍 기반 `overlap_residual_mass` 를 계산해 건전한 전역 fallback 값과 MIN 을 취했고, 이 때문에 선택도가 부당하게 낮아졌다. 17a 에서 `mc.company_id=cn.id`(FK→PK) sel 이 오버랩값 3.065e-6 로 전역 fallback 3.58e-6 을 언더컷했고(uniform 4.26e-6), 그 결과 t-vs-mc 부착 결정이 비용 1915 vs 1915 완전 동률이 되어 tie-break 가 순서를 결정했다. 오버랩 MIN 을 제거하자 attachment-order 매치 34→38/113, leaf 27→31/113, 회귀 0 이며 16b/17a/17e/2d(pattern-C 계열)가 새로 일치했다(검증: `SHOW HISTOGRAM movie_companies ON company_id` / `company_name ON id` 덤프). *(이 심볼은 CBRD-27094 브랜치에도 develop 에도 없다 — `histogram_get_join_selectivity` 만 존재)*
+- ✅ **리뷰 체크포인트**: eqjoin 선택도 경로에 보정항(오버랩/잔여질량 등)을 MIN/MAX 로 끼워넣는 변경은 거부하고, 추가 항이 건전한 전역 추정을 아래로 끌어내리지 않는지 확인할 것.
 
-**한쪽만 MCV 리스트가 있는 eqjoin fallback 이 MCV 행의 조인 질량을 통째로 누락 (Card-cost defect #3) (실험 브랜치 계열)** — 기존 fallback 은 `non_mcv_frac_l × non_mcv_frac_r / max(ndv)` 였는데, 이는 MCV 에 속한 행들의 조인 기여를 0 으로 만든다(mc 의 MCV 15.8% 행이 아무 기여도 안 함) → term sel 3.58e-6. PG 의 `eqjoinsel_inner` 은 양쪽 MCV 리스트가 없을 때 NULL 비율만 곱한 뒤 **전체 모집단 기준 `1/max(nd1,nd2)`** 를 쓴다. Stage 3 에서 `!has_both_mcv_lists` 일 때 `selectivity_mass = 1/max(lhs_total_ndv, rhs_total_ndv)` 로 고치자 1/234,997 = 4.255e-6(이상값)이 나오고, max 를 쓰므로 정확한 PK 쪽 NDV 가 채택되어 LHS NDV 잡음에 강건해진다(17a 검증 mc⋈cn sel = 4.25537e-6).
+**한쪽만 MCV 리스트가 있는 eqjoin fallback 이 MCV 행의 조인 질량을 통째로 누락 (Card-cost defect #3) (실험 브랜치 계열)** — 기존 fallback 은 `non_mcv_frac_l × non_mcv_frac_r / max(ndv)` 였는데, 이는 MCV 에 속한 행들의 조인 기여를 0 으로 만든다(mc 의 MCV 15.8% 행이 아무 기여도 안 함) → term sel 3.58e-6. Stage 3 에서 `!has_both_mcv_lists` 일 때 `selectivity_mass = 1/max(lhs_total_ndv, rhs_total_ndv)` 로 고치자 1/234,997 = 4.255e-6(이상값)이 나오고, max 를 쓰므로 정확한 PK 쪽 NDV 가 채택되어 LHS NDV 잡음에 강건해진다(17a 검증 mc⋈cn sel = 4.25537e-6).
 - ✅ **리뷰 체크포인트**: MCV 경로 밖(non-MCV) 잔여 비율만 곱해 선택도를 만드는 코드가 보이면 MCV 행의 조인 질량이 사라지지 않는지 확인 — 분모는 min 이 아니라 max(NDV) 여야 하고 분자에 non_mcv_frac 곱이 남으면 재발이다.
 
-**양쪽 모두 MCV 가 있는 many-to-many 조인은 여전히 과대추정 (위 두 수정과 무관)** — C-1(오버랩 언더컷 제거)/C-3(PG 한쪽-MCV fallback) 수정은 `company_id=cn.id` 류의 한쪽-MCV/오버랩 케이스만 고친다. movie_id 계열의 many-to-many 조인은 양쪽에 MCV 리스트가 있어 both-MCV `pg_mcv_mass`/overlap 경로로 들어가고 uniform(1/max(NDV)) 대비 과대추정이 남는다. 실측으로 stash(C-1+C-3+Duj1) 복원 시 movie_id 조인 4건의 선택도가 origin 과 바이트 단위로 동일했다(31b `mi_idx.movie_id=mk.movie_id` 2.174e-6 고정) — 즉 이 회귀들에 대해 두 수정은 완전히 무력(inert)이다.
+**양쪽 모두 MCV 가 있는 many-to-many 조인은 여전히 과대추정 (위 두 수정과 무관)** — C-1(오버랩 언더컷 제거)/C-3(한쪽-MCV fallback) 수정은 `company_id=cn.id` 류의 한쪽-MCV/오버랩 케이스만 고친다. movie_id 계열의 many-to-many 조인은 양쪽에 MCV 리스트가 있어 both-MCV/overlap 경로로 들어가고 uniform(1/max(NDV)) 대비 과대추정이 남는다. 실측으로 stash(C-1+C-3+Duj1) 복원 시 movie_id 조인 4건의 선택도가 origin 과 바이트 단위로 동일했다(31b `mi_idx.movie_id=mk.movie_id` 2.174e-6 고정) — 즉 이 회귀들에 대해 두 수정은 완전히 무력(inert)이다.
 - ✅ **리뷰 체크포인트**: eqjoin 선택도 수정이 특정 회귀를 고친다고 주장하면 그 조인이 both-MCV 경로인지 one-sided 경로인지부터 확인할 것 — 선택도 값이 그대로인지 비교하면 즉시 반증 가능하다.
 
 ### histogram_get_like_selectivity (histogram_cl.cpp:1824)
 
-**LIKE prefix 를 (선택도 추정에서) 범위로 변환하지 않고 버킷 경계값 매칭만 한다 (편향)** — PG 는 `make_greater_string` 으로 LIKE 접두사를 `[prefix, prefix+)` 범위 조건으로 바꿔 히스토그램 보간을 쓰지만, CUBRID 의 이 함수는 그 변환 없이 MCV 매칭 + 버킷 경계값 매칭(`matched_non_mcv_buckets`, develop :1909-1920) + 휴리스틱만 쓴다. 경계값에만 의존하므로 접두사가 버킷 경계와 어긋나면 선택도가 편향된다. (인덱스 스캔용으로는 rewriter 가 prefix LIKE 에서 파생 BETWEEN 범위를 만들지만 — CBRD-27036, qo_iscan_cost 절 참조 — 그것은 스캔 범위이지 히스토그램 보간 선택도가 아니다.)
-- ✅ **리뷰 체크포인트**: LIKE 선택도 개선 PR 은 접두사→범위 변환(make_greater_string 상당)을 도입했는지 아니면 또 다른 휴리스틱을 얹었는지 구분할 것 — 후자는 편향을 다른 방향으로 옮길 뿐이다.
+**LIKE prefix 를 (선택도 추정에서) 범위로 변환하지 않고 버킷 경계값 매칭만 한다 (편향)** — CUBRID 의 이 함수는 LIKE 접두사를 `[prefix, prefix+)` 범위 조건으로 바꾸는 변환 없이 MCV 매칭 + 버킷 경계값 매칭(`matched_non_mcv_buckets`, develop :1909-1920) + 휴리스틱만 쓴다. 경계값에만 의존하므로 접두사가 버킷 경계와 어긋나면 선택도가 편향된다. (인덱스 스캔용으로는 rewriter 가 prefix LIKE 에서 파생 BETWEEN 범위를 만들지만 — CBRD-27036, qo_iscan_cost 절 참조 — 그것은 스캔 범위이지 히스토그램 보간 선택도가 아니다.)
+- ✅ **리뷰 체크포인트**: LIKE 선택도 개선 PR 은 접두사→범위 변환을 도입했는지 아니면 또 다른 휴리스틱을 얹었는지 구분할 것 — 후자는 편향을 다른 방향으로 옮길 뿐이다.
 
-**develop 의 혼합식: 크기 기반 블렌드 + 클램프 (disagreement_boost 는 develop 에 없음)** — develop 은 비-MCV 추정을 히스토그램 크기로 가중한다: 버킷 100개 이상이면 경계값 매칭 비율을 전적으로 신뢰, 10~99개면 `w = size/100` 으로 패턴 휴리스틱과 블렌드, 10개 미만이면 휴리스틱 단독(:1931-1946). 결과는 [0.0001, 0.9999] 로 클램프(:1947-1955)하고, (1-nullfrac) 나눗셈 규약 후 `max(1/total_rows, sel)` 바닥을 적용한다(:1965-1975). 패턴 휴리스틱 `pattern_heuristic_selectivity`(:1670)는 PG 와 동일 상수(FIXED_CHAR 0.20 / ANY_CHAR 0.9 / WILDCARD 5.0)를 쓴다.
+**develop 의 혼합식: 크기 기반 블렌드 + 클램프 (disagreement_boost 는 develop 에 없음)** — develop 은 비-MCV 추정을 히스토그램 크기로 가중한다: 버킷 100개 이상이면 경계값 매칭 비율을 전적으로 신뢰, 10~99개면 `w = size/100` 으로 패턴 휴리스틱과 블렌드, 10개 미만이면 휴리스틱 단독(:1931-1946). 결과는 [0.0001, 0.9999] 로 클램프(:1947-1955)하고, (1-nullfrac) 나눗셈 규약 후 `max(1/total_rows, sel)` 바닥을 적용한다(:1965-1975). 패턴 휴리스틱 `pattern_heuristic_selectivity`(:1670)는 상수 FIXED_CHAR 0.20 / ANY_CHAR 0.9 / WILDCARD 5.0 을 쓴다.
 
-**disagreement_boost 가 매칭 버킷 0개일 때 패턴 휴리스틱을 0으로 지운다 (Card-cost defect #1) (develop 에 없음 — 실험 브랜치 계열)** — 패턴에 매칭되는 히스토그램 버킷이 0개일 때(희귀 패턴에서는 정상 — 샘플된 bucket_hi 값이 수백 개뿐) `disagreement_boost` 가 boosted_weight 를 1 로 밀어 `pattern_heuristic_selectivity` 를 0 으로 만든다. 그 결과 sel 이 1/NCARD 로 클램프되어 `k.keyword LIKE '%sequel%'` 가 정확히 1행으로 추정된다(실제 30, PG 추정 13). 패턴 휴리스틱 자체는 단독으로 ~43행으로 PG 보다도 낫다 — 수정 방향은 `matched_non_mcv_buckets == 0` 이면 boost 를 적용하지 말고 pattern_sel 로 폴백하는 것. *(`disagreement_boost` 심볼은 CBRD-27094 브랜치에도 develop 에도 없음 — 실험 브랜치 한정)*
+**disagreement_boost 가 매칭 버킷 0개일 때 패턴 휴리스틱을 0으로 지운다 (Card-cost defect #1) (develop 에 없음 — 실험 브랜치 계열)** — 패턴에 매칭되는 히스토그램 버킷이 0개일 때(희귀 패턴에서는 정상 — 샘플된 bucket_hi 값이 수백 개뿐) `disagreement_boost` 가 boosted_weight 를 1 로 밀어 `pattern_heuristic_selectivity` 를 0 으로 만든다. 그 결과 sel 이 1/NCARD 로 클램프되어 `k.keyword LIKE '%sequel%'` 가 정확히 1행으로 추정된다(실제 30). 패턴 휴리스틱 자체는 단독으로 ~43행이다 — 수정 방향은 `matched_non_mcv_buckets == 0` 이면 boost 를 적용하지 말고 pattern_sel 로 폴백하는 것. *(`disagreement_boost` 심볼은 CBRD-27094 브랜치에도 develop 에도 없음 — 실험 브랜치 한정)*
 - ✅ **리뷰 체크포인트**: 패턴 선택도 코드에서 '매칭 버킷 0개'가 에러가 아니라 정상 경로로 처리되고 휴리스틱 폴백이 살아 있는지, 가중치 혼합식이 한쪽 항을 0으로 만들 수 있는 구조인지 확인할 것.
 
 ### HistogramReader::reset (histogram_reader.cpp:72)
@@ -315,7 +314,7 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
 **location != 0 (outer join ON 유래) 팩터는 반드시 제외해야 한다** — outer join 의 ON 절에서 유래한 팩터(location != 0)를 OR 추출 대상에 포함하면 outer join 의 null-확장 행이 사라져 결과가 달라진다. develop 머지본은 이 가드를 내장했다: "a factor that came from an outer join's ON condition (location > 0) is evaluated at its join level and does not reject the null-padded rows, while the derived filter would run at WHERE level and wrongly reject them"(develop :4824-4830). PR#7613 개발 중 커밋 4f6e24024 로 추가됐고, LEFT JOIN 항등식(4097 = 4074 + 23)으로 검증했다. 추가 가드: `or_next` 체인이 달린 팩터는 flatten 이 disjunct 일부만 모아 과강한 제약을 만들 수 있어 스킵(:4815-4820), disjunct 수 상한 `QO_OR_EXTRACT_MAX_DISJUNCTS 8`.
 - ✅ **리뷰 체크포인트**: 제약을 WHERE 로 끌어올리는(pull-up) 모든 변형에서 term 의 location 값 가드가 있는지, LEFT/RIGHT JOIN 회귀 케이스(전체 행수 = 매칭 행수 + null-확장 행수)로 검증됐는지 확인할 것.
 
-**선택도 이중계상은 머지본이 PT_EXPR_INFO_OR_DERIVED 마크로 보정한다** — 추출된 OR 를 원래 join term 과 함께 남긴 채 단일 릴레이션 제약으로 추가하면 같은 조건이 두 번 곱해져 선택도가 이중 계산된다(PG 는 `consider_new_or_clause()` 로 보정; PR#7613 draft 시점에는 '남은 개선 ①'). develop 머지본은 파생 팩터를 `PT_EXPR_INFO_OR_DERIVED`(모양에 따라 `_EXPENSIVE` 추가)로 마크하고, 이 마크가 QO_TERM 플래그로 전달되어 `qo_node_add_sarg()` 가 행수 이중계상을 스킵하고 `make_pred_from_plan()` 이 인덱스가 채택하지 않은 비싼 복사본을 드랍한다(함수 주석 :4788-4794).
+**선택도 이중계상은 머지본이 PT_EXPR_INFO_OR_DERIVED 마크로 보정한다** — 추출된 OR 를 원래 join term 과 함께 남긴 채 단일 릴레이션 제약으로 추가하면 같은 조건이 두 번 곱해져 선택도가 이중 계산된다(PR#7613 draft 시점에는 '남은 개선 ①'). develop 머지본은 파생 팩터를 `PT_EXPR_INFO_OR_DERIVED`(모양에 따라 `_EXPENSIVE` 추가)로 마크하고, 이 마크가 QO_TERM 플래그로 전달되어 `qo_node_add_sarg()` 가 행수 이중계상을 스킵하고 `make_pred_from_plan()` 이 인덱스가 채택하지 않은 비싼 복사본을 드랍한다(함수 주석 :4788-4794).
 - ✅ **리뷰 체크포인트**: 중복 제약을 추가하는 변경에 선택도 보정(추출 절을 원 절의 선택도에서 나누거나 계산에서 제외)이 함께 들어갔는지 확인할 것 — 없으면 카디널리티 과소추정으로 다른 질의에 회귀가 생긴다.
 
 **추출된 OR 가 하류에서 재전개되어 27-conjunct 로 풀리면 추가 1.3x 손해** — 추출 결과를 단일 term 형태로 유지하지 못하면 하류 처리에서 다시 전개되어 27-conjunct 형태가 되고, 단일 term 유지 대비 약 1.3배 느려진다(IMP-027 실측 0.293s vs 당시 출력 0.383s). draft 시점 '남은 개선 ②' 였다 — **develop 머지본이 단일 term 을 유지하는지는 미확인(재검증 필요)**.
@@ -329,10 +328,10 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
 `MAX(1, height) * BTREE_DESCENT_PAGE_OVERHEAD` (단층 50, 2층 100) 미만일 때 물리므로 **4~18행 차원
 테이블의 인덱스 스캔이 거의 공짜가 되어 조인 순서 앞으로 끌려온다.**
 
-가장 나쁜 결과는 **PG 순서 일치의 상실**이다. `1a`·`1b` 는 수정 전 PG 조인 순서와 정확히 일치했는데
-(1a: `it mi_idx mc ct t`) 캡 투입 후 어긋났다(`mc ct mi_idx it t`). 1a 는 시간도 0.014s → 0.242s.
+가장 나쁜 결과는 `1a`·`1b` 의 조인 순서 변화다. 1a 는 수정 전 `it mi_idx mc ct t` 였던 순서가
+캡 투입 후 `mc ct mi_idx it t` 로 바뀌었고 시간도 0.014s → 0.242s.
 인터리브 median-of-5(rep 마다 팔 교대) + MAD 판정으로 1a +1629%, 27c +75%, 23c +8.7%, 15d +9.1%
-회귀 대 개선 8건. 지표가 'PG 와의 조인 순서 일치' 이므로 이건 다툴 여지 없는 회귀다.
+회귀 대 개선 8건.
 
 반면 **inner 전용 분리(`iscan_descent_cpu`)만 남긴 버전은 JOB 플랜에 완전히 중립**이다 — 113개
 질의의 플랜 덤프가 비용 수치를 제외하면 base 와 **전건 동일**(구조·접근 방식 포함, 상이 0건).
@@ -386,16 +385,15 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
 
 - **[문서 결함]** `src/optimizer/AGENTS.md` Where-to-Look 의 "Fix cost estimation = plan_generation.c"는 오안내 — 실제는 query_planner.c 의 `qo_*_cost` 계열. develop 95b79e7ed 에 여전히 존재(재확인). 정정 PR 은 사용자 판단 대기.
 - 조인 카디널리티 `MAX(1.0)` 바닥 — 분수 카디널리티 소거로 조인 순서가 코스트 노이즈에 좌우. develop planner_visit_node :8124/:8134/:8158/:8160 에 존재(재확인).
-- eqjoinsel NDV clamp 부재 — 조인 선택도 과대(20a 회귀). develop histogram_get_join_selectivity 에 clamp 없음(재확인).
-- 구조적 미구현 4종: `scalararraysel`(IN 원소별 MCV 프로브) 미구현(develop cap 0.5 유지 재확인) / correlation 미수집(ISCAN_OID_ACCESS_OVERHEAD 5 로 땜질, develop :82-84 TODO 재확인) / 히스토그램 min·max 미저장(첫 버킷 하한 근사, develop :923 주석 재확인) / LIKE prefix→범위 변환 없음(선택도 측, develop 재확인).
-- 기본 선택도 상수 PG 불일치(EQ 0.001 vs 0.005, COMP 0.1 vs 0.3333) — 폴백 경로 체계적 과소추정. develop query_planner.h:116/:118 재확인.
+- 조인 선택도 NDV clamp 부재 — 조인 선택도 과대(20a 회귀). develop histogram_get_join_selectivity 에 clamp 없음(재확인).
+- 구조적 미구현 4종: IN 원소별 MCV 프로브 미구현(develop cap 0.5 유지 재확인) / correlation 미수집(ISCAN_OID_ACCESS_OVERHEAD 5 로 땜질, develop :82-84 TODO 재확인) / 히스토그램 min·max 미저장(첫 버킷 하한 근사, develop :923 주석 재확인) / LIKE prefix→범위 변환 없음(선택도 측, develop 재확인).
 - descent_cpu 비대칭 — **해소됨(PR#7622 `54b1b44d6`, inner 전용 과금)**. 잔여 두 축은 위 §2 캘리브레이션 절: `HJ_MEM_ALLOC_CONSTANT` 800 은 두 벤치 사이의 타협값(별건: 필터된 차원 테이블을 거친 조인 카디널리티), `qo_plan_cmp` 1.2배 밴드 안 "term 많은 인덱스 우선" 규칙(cbrd_25382_1, 별건 후보).
 - (구 서술) descent_cpu 비대칭(iscan 전용 고정 CPU 항) — PR#7622 27건 회귀 근본 원인. develop 미머지(develop 에 descent_cpu 없음). **.50 수정 시도는 사용자 지시로 종결(2026-08-26, 미적용)** — 수정안(`iscan_descent_cpu` 필드 분리, nljoin inner 전용 과금)은 .50 `~/dev/cbrd27094-descent-fix.patch` 로 보존. 산식 검증 완료(구동측 0.2575→0, inner 과금 불변), 19a 플랜 유지 확인. JOB 순효과는 세션 오프셋(+5.76% 균일 시프트)으로 미확정 — 재개 시 동일 세션 A/B 필수.
 - `qo_mackert_lohman_pages` T>b 분기 캡 부재 — 단일 스캔 fetch 추정이 힙 전체의 17.4배까지 발산. develop 미머지(PR#7622 계열 브랜치 한정).
 - `QO_GET_HIST_STATS` 매크로가 여전히 캐시 원본 포인터를 반환(query_graph.h:203-204) — dangling 자체는 주석 사이트 복사(937d09feb)로 해소됐으나, 매크로 신규 사용처는 같은 결함을 재생산할 수 있음(부분 해소).
 - 파스 트리 histogram dangling 결함 — **해소됨(develop 937d09feb, CBRD-27279 #7761)**.
 - OR 제약 추출 부재(q19) — **해소됨(develop c283e799d, CBRD-27171 #7613)**. 단, 추출 term 의 단일 term 유지(27-conjunct 재전개) 여부는 머지본에서 미확인.
-  잔여 개선 후보(.50 프로젝트 md 이관, 2026-08-26): ① 추출 절의 **선택도 이중계상 보정**(PG `consider_new_or_clause` 상당 — 추출 OR 를 중복 제약으로 더할 때 선택도를 나눠 보정) 미구현 ② 단일 term 형태 유지 시 추가 ~1.3x 여지(IMP-027 실측 0.293 vs 0.383) ③ CTP sql/medium 회귀 확인 미수행. 참고: 동일 발견이 주영진 IMP-027 캠페인에 있음(필터플랜 코스트 29,357까지 일치) — 중복 구현 방지 조율은 사용자 몫.
+  잔여 개선 후보(.50 프로젝트 md 이관, 2026-08-26): ① 추출 절의 **선택도 이중계상 보정**(추출 OR 를 중복 제약으로 더할 때 선택도를 나눠 보정) 미구현 ② 단일 term 형태 유지 시 추가 ~1.3x 여지(IMP-027 실측 0.293 vs 0.383) ③ CTP sql/medium 회귀 확인 미수행. 참고: 동일 발견이 주영진 IMP-027 캠페인에 있음(필터플랜 코스트 29,357까지 일치) — 중복 구현 방지 조율은 사용자 몫.
 
 ## 4. 진행중인 작업
 
@@ -405,7 +403,7 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
 - CBRD-27140: `qo_index_cardinality` 계열·`QO_ATTR_CUM_STATS` INT64 승격 (PR#7856, 2026-09-02 리뷰 대기).
 - descent_cpu 회귀(PR#7622 근본 원인) 코드 수정 진행 중 — (a) inner-only 우선, 이후 (c) 페이지 비례 검토. 완료 시 .51의 재블레스 8건 진행 가능.
 - PR#7613 (qo_extract_or_restrictions OR 제약 추출) — **완료(머지 c283e799d, CBRD-27171)**. 선택도 이중계상은 머지본이 PT_EXPR_INFO_OR_DERIVED 마크로 처리; 단일 term 유지(27-conjunct) 여부는 머지본에서 재확인 필요.
-- CBRD-27094 히스토그램 조인 선택도 계열 브랜치 작업 — eqjoinsel 이식(10d0aa0e7, CBRD-26746 #7508)과 histogram dangling 수정(937d09feb, CBRD-27279 #7761)은 develop 에 이미 머지됨; M-L/descent_cpu 계열(PR#7622)은 미머지.
+- CBRD-27094 히스토그램 조인 선택도 계열 브랜치 작업 — MCV 조인 선택도 도입(10d0aa0e7, CBRD-26746 #7508)과 histogram dangling 수정(937d09feb, CBRD-27279 #7761)은 develop 에 이미 머지됨; M-L/descent_cpu 계열(PR#7622)은 미머지.
 - AGENTS.md "비용 추정=plan_generation.c" 오안내 정정 PR — 사용자 판단 대기.
 
 ### .51
@@ -427,5 +425,4 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
   리뷰 완결(unresolved 0)·APPROVED·develop 머지(faf5a3b2a). 남은 것 = TC PR(tc/pr-7622) 정리 →
   Merge Gate 해제 → 머지. [기준: CBRD-27094 브랜치, 2026-08-26]
 - CBRD-27283(correlation/클러스터링 통계 — clustered↔uncorrelated 비용 보간): 착수 가능 상태.
-  검증 대상 = PR#7622 잔여 회귀 4건(9c/5c/13c/7a). 설계 참고 = 이 모듈 §2·§3의 .50 축적분 +
-  PG cost_index csquared. [보드 #75]
+  검증 대상 = PR#7622 잔여 회귀 4건(9c/5c/13c/7a). 설계 참고 = 이 모듈 §2·§3의 .50 축적분. [보드 #75]
