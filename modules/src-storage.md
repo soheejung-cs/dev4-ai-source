@@ -132,6 +132,14 @@
 - ✅ **리뷰 체크포인트**: pgbuf 계열 구조체를 memcpy/할당하며 `sizeof`를 그대로 쓰는 코드가 보이면
   유연 배열 페이로드 누락을 의심하고 offsetof 관용구로 바꾸도록 지적한다.
 
+### pgbuf_lock_page (page_buffer.c:7975) — `Num_page_locks_acquired` 의 정체
+
+- **`Num_page_locks_acquired` 는 락 매니저 카운터가 아니다 — 사실상 페이지 첫 접근(버퍼 적재) 횟수다** (.50, `519cc1a43`, 2026-09-11 실측 · 줄은 develop
+  `2d925cb86`): `PSTAT_LK_NUM_ACQUIRED_ON_PAGES` 가 증가하는 곳은 `pgbuf_lock_page ()` 끝(page_buffer.c:8070) 한 곳뿐이고, VPID 가 버퍼 락 체인에 없어 새로 걸고
+  `PGBUF_LOCK_HOLDER` 가 될 때 센다(기다리면 `PSTAT_LK_NUM_WAITED_ON_PAGES`). 이름 때문에 트랜잭션 락으로 오해하기 쉽다(`Num_object_locks_*` 가 그쪽). TC
+  `cbrd_20145_1` 의 debug 답안이 27→25 로 바뀐 것은 이 값이고, 같은 답안의 객체 락 카운터는 전부 그대로였다. — 정소희(.50) 2026-10-28
+  - ✅ **리뷰 체크포인트**: statdump 의 `Num_page_locks_*` 변화를 락 경합 변화로 읽지 않는다 — 버퍼 적재(미스) 횟수의 변화다.
+
 ### btree_search_nonleaf_page (btree.c:5235)
 
 - **UB: start_col 미초기화** — 선언 btree.c:5242(develop 95b79e7ed에서 미초기화 잔존 재확인).
@@ -161,6 +169,24 @@
 
 - ~80B `FILTER_INFO`를 프로브마다 복사(내용 동일, 측정 시점 L16596 — develop 정의는 :16341로 이동).
 
+### xbtree_find_unique (btree.c:28334) — S_SELECT 의 잠금 승격과 무잠금 예외
+
+- **MVCC 클래스의 `S_SELECT` 유니크 조회는 S_LOCK 으로 승격되고, 무잠금은 카탈로그 클래스와 `_db_histogram` 둘뿐이다**
+  (.51, PR#7900 리뷰 2026-09-09 · 머지 `0d0809963` 반영, develop `2d925cb86` 재확인): `tf_is_catalog_class`(transform.c:547 — `ct_Classes` 11개, `_db_class`·
+  `_db_attribute`·`_db_index` 등이고 `_db_histogram`·`_db_user` 는 없다)면 dirty snapshot + `btree_key_find_unique_version_oid` + NULL_LOCK(btree.c:28402),
+  `_db_histogram`(`OID_CACHE_HISTOGRAM_CLASS_ID`)이면 **committed snapshot**(`mvcc_satisfies_committed`) + NULL_LOCK(:28408, CBRD-27369 `0d0809963` 에서 추가),
+  그 밖의 사용자 클래스는 같은 dirty snapshot 에 `btree_key_find_and_lock_unique` + S_LOCK 으로 `scan_op_type` 을 `S_SELECT_WITH_LOCK` 으로 바꾼다(:28421-28426 —
+  op_type 이 S_SELECT 여도 잠근다). `need_skip_mvcc_snapshot` 의 `_db_user`·`_db_synonym`·`_db_histogram`(:28452-28457)은 컴파일 시점 내부 조회가 RR 트랜잭션 스냅샷을 만들지 않게
+  하려는 것이다(`_db_user`·`_db_synonym` 은 CBRD-24311 `de88d1ea7`, `_db_histogram` 은 CBRD-26202 `aabba8d1e` #7180). — 정소희(.50) 2026-10-28
+  - ✅ **리뷰 체크포인트**: 히스토그램 읽기 경로를 바꿀 때 트랜잭션 스냅샷을 새로 만들면 안 된다 — RR 세션의 스냅샷 시점이 문장 실행이 아니라 컴파일로 당겨진다.
+
+### btree_check_foreign_key (btree.c:26184) — FK 검사의 부모 행 락
+
+- **FK 검사는 부모 행에 S 락을 트랜잭션 끝까지 유지한다** (.51, release `33d134239`·debug `959314906`, 2026-10-21~23 · develop `2d925cb86` 재확인):
+  `btree_check_foreign_key ()` 가 `xbtree_find_unique (…, S_SELECT_WITH_LOCK, …)` 로 부모를 찾고(btree.c:26255), 바로 아래 `/* TODO: For read committed... Do we need
+  to keep the lock? */`(:26276) 가 남아 있다. 그래서 부모의 키가 아닌 컬럼 UPDATE(행 X)와 자식 INSERT(부모 행 S)가 서로 막는다. **미수정** — CBRD-27463 PR#8198
+  (부모 행 락 제거) 열림 → §3. — 정소희(.50) 2026-10-28
+
 ### heap_scancache_start_internal (heap_file.c:6359)
 
 - **힙 스캔의 IS_LOCK과 compactdb의 X_LOCK 상호 배제가 스캔 중 페이지 재-fix의 안전 근거다**:
@@ -174,6 +200,21 @@
   심볼도 `heap_scancache_start_internal`이다.)
 - ✅ **리뷰 체크포인트**: 힙 스캔 경로에서 락을 조기 해제하거나 락 없이 페이지를 재-fix하는 변경은
   이 IS_LOCK↔X_LOCK 배제 불변식을 깨므로 거부 대상이다.
+- **래치 없는 스캔 사본(로컬 캐시 읽기)은 `copy_to_local_cache && is_queryscan` 일 때만 켜지고, 사본 버퍼 할당이 실패하면 에러 없이 COPY 로 강등된다**
+  (.52, `a7a1db84b`, 2026-09-16 · 줄은 develop `2d925cb86`): `heap_scancache_start_internal`(heap_file.c:6436)이 `pgbuf_copy_buffer_alloc ()` 이 성공할 때만
+  `read_mode = HEAP_SCAN_READ_LOCAL_CACHE` 로 두고(:6531-6542), 실패는 `er_log_debug` 한 줄뿐이다 — 코드 주석도 "OOM contract (pinned): degrade to COPY,
+  no er_set, no error return"(:6536). 켜지면 `heap_next` 계열이 `HEAP_SCAN_IS_LOCAL_CACHE_READ` 일 때 새 페이지마다 `pgbuf_copy_page_for_scan` 으로 16KB 를
+  복사한다(:7725, :8066). CBRD-27041 `b334446d6` 의 설계. 성능 저하가 에러 없이 일어난다. — 정소희(.50) 2026-10-28
+  - ✅ **리뷰 체크포인트**: 같은 질의의 힙 스캔 성능이 들쭉날쭉하면 이 강등(사본 버퍼 OOM → COPY)을 먼저 의심한다 — 에러 로그에 남지 않는다.
+
+### heap_next_internal (heap_file.c:7545) — 힙 스캔의 fix 단위
+
+- **힙 스캔은 페이지 단위로 fix 를 들고 가고, 로컬 캐시 모드면 새 페이지마다 프레임을 복사한 뒤 사본에서 슬롯을 걷는다**
+  (.52, 2026-10-01 · develop `2d925cb86` 재확인): `scan_cache->cache_last_fix_page` 면 마지막 fix 페이지를 들고 있다가 다음 행이 같은 VPID 면 unfix 하지 않는다
+  (heap_file.c:7632-7640). 로컬 캐시 모드에서는 그 VPID 가 이미 사본에 있으면 fix 자체를 건너뛰고(:7641-7650), 새 페이지면 READ 래치 아래
+  `pgbuf_copy_page_for_scan` 으로 프레임을 복사한다(:7717-7727). 원 페이지는 보이는 행을 돌려주거나 다른 페이지로 넘어갈 때까지 fix 를 유지해, 사본의
+  슬롯을 보는 동안 vacuum 이 그 페이지를 dealloc 하지 못하게 한다(:7719-7723 주석). 사본은 undo 를 적용하지 않은 원본 프레임이고 스캔 캐시(스레드) 전용이라
+  리더 간에 공유하지 않는다. record-info 스캔은 로컬 캐시를 쓰지 않는다. CBRD-27041 `b334446d6`. — 정소희(.50) 2026-10-28
 
 ### heap_prepare_get_context / heap_get_mvcc_header / heap_get_record_data_when_all_ready (heap_file.c:7069/:7304/:7391)
 
@@ -185,10 +226,31 @@
 - `or_mvcc_get_repid_and_flags`(src/object/object_representation.c:399): 형제 3개는 same-TU
   ALWAYS_INLINE인데 이것만 타 TU+PLT → OR_BUF 스택 실체화. 피호출자 1.35% > 호출자 0.64%.
 
+### heap_get_visible_version_internal / heap_get_visible_version_from_log (heap_file.c:26469/:26183)
+
+- **`heap_scancache_start (…, NULL snapshot)` 은 "최신 커밋 버전"이 아니라 최신 물리 버전을 준다** (.51, 2026-09-16 PR#7900 리뷰로 확정 · 줄은 develop `2d925cb86`):
+  `heap_get_visible_version_internal` 은 스캔 캐시에 `snapshot_fnc` 가 없으면 `mvcc_snapshot = NULL` 로 두고(:26504-26510) 가시성 검사도 `prev_version_lsa`
+  추적도 건너뛴다. 커밋 버전이 필요하면 `mvcc_satisfies_committed` 같은 snapshot fn 을 명시해야 한다(TOO_NEW → `heap_get_visible_version_from_log`). — 정소희(.50) 2026-10-28
+- **snapshot 이 있으면 TOO_NEW 는 로그의 구버전 체인을 따라가고 TOO_OLD 는 곧바로 "만족 안 함"이다** (.51, `a910e8e6e`, 2026-09-17 · 줄은 develop `2d925cb86`):
+  `snapshot_fnc` 결과가 TOO_NEW 면 `heap_get_visible_version_from_log`(:26183)가 `prev_version_lsa` 체인을 따라 SATISFIED 가 나올 때까지 반복하고(:26217 루프)
+  끝까지 없으면 `S_DOESNT_EXIST`, TOO_OLD 는 즉시 `S_SNAPSHOT_NOT_SATISFIED`(:26528-26543). 키가 바뀌지 않는 in-place 갱신은 B+tree leaf 객체의 MVCC 정보를
+  바꾸지 않으므로 `btree_key_find_unique_version_oid`(btree.c:27060)는 leaf 의 MVCC 정보만으로 가시성을 판정한다(:27125-27133 `btree_record_satisfies_snapshot`).
+  — 정소희(.50) 2026-10-28
+
 ### heap_get_class_oid_from_page (heap_file.c:19455)
 
 - class OID를 행마다 페이지에서 재유도(측정 시점 L25451: class_oid에 NULL 전달 시 매행
   `heap_get_class_oid_from_page` 호출) — 유일 소비처는 scan_cache에 이미 같은 값을 갖고 있음.
+
+### heap_attrinfo_read_dbvalues / heap_attrvalue_read (heap_file.c:11363/:11205)
+
+- **`heap_attrinfo_read_dbvalues` 는 복사가 아니라 포인팅이다 — 비압축 문자열 DB_VALUE 는 레코드 버퍼를 가리키고 `need_clear=false`**
+  (.52, `a7a1db84b`, 2026-09-16 · 줄은 develop `2d925cb86`): `heap_attrvalue_read`(:11205)가 `heap_attrvalue_point_fixed/variable`(:10851/:10878)로 RECDES 안
+  위치를 잡고, `heap_attrvalue_transform_to_dbvalue` 가 `data_readval (…, copy=false)`(:10995)를 부른다(주석 :11173 "Character data is decoded without
+  copying"). 문자열은 `mr_readval_string_internal` 이 압축이 없으면 `buf->ptr` 를 그대로 물고(object_primitive.c:11005), 압축된 문자열은 copy=false 여도 새 버퍼로
+  풀어 `need_clear=true` 다(:10953). NUMERIC 은 `db_make_numeric` 이 DB_VALUE 내부 버퍼로 복사하므로 포인팅이 아니다(:8799 주석 — 원 메모의 "NUMERIC 도
+  레코드를 가리킨다" 를 정정, `a7a1db84b` 에서도 같았다). **문자열 값의 수명 = 레코드(페이지 또는 페이지 사본)의 수명**. — 정소희(.50) 2026-10-28
+  - ✅ **리뷰 체크포인트**: 스캔 셀을 행 밖으로 들고 나가는 코드(프로그램 셀 캐시, 리스트 지연 기록)는 여기서 깨진다 — 문자열 값은 다음 행·다음 페이지로 넘어가면 무효다.
 
 ### xstats_update_statistics (statistics_sr.c:91)
 
@@ -204,6 +266,11 @@
   `;info histogram`으로 확인해야 한다.
 - ✅ **리뷰 체크포인트**: 통계 산출 코드 변경 PR의 성능/정확도 수치가 히스토그램 재생성 후 값인지
   확인할 것 — 재생성 없이 낸 수치는 이전 통계로 측정된 무효 수치다.
+- **행 수의 heap 메타데이터 폴백은 "NDV 는 실려 왔는데 행 수가 0" 일 때만 탄다** (.50, `519cc1a43`, 2026-09-16 · 줄은 develop `2d925cb86`):
+  `stats_update_statistics_internal` 은 `use_provided_ndv` 이고 `class_attr_ndv->total_rows > 0` 이면 그 값을 쓰고(statistics_sr.c:368-375), **0 일 때만**
+  `heap_get_num_objects ()` 로 떨어진다(:376-383). NDV 가 아예 없으면 서버가 `xstats_collect_ndv_by_fullscan_reservoir` 로 직접 센다(:387-395). 정상 경로(히스토그램
+  풀스캔)는 행 수를 같이 실어 보내므로 폴백에 들어오지 않는다 — 아래 「통계 카운트의 표현 폭」의 `heap_get_num_objects` 반환값 결함이 오래 안 드러난 이유이고,
+  트랜잭션 안에서 `UPDATE STATISTICS` 를 부르는 경우처럼 폴백을 타야 노출된다(현재 계약). — 정소희(.50) 2026-10-28
 
 ### stats_analyze_mcv_list (statistics_ndv.c:205)
 
@@ -253,6 +320,35 @@
 ④ 가 실패했을 때는 안전하다 — `heap_get_visible_version_internal()` 은 복사 영역을 먼저 잡고
 (`heap_scan_cache_allocate_area (thread_p, scan_cache, DB_PAGESIZE * 2)`) 실패 시 `recdes` 를 건드리기
 전에 `S_ERROR` 로 빠진다. (기준: develop 1ea077d85)
+
+- **`catcls_update_class_stats ()` 는 `_db_class` 행을 잠그지 않고 고친다 — `lock_object` 호출이 없다** (.50, `bc988f0ab` 정적·`cb056c6d9` 동적, 2026-09-17~18 ·
+  develop `2d925cb86` 재확인): 위 ①~⑩ 어디에도 행 잠금이 없다(catalog_class.c:4450~ — `heap_scancache_start_modify (SINGLE_ROW_UPDATE)` →
+  `heap_get_visible_version` → `old_chn + 1` → `locator_update_index` → `heap_update_logical (UPDATE_INPLACE_NONE)`). 귀결 둘: (가) 같은 행을 문장 시작에 X 로
+  미리 잡아도 같은 트랜잭션 안에서는 자기충돌이 없다(현재 계약). (나) 두 수집이 이 행을 락 없이 겹쳐 쓰므로 **앞 트랜잭션이 롤백하면 뒤 세션의
+  `checked_time`·`statistics_strategy` 갱신도 함께 되돌아간다**(홀더 COMMIT 은 정상. 실측: 대기자의 히스토그램은 남는데 `checked_time` 은 전진하지 않음) → §3.
+  — 정소희(.50) 2026-10-28
+- **그 두 칸을 읽는 곳은 뷰뿐이고, 옵티마이저의 통계 재요청 판정은 다른 저장소를 본다** (.50, 정적 2026-09-18 · develop `2d925cb86` 재확인):
+  `checked_time`·`statistics_strategy` 를 읽는 곳은 `db_class` 시스템 뷰(schema_system_catalog_install_query_spec.cpp:75-91)와 information_schema 뷰
+  (`last_analyzed`·`statistics_strategy`, schema_information_schema_install_query_spec.cpp:997-998)뿐이다(원 메모는 information_schema 만 적었다). 클라이언트
+  `sm_get_class_with_statistics` 가 재요청을 판정하는 시각은 카탈로그 CLS_INFO 의 `ci_time_stamp`(statistics_sr.c:602, 기록 :457)로 `catalog_add_class_info` 가 따로
+  쓴다 — `_db_class` 두 칸의 유실은 그 판정에 쓰이지 않는다. 원 메모의 "CLS_INFO 는 롤백되지 않는다"는 **미확인** — `catalog_add_class_info` 는 RVCT_INSERT 를
+  undoredo 로 남기고(system_catalog.c:3129, undo `catalog_rv_insert_undo`) `xstats_get_statistics_from_server` 의 클래스 SCH_S 주석도 "rollbacked UPDATE statistics"
+  를 전제한다(statistics_sr.c:562). — 정소희(.50) 2026-10-28
+
+### `_db_class`·`_db_histogram` 카탈로그 행과 서비스 트래픽 (transform.c · btree.c · statistics_sr.c · schema_system_catalog_install.cpp)
+
+- **`_db_class` 인스턴스 행의 X 는 그 테이블의 서비스 트래픽을 막지 않는다** (.50, 2026-09-17 정적+동적 · .51 `66bfd071d` 실측 · develop `2d925cb86` 재확인):
+  `_db_class` 는 `ct_Classes` 에 든 카탈로그 클래스라 유니크 조회가 NULL_LOCK 이고(btree.c:28402, 위 `xbtree_find_unique`), 옵티마이저 통계는
+  `xstats_get_statistics_from_server` 가 클래스 SCH_S + dir OID S 로 CLS_INFO 를 읽는 경로라(statistics_sr.c:563·591·596) 이 행을 건드리지 않는다. 테이블 `t` 의
+  SELECT(IS)·DML(IX)은 `t` 의 클래스 OID·인스턴스 행을 잠그지 이 카탈로그 행을 잠그지 않는다. 실측: 그 행의 미커밋 홀더가 있을 때 같은 테이블 SELECT·INSERT·
+  `SHOW INDEXES`·`/*+ RECOMPILE */` 컴파일·다른 테이블 `UPDATE STATISTICS` 는 0.02~0.03초로 통과하고 같은 테이블 `UPDATE STATISTICS` 만 대기했다(PR#7900 리뷰 빌드의
+  클래스 게이트 — 머지본에는 게이트가 없다). → 클래스 단위 직렬화 자원으로 쓸 수 있다(현재 계약). — 정소희(.50) 2026-10-28
+- **`_db_histogram` 카탈로그 컬럼에 버킷 수가 없다** (.51, `66bfd071d`, 2026-09-17 · develop `2d925cb86` 재확인): `system_catalog_initializer::get_histogram ()`
+  (schema_system_catalog_install.cpp:1280-1305)의 컬럼은 `class_of`(object)·`key_attr`(varchar 255)·`with_fullscan`(integer)·`null_frequency`(double)·
+  `histogram_values`(varbit) 다섯과 `(class_of, key_attr)` UNIQUE 뿐이다. 버킷 수는 `histogram_values` 블롭 안에만 있다. per-column fullscan 은
+  `_db_histogram.with_fullscan`, per-class 는 `_db_class.statistics_strategy` 에 따로 있다. — 정소희(.50) 2026-10-28
+  - ✅ **리뷰 체크포인트**: "같은 조건으로 이미 수집됐으면 건너뛴다" 류의 판정을 카탈로그 컬럼으로 하려는 변경은 버킷 수를 대조할 수 없다 — 기본 버킷 요청이 다른
+    세션의 `WITH n BUCKETS` 결과를 물려받는 한 방향 구멍이 생긴다(PR#7900 리뷰의 편승 설계가 걸렸던 자리, 머지본에는 편승이 없다).
 
 ### 페이지 래치 실패의 에러 계약 — `pgbuf_fix()` ~ `pgbuf_timed_sleep()` (page_buffer.c)
 
@@ -315,10 +411,24 @@ override 를 우선하므로 **①창 안에 중첩된 ②가 가려져 스코�
 bestspace 프로브 창(override −2) 안에서 조건부로 강등 → 볼륨헤더 경쟁(동시 삽입의 파일 확장) 시 에러 없는 NULL →
 `disk_manager.c:3235 ASSERT_ERROR_AND_SET` abort. 8세션 동시 삽입으로 2/2 재현, ②를 전부 override 로 옮긴 뒤 2/2 생존.
 **release 는 페이지 검증이 꺼져 있어 이 경로를 밟지 않는다** — debug 전용 노출.
+(develop `2d925cb86` 재확인: 기본값은 system_parameter.c:1935-1944 — debug FETCH, release 검증 없음. 지금은 그 −1 이 스레드 override 로 fix 마다 저장·복원되고,
+fix 입구 검증은 page_buffer.c:2229-2236 → :11160. CBRD-27486 TC 의 수정 전 실패가 debug 전용이었던 이유도 이것이다. — 정소희(.50) 2026-10-28)
 
 - ✅ **리뷰 체크포인트**: wait/timeout 류를 스레드 스코프로 옮기는 변경은 **그 값을 임시로 바꾸는 모든 지점**을 같은
   변수로 옮겨야 한다(`grep xlogtb_reset_wait_msecs`). 하나라도 TDES 에 남으면 중첩 시 뒤집힌다. 회귀 검증은 반드시
   **debug 빌드**로 — `page_validation_level` 기본값이 갈려 debug 에만 있는 경로가 있다.
+- **develop 의 형태 — CBRD-27486 `9699a883c`(PR#8034, 2026-10-06)가 임시 대기 시간을 전부 스레드 전용 override 로 옮겼다** (.52, PR#8034 head `db66b7879`
+  2026-10-01 → 머지본 develop `2d925cb86` 재확인): `THREAD_ENTRY::wait_msecs_override`(기본 `LK_WAIT_NOT_OVERRIDDEN` = −3)를 `logtb_set_thread_wait_msecs ()`
+  (log_tran_table.c:2631)로 세우고 돌려받은 이전 값으로 복원한다. 조회 규칙("override 가 있으면 그것, 없으면 `tdes->wait_msecs`")은 락 쪽
+  `logtb_find_current_wait_msecs ()`(:2657)와 pgbuf 쪽 `pgbuf_find_current_wait_msecs ()`(page_buffer.c:17072)에 **복제**돼 있다 — pgbuf 쪽은 모든 fix 가 읽어
+  inline 으로 남겼고 tdes 가 없으면 `LK_ZERO_WAIT`, logtb 쪽은 `logtb_find_wait_msecs` 의 `assert (false); return 0` 을 탄다(두 주석이 "change both together" 로 서로를
+  가리킨다). override 설치는 develop 에서 **8곳**: bestspace `shard::L1_fix`(−2, bestspace.cpp:732) · `btree_set_error`(−2, btree.c:22653) ·
+  `disk_get_volheader_internal`·`disk_stab_cursor_fix`(`pgbuf_force_latch_wait`, disk_manager.c:3235·3513) · `disk_is_page_sector_reserved_with_debug_crash`(−1, :4210) ·
+  `heap_does_exist`(−1, heap_file.c:8836) · `log_rollback`(−1, log_manager.c:7793) · 머지 뒤 들어온 `heap_get_insert_location_with_lock` 의 삽입 힌트 fix(−2,
+  heap_file.c:21468, CBRD-27247 `c1dfe7e87`). 전부 자기 함수 안에서 복원하고 중첩은 LIFO 로 정확하다(`log_rollback` 의 `log_zip_alloc` 실패 조기 return 은
+  `logpb_fatal_error (…, true, …)` 가 프로세스를 끝내므로 누수가 아니다). `pgbuf_force_latch_wait ()`(page_buffer.c:5364)는 현재 wait 가 0/−2 일 때만 −1 override 를
+  세우고, 유한·−1 이면 스레드를 건드리지 않은 채 현재 override 를 돌려준다(PR head 에서는 그 값을 스레드에 복사했다 — 머지본에서 바뀜). TDES 에 일부러 남긴 자리와
+  교착 탐지기 쪽은 src-transaction §2 「대기 시간 조회」. — 정소희(.50) 2026-10-28
 
 ### `pgbuf_fix` 의 조용한 강등과 거부 경로의 에러 규약 (page_buffer.c:2231, :6467)
 
@@ -329,6 +439,11 @@ bestspace 프로브 창(override −2) 안에서 조건부로 강등 → 볼륨�
 그래서 "에러 없는 NULL" 은 ①이 강등→거부 else(−2), ②`pgbuf_timed_sleep` zero-wait else 두 경로에서 나온다.
 CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 → `btree_set_error` 프로브 엇갈림 → −2 고착 →
 **`logtb_clear_tdes()` 가 `wait_msecs` 를 리셋하지 않아 트랜잭션 경계를 넘어 유지**), 27183 이 원인을, 27355 가 ②를 닫는다.
+
+- **②는 닫혔다 — `9699a883c`(CBRD-27486 PR#8034)가 `pgbuf_timed_sleep ()` 의 zero-wait else 에서도 `ER_LK_PAGE_TIMEOUT` 을 설정한다** (.52, 2026-10-01 · develop
+  `2d925cb86` 재확인): page_buffer.c:7407-7430 — 닫힌 PR#7843 `3c58abb63` 의 CBRD-27355 수정을 흡수해 0·−2 둘 다 설정한다(bestspace contended 경로가 그 코드를
+  검사·`er_clear` 후 재시도하므로 다른 코드를 쓰면 재시도 가능한 경쟁이 하드 실패가 된다). 같은 커밋이 원인 축(CBRD-27183)도 스레드 override 로 닫았다. ①의 거부
+  경로(`pgbuf_latch_bcb_upon_fix` :6536-6570)는 여전히 0 만 오류, −2 는 무오류다 — FORCE 프로브 호출자가 스스로 처리한다는 전제가 남긴 비대칭. — 정소희(.50) 2026-10-28
 
 ### 통계 카운트의 표현 폭과 카탈로그 BTREE_STATS/CLS_INFO 레코드 레이아웃 (statistics.h · system_catalog.c · statistics_sr.c · btree.c)
 
@@ -346,6 +461,10 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 - 행수는 `statistics_sr.c` 가 `(int) MIN (rs_total_rows, INT_MAX)` 로 **포화**시켜 음수는 안 나오지만, 폴백 `heap_get_num_objects (int *nobjs)`
   는 `HEAP_HDR_STATS.num_recs`(uint64)를 int 로 절단한다. 덤으로 이 함수는 **행수를 반환값으로** 주는데(`return *nobjs`) 유일한 호출부가
   `== NO_ERROR` 로 검사해 행이 있으면 폴백이 0 행으로 끝나는 잠복 버그가 있었다.
+  → **수정됨**(CBRD-27140 `519cc1a43`) (.50, 2026-09-16 확인 · develop `2d925cb86` 재확인): 시그니처가 `int heap_get_num_objects (…, INT64 *nobjs, …)` +
+  `NO_ERROR`/`ER_FAILED` 반환이 되어(heap_file.c:9212, heap_file.h:469-471) 호출부 관용구(statistics_sr.c:380)와 맞는다. 즉 그 조건은 "성공하면" 이 아니라
+  **"행 수가 0 이면"** 이었고 힙에 행이 있을 때만 대입이 건너뛰어져 `rs_total_rows` 가 0 으로 남았다. 결함 도입은 `f7432203a`(CBRD-26936 #7286, 2026-07-15)의
+  신규 폴백 경로. TC `bug_bts_5048` 의 기대값 `0,0` 은 이 결함이 만든 값이라 `1,6`(커밋 행수)으로 고쳤다. — 정소희(.50) 2026-10-28
 - 파티션 부모 통계는 `PARTITION_STATS_ACUMULATOR`(double) 합산 후 int 대입 — 범위 밖 double→int 는 UB.
 - **카탈로그 온디스크 레이아웃** (system_catalog.c 상단 `CATALOG_*_OFF`): DISK_REPR 56B(offset 16 은 "reserved", writer 가 0 기록) →
   속성마다 DISK_ATTR 88B(+가변 default value) → 인덱스마다 BTREE_STATS. **V0** = 80B (`btid@0 leafs@12 pages@16 height@20 keys@24
@@ -368,6 +487,17 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 - int 를 유지하는 경계와 포화 지점: `db_get_btree_statistics()`, `db_get_class_num_objs_and_pages()`(→`xheap_get_class_num_objects_pages`),
   `catalog_get_cardinality()`(`index_cardinality()` SQL 함수·`SHOW INDEX` cardinality 컬럼), `heap_estimate_num_objects()`.
   `#objects`/`#keys` 의사컬럼(execute_statement.c `cst_item_tbl`)은 BIGINT 로 바뀜.
+- **PR#7957(CBRD-27429) 머지 `07aec2c5c`(2026-10-06) 이후 BTREE_STATS 는 V1 120B 단일 레이아웃이다** (.50, develop `2d925cb86` 재확인): V0 파서·레이아웃별 레코드
+  크기(`CATALOG_BT_STATS_SIZE_OF`)·`DISK_REPR.stats_layout` 버전 표지·`CATALOG_STATS_LAYOUT_*` 가 모두 제거됐고(system_catalog.c:120-132 는 V1 오프셋만 남음),
+  BTREE_STATS·CLS_INFO 의 32비트 포화 사본 쓰기와 CLS_INFO 의 "tail 이 0 이면 32비트 칸" 폴백 읽기도 없어졌다. 위 "PR#7856 이후" 단락의 `stats_layout` 분기·V0
+  keys@24 포화 복사·CLS_INFO 32비트 폴백은 이제 과거 서술이다. 예약 슬롯은 다시 0. CBRD-27140 이전 개발 빌드로 만든 DB 는 재생성해야 하고, 버전 표지가 없어
+  자동 검출되지 않는다. — 정소희(.50) 2026-10-28
+- **통계 재수집은 기존 표현을 먼저 읽고 다시 쓴다 — 그래서 BTREE_STATS 포맷을 바꾸면 `UPDATE STATISTICS` 로 제자리 마이그레이션을 할 수 없다** (.50,
+  `519cc1a43` · 줄은 develop `2d925cb86`): statistics_sr.c:287·613·1294 가 `catalog_get_representation ()` 으로 읽은 뒤 :450·1591 의 `catalog_add_representation ()`
+  으로 쓴다. 옛 포맷 파서를 지우는 순간 그 DB 는 읽을 수도 옮길 수도 없다 — `07aec2c5c` 가 V0 파서를 지울 수 있었던 근거는 "11.5 미출시 + `disk_compatibility_level`
+  정확 일치라 V0 레코드를 가진 DB 를 11.5 바이너리가 열 일이 없다" 였다(커밋 메시지). — 정소희(.50) 2026-10-28
+  - ✅ **리뷰 체크포인트**: 카탈로그 레코드 포맷을 바꾸는 PR 은 "옛 포맷 reader 를 언제 지울 수 있나"(릴리스·호환 레벨)를 같이 정해야 한다 — 통계 재수집은
+    마이그레이션 수단이 아니다.
 - ✅ **리뷰 체크포인트**: 카탈로그 레코드에 필드를 넣을 때 reserved 슬롯이 "항상 0 으로 쓰였는지"(DISK_REPR offset 16, CLS_INFO tail,
   BTREE_STATS reserved) 를 먼저 확인하면 버전 마커 없이도 구 레코드 판별이 가능하다. 통계 관련 카운트를 새로 추가하면 위 7단계 중
   어느 하나만 int 로 두어도 다시 잘린다.
@@ -383,7 +513,10 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 - **`PSTAT_PB_NUM_IOWRITES` 의 의미는 DWB on/off 에 따라 다르다** — pgbuf 쪽은 DWB 미사용 분기에서만 1회 증가(`pgbuf_bcb_flush_with_wal` :10804, `else`), DWB 활성(기본)이면
   `double_write_buffer.cpp` 가 DWB 파일 쓰기(:2339 `count_wb_pages`)와 원위치 쓰기(:2115/:2150 `count_writes`)를 각각 더해 **페이지당 2회** 집계된다. DWB on/off 를 바꿔 이 값을 비교하면 무효.
   `PSTAT_PB_NUM_FLUSHED` 는 `pgbuf_flush_victim_candidates` (:4065) 만 더한다 — 체크포인트 flush 는 0 이라 "flush 량" 지표가 아니다. `SHOW PAGE BUFFER STATUS` 의 `Victim_candidate_pages` 는 zone3 ∧ **dirty**(:17309)인데
-  내부 `count_vict_cand`(`pgbuf_lru_add_victim_candidate` :15627)는 victim 가능 = non-dirty 쪽이라 이름이 같고 뜻이 반대(원문 주장, 내부 쪽 정의는 미대조). SHOW 의 `Hit_rate` 는 deprecated 로 항상 NULL(:17397, statdump 의 `Data_page_buffer_hit_ratio` 를 쓸 것). 원문 D6. — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md P5) 2026-09-30; .51 대조 develop 0d0809963
+  내부 `count_vict_cand`(`pgbuf_lru_add_victim_candidate` :15627)는 victim 가능 = non-dirty 쪽이라 이름이 같고 뜻이 반대(내부 쪽 정의 대조 — develop `2d925cb86`, 정소희(.50) 2026-10-28: `count_vict_cand` 는
+  BCB 가 LRU3 에 들어올 때(:16013·:16070-16072) 또는 LRU3 안에서 무효 표시가 풀릴 때(:15915-15924)만 `pgbuf_lru_add_victim_candidate`(:15768, 증가 :15804)로 오르고,
+  무효 표시 `PGBUF_BCB_INVALID_VICTIM_CANDIDATE_MASK` 는 DIRTY·FLUSHING_TO_DISK·VICTIM_DIRECT·INVALIDATE_DIRECT_VICTIM(:266-270) — 즉 "zone3 ∧ 그 넷이 없음".
+  SHOW 쪽은 zone3 ∧ DIRTY(:17480-17482)). SHOW 의 `Hit_rate` 는 deprecated 로 항상 NULL(:17397, statdump 의 `Data_page_buffer_hit_ratio` 를 쓸 것). 원문 D6. — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md P5) 2026-09-30; .51 대조 develop 0d0809963
 - **lock-free RO fast path 의 구조** — `pgbuf_fix` 에서 `request_mode == READ && fetch_mode ∈ {OLD_PAGE, OLD_PAGE_PREVENT_DEALLOC, OLD_PAGE_MAYBE_DEALLOCATED}
   && UNCONDITIONAL` 이면 `pgbuf_lockfree_fix_ro()` (:2267) 로 가고 성공 시 `goto fast_path` (:2279 → 라벨 :2447) 로 **해시 탐색·BCB mutex·holder 등록의 정규 경로를 전부 건넌다**.
   이 경로가 들어온 커밋·동기·성능 수치와 되돌릴 때의 비용은 `imports/vimkim/pgbuf/research/lockfree-fix-origin.md`. 정규 경로만 하는 일(예: `register_avoid_deallocation` :2376)은
@@ -406,6 +539,11 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 
 - 데이터 볼륨은 고정 크기 물리 페이지 배열(`byte_offset = N * volume_io_page_size`), 볼륨 헤더·섹터 테이블·file 소유 재구성·TDE 가시 범위·LSA 워터마크(체크섬 아님)를
   `imports/vimkim/storage/cubrid-volume-read-only-parser_e6ed61e.md` 가 정리 — 볼륨을 열지 않고 진단할 때. — vimkim 2026-09-30
+  - 세부 대조(develop `2d925cb86`, 정소희(.50) 2026-10-28): 원문 §3 의 부트스트랩 오프셋(prefix pageid@8·volid@12·ptype@14, 그 뒤 `DISK_VOLUME_HEADER` 가
+    `FILEIO_PAGE_RESERVED` 32B 다음에서 시작 — magic@32(25B)·iopagesize@58·inner volid@60)은 `struct fileio_page_reserved`(file_io.h:166-176)·`struct disk_volume_header`
+    (disk_manager.c)·`CUBRID_MAGIC_MAX_LENGTH 25`(storage_common.h:414)와 맞는다(x86-64 정렬 기준). §7 의 "TDE 데이터 페이지는 prefix 뒤 `DB_PAGESIZE` 만 암호화해
+    prefix·watermark 가 평문" 도 `TDE_DATA_PAGE_ENC_OFFSET = sizeof (FILEIO_PAGE_RESERVED)`·`TDE_DATA_PAGE_ENC_LENGTH = DB_PAGESIZE`(tde.h:43-44)로 맞다.
+    파일 단위 TDE 적용이 FTAB 페이지를 빼는지(file_manager.c)는 미대조.
 - `cubrid backupdb -l 0` 는 볼륨 파일을 페이지 0..N-1 로 `pread` 전수 복사(할당 상태 무시)하되, 볼륨마다 체크포인트·flush·DWB sync 를 선행하고, 기본 consistency check 와 LZ4 압축이 붙는다.
   `-t N` 병렬은 압축 병렬이지 I/O 병렬이 아니다(pread·write 가 공유 mutex 하). `imports/vimkim/storage/survey-backupdb-level-0_cd593bc.md` — vimkim 2026-09-30
 - heap/btree 스캔에 사용자 질의 경로용 page prefetch 는 없다(`prefetch` 는 vacuum 로그·파서 클래스 락·커서 OID·`__builtin_prefetch` 뿐); `posix_fadvise` 는 볼륨 open 시 1회 hint(`file_io.c`, `data_file_os_advise`).
@@ -426,13 +564,16 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   워스트케이스 배열 때문.
 - buf_hash_table 56MB(56B×2^20) 중 히트 경로는 8B(hash_next)만 사용 — SoA 분리 시 8MB + 프리페치 여지.
 - 힙 프로브 1행당 같은 슬롯 3~4회 재탐색(spage 합계 7.6%), class OID 행마다 재유도.
-- **[래치 타임아웃이 서버 abort]** `pgbuf_timed_sleep()` 의 `er_set_return` 이 zero-wait 분기
+- **[해소됨 `9699a883c` — 래치 타임아웃이 서버 abort]** `pgbuf_timed_sleep()` 의 `er_set_return` 이 zero-wait 분기
   (`LK_ZERO_WAIT`·`LK_FORCE_ZERO_WAIT`, 그리고 tdes 가 없어 `pgbuf_find_current_wait_msecs()` 가 0 을
   반환한 경우)에서만 **에러를 설정하지 않아** `pgbuf_fix()` 가 에러 없는 NULL 을 반환하고, 호출자의
   `ASSERT_ERROR_AND_SET` 이 깨져 서버가 죽는다. zero-wait 는 예외 상황이 아니다 —
   `xlogtb_reset_wait_msecs (thread_p, LK_FORCE_ZERO_WAIT)` 로 트랜잭션 전역에 no-wait 를 걸었다 푸는
   구간이 있다(btree.c:21729, bestspace.cpp:680, lock_manager.c:9029). → **CBRD-27355 / PR#7843 제출됨** (`.51`, 2026-09-01). **2026-09-02 이관** — PR#7843(27183+27355) 후속은 다른 세션/담당이 맡는다. 같은 부류를 CBRD-27293(f8f5b4401)이 `pgbuf_block_bcb()` 인터럽트 경로에서 먼저
   고쳤고 "callers assert one is set" 주석이 그 흔적이다.
+  → **해소됨**: CBRD-27486 PR#8034 머지 `9699a883c`(2026-10-06)가 PR#7843 `3c58abb63` 의 CBRD-27355 수정을 흡수해 zero-wait else 에서도 `ER_LK_PAGE_TIMEOUT` 을
+  설정한다(page_buffer.c:7407-7430, develop `2d925cb86` 재확인 2026-10-28). −2 조건부 거부의 무오류는 설계상 남았다(§2 「`pgbuf_fix` 의 조용한 강등」).
+  — 정소희(.50) 2026-10-28
 - **[에러 경로에서 남의 버퍼 free]** `catcls_update_class_stats()` 가 읽기·쓰기에 RECDES 하나를 겸해,
   `heap_get_visible_version(COPY)` 성공 후 `malloc` 전에 실패하면(`catcls_get_or_value_from_record()` 가
   `ER_INTERRUPTED` 로 NULL) error 레이블이 **스캔캐시 소유 버퍼**를 free 해 glibc
@@ -471,7 +612,10 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 - **[관측 — 300초 WRITE latch 점유 원인 규명 계측안, CBRD-26325]** holder 추적·breadcrumb·강제 스택 덤프 4단계 — 래치 타임아웃 코어를 다시 만나면 `imports/vimkim/pgbuf/CBRD-26325-latch-timeout-instrumentation-proposal.md` 부터. — vimkim 2026-09-30
 - **[미수정 — pgbuf 초기화/종료 위생 3건 (원문 D2/P7)]** ① `pgbuf_initialize` :1600 `memset (&pgbuf_Pool.direct_victims, 0, sizeof (PGBUF_VICTIM_CANDIDATE_LIST))` — 대상은 `PGBUF_DIRECT_VICTIM`(:722, 포인터 3개)인데
   16B 타입 크기를 써 마지막 멤버 `waiter_threads_low_priority` 가 초기화되지 않는다(정적 저장소라 첫 초기화만 우연히 0; init 실패 → `pgbuf_finalize` 경로에서 garbage `delete` 가능). ② `Aout_mutex` 이중 `pthread_mutex_destroy` —
-  `pgbuf_initialize_aout_list` 실패 경로(:5834)와 `pgbuf_finalize`(:1939) 양쪽. ③ quota 배열 `malloc (PGBUF_PRIVATE_LRU_COUNT * ...)` (:13929) 는 private LRU 0개면 `malloc(0)` 반환값 의존(원문 주장, 0 조건 미대조). 한 PR 로 묶을 만한 위생 건. — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md) 2026-09-30; .51 대조 develop 0d0809963
+  `pgbuf_initialize_aout_list` 실패 경로(:5834)와 `pgbuf_finalize`(:1939) 양쪽. ③ quota 배열 `malloc (PGBUF_PRIVATE_LRU_COUNT * ...)` (:13929) 는 private LRU 0개면 `malloc(0)` 반환값 의존(0 조건 대조 — develop `2d925cb86`, 정소희(.50) 2026-10-28:
+  SA 는 늘 0(page_buffer.c:14059-14061 "stand-alone quota is disabled"), SERVER 는 `num_private_chains=0`(기본 −1 = 자동, :14040-14049)일 때 0 이고,
+  `pgbuf_initialize_page_quota ()` 가 무조건 불리므로(:1729) SA 는 매번 :14090-14091 의 `malloc (0)` 을 탄다. glibc 는 non-NULL 을 돌려 실패하지 않고, NULL 을
+  돌려주는 libc 면 `ER_OUT_OF_VIRTUAL_MEMORY` 로 초기화가 실패한다). 한 PR 로 묶을 만한 위생 건. — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md) 2026-09-30; .51 대조 develop 0d0809963
 - **[미수정 — `big_private_lrus_with_victims` 큐에 생산자가 없음 (원문 D4)]** `pgbuf_lfcq_add_lru_with_victims` 는 private(:16329 부근)·shared 큐에만 `produce` 하고, big 큐의 유일한 `produce` 는 `pgbuf_lfcq_get_victim_from_private_lru` 가
   같은 큐에서 `consume`(:16375) 한 뒤 되넣는 :16402 뿐 → 항상 비어 있다. over-quota(`restrict_other`) 스레드의 "큰 private 리스트부터 회수" 2단계는 무효고 곧장 shared 로 간다. 큐 제거 또는 크기·quota 조건 라우팅 중 택일. — vimkim 2026-09-30; .51 대조 develop 0d0809963
 - **[미수정 — `pgbuf_panic_assign_direct_victims_from_lru` 호출부가 죽은 호출 (원문 P3 부속)]** `pgbuf_get_victim_from_lru_list` 가 `pgbuf_remove_from_lru_list (thread_p, bufptr, lru_list)` (:9376; 이 함수가 `prev_BCB = NULL` 로 끊는다) **뒤에**
@@ -481,6 +625,38 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   `UINT16MAX`(:300) 미사용, `buf_LRU_list` 주석의 `num_garbage_LRU_list`(:749) 는 코드에 없음, `goto copy_unflushed_lsa`(:10745) 는 라벨(:10749)이 바로 다음. — vimkim 2026-09-30; .51 대조 develop 0d0809963
 - **[사용성 — `double_write_buffer_size` 는 크기 접미사를 못 받는다 (원문 D5)]** `PRM_ID_DWB_SIZE` 의 플래그가 `PRM_FOR_SERVER | PRM_USER_CHANGE` 뿐(:4348)이라 `PRM_SIZE_UNIT` 가 없다 — `data_buffer_size`(:1186, `PRM_SIZE_UNIT | PRM_DIFFER_UNIT`) 와 달리
   `=2M` 을 쓰면 ER -839 로 **서버 부팅 실패**(원문 실측; start 유틸은 그냥 기다려 조용히 죽는다). 바이트로 적어야 한다. — vimkim 2026-09-30; .51 대조 develop 0d0809963
+- **[미수정 — `UPDATE STATISTICS ON ALL CLASSES`(와 인자 없는 `optimizedb`)는 클래스마다 통계를 두 번 수집한다]** (.51, `bcd6c5936`, 2026-10-14 · develop
+  `2d925cb86` 재확인 2026-10-28): `sm_update_all_statistics`(schema_manager.c:4364)가 서버 `stats_update_all_statistics` 로 전 클래스 통계를 갱신한 뒤(:4377)
+  `update_histogram_for_all_classes`(network_interface_cl.c:6223)가 클래스마다 `update_or_drop_histogram_helper (DO_HISTOGRAM_CREATE)`(:6297)를 부르는데, 헬퍼는
+  자기 스캔으로 클래스 통계를 다시 쓴다(execute_statement.c:5007 주석 "refreshes the class statistics itself"). 단일 클래스 경로(SQL `do_update_stats`, `optimizedb -n` 의
+  `optimizedb_update_class_statistics`)는 헬퍼를 먼저 돌려 이걸 피한다. 예비 이슈 — 전체 경로도 히스토그램을 만들 클래스는 서버 단계를 건너뛸 수 있는지.
+  `--no-histogram`(SQL `WITH NO HISTOGRAM`)이면 서버 단계 한 번뿐. — 정소희(.50) 2026-10-28
+- **[미수정 — 같은 초에 두 번 커밋된 통계를 클라이언트 캐시가 구분하지 못한다]** (.51, PR#7900 `a910e8e6e` 리뷰 2026-09-17 · develop `2d925cb86` 재확인 2026-10-28):
+  `xstats_get_statistics_from_server`(statistics_sr.c:540)는 `time_stamp > 0 && time_stamp >= ci_time_stamp` 면 통계를 보내지 않는데(:602) `ci_time_stamp` 는
+  `stats_get_time_stamp ()` = `time ()` **초 단위**다(:991). 클라이언트 `sm_get_class_with_statistics`(schema_manager.c:4038)는 이 갱신(`updated`)이 있을 때만
+  `class_->histogram` 을 다시 읽는다(:4128-4134). 그래서 같은 초 안의 두 수집은 캐시 쪽에서 구분되지 않는다 — 캐시를 강제로 비우는 것은 자기 세션의
+  `sm_update_statistics`(:4210, stats·histogram 해제 :4247-4257)뿐이다. — 정소희(.50) 2026-10-28
+- **[미수정 — `_db_class` 통계 칸의 무락 갱신: 앞 수집이 롤백하면 뒤 수집의 `checked_time`·`statistics_strategy` 도 되돌아간다]** (.50, `cb056c6d9` 동적,
+  2026-09-18 · develop `2d925cb86` 재확인 2026-10-28): §2 `catcls_update_class_stats()` 항목. PR#7900(`0d0809963`)은 이를 한계로 문서화만 했다. 플랜 재요청 판정
+  (`ci_time_stamp`)과는 다른 저장소라 사용자에게 보이는 마지막 수집 시각·전략만 틀린다(CLS_INFO 쪽 롤백 여부는 §2 의 미확인 메모). — 정소희(.50) 2026-10-28
+- **[수정됨 `0d0809963` — `DB_FETCH_WRITE` 유니크 조회는 X-first 가 아니었다]** (.50, 2026-09-17 동적 · develop `2d925cb86` 재확인): 클라이언트 `btree_find_unique ()` →
+  서버 `sbtree_find_unique` 가 `S_SELECT_WITH_LOCK` 고정(network_interface_sr.cpp:4938)이라 `DB_FETCH_WRITE` 도 행 S 를 먼저 잡고 fetch 에서 X 로 승급했다. X-first 는
+  `btree_find_multi_uniques (…, S_UPDATE)`(object_accessor.c:3816, CBRD-27369 `0d0809963`). 본문은 src-object §2 「obj_find_multi_attr / _committed / _for_update —
+  객체계층 유니크 조회의 잠금」. — 정소희(.50) 2026-10-28
+- **[미수정 — FK 검사가 부모 행 S 락을 트랜잭션 끝까지 쥔다]** (.51, `33d134239`/`959314906`, 2026-10-23 · develop `2d925cb86` 재확인 2026-10-28): §2
+  `btree_check_foreign_key` 항목. 부모의 비키 UPDATE 와 자식 INSERT 가 서로 막는다. CBRD-27463 PR#8198(부모 행 락 제거) 열림. — 정소희(.50) 2026-10-28
+- **[미수정 — SA 기동 중 vacuum 이 삭제 파일 페이지에 붙인 TO_VACUUM 표시가 남아 `installdb` 에서 debug assert]** (.51, `959314906`, 2026-10-23 · develop
+  `2d925cb86` 재확인 2026-10-28): `vacuum_find_dropped_file ()`(src/query/vacuum.c:6637)의 `pgbuf_notify_vacuum_follows ()`(:6677 → page_buffer.c:16288)가 BCB 에
+  `PGBUF_BCB_TO_VACUUM_FLAG` 를 세우는데 SA 에서는 지워지지 않은 채 `installdb` → `xboot_soft_rename` → `logpb_rename_all_volumes_files` → `pgbuf_invalidate_all` →
+  `pgbuf_invalidate_bcb ()`(:8668, dirty 만 지움) → `pgbuf_put_bcb_into_invalid_list` 의 `assert ((bufptr->flags & PGBUF_BCB_FLAGS_MASK) == 0)`(:8946, 마스크에
+  TO_VACUUM 포함 :251-258)에 걸린다. gdb: flags=0x04080000(TO_VACUUM), ptype=12(PAGE_DROPPED_FILES). DROP 이 있었던 DB 를 정상 종료한 뒤 다시 `installdb` 하면
+  매번(첫 SA 기동만). — 정소희(.50) 2026-10-28
+- **[미수정(잠재, 지금은 도달 불가) — `pgbuf_claim_bcb_for_fix` 의 `dwb_read_page` 실패 경로가 BCB mutex·버퍼 락을 쥔 채 반환]** (develop `2d925cb86` 대조
+  2026-10-28): `pgbuf_allocate_bcb` 뒤 호출자는 `bufptr->mutex` 를 쥐고 있는데(page_buffer.c:8458 주석) `dwb_read_page` 실패 분기(:8486-8491)는
+  `assert (false); return NULL;` 뿐이라, 형제 실패 경로(`fileio_read` 실패 :8499-8520, TDE 복호 실패 :8527-8535)가 하는 `pgbuf_put_bcb_into_invalid_list`(mutex
+  해제)·`pgbuf_unlock_page`(같은 VPID 대기자 해제)를 건너뛴다. 지금은 `dwb_read_page ()`(double_write_buffer.cpp:3979)가 언제나 `NO_ERROR` 를 돌려줘 이 분기에
+  오지 않는다 — DWB 읽기에 실패 반환을 넣는 변경이 이 구멍을 연다. 출처 vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md P2 부수 주장, 호출 문맥 미대조였음)
+  — 정소희(.50) 2026-10-28
 
 **CBRD-24094(10a1df3e6, OID-ordered overflow chains + separator directory)는 온디스크
 포맷 비호환** — 구 포맷 볼륨을 새 빌드로 열면 **읽기는 되지만 뷰 생성 등 카탈로그 쓰기에서

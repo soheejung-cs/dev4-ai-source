@@ -95,7 +95,16 @@
   `REGU_VARIABLE_FAST_PEEK`(regu_var.hpp:174 정의 — "inline fetch_peek_dbval () may return its
   value pointer directly", 설정은 fetch.c:4635)는 같은 방향의 선행 흔적이다. (원 메모의
   fetch.c:4597은 행 번호 확인 필요 — 현재 소스와 불일치)
+  — `original_domain` 은 develop `be683e04c`([CBRD-27510] #8022, 2026-10-11)가 "clone-domain restoration" 과 함께 없앴다:
+  도메인은 이제 실행 전 `qexec_resolve_domains ()` 가 실행당 1회 정한다(아래 「식 컴파일 머지본 재확인」 절). — 정소희(.50) 2026-10-28
 - ✅ **리뷰 체크포인트**: regu 트리를 새로 순회·변형하는 코드가 `map_regu()`를 재사용했는지, 결과를 `ARITH_TYPE.value` 외 임시 슬롯에 쓰면서 소유권이 흐려지지 않았는지 확인할 것.
+- **리스트 파일 값 읽기(`TYPE_POSITION`)도 peek 다** (.52, `a7a1db84b`, 2026-09-16; develop `2d925cb86` 재확인 2026-10-28):
+  `fetch_peek_dbval` 이 `qfile_locate_tuple_value` 뒤 `data_readval(…, false /* Don't copy */)`(fetch.c:4726-4737). develop 은 리스트 파일
+  튜플 형식 교체([CBRD-27365] `453da49c8`, 2026-09-29) 뒤 `qfile_slot_read_column_value (…, false /* Don't copy */ …)`(fetch.c:1781-1782
+  `fetch_peek_dbval_slow`, :2394-2395 `fetch_peek_dbval_pos`)로 읽지만 peek 인 것은 같다. 행당 강제 복사는 XASL 블록 출력의 튜플 조립
+  (`qfile_generate_tuple_into_list`, develop list_file.c:1805) 한 번이다 — `a7a1db84b` 의 형식은 값당 8B 헤더 + 8B 튜플 길이(query_list.h:229-236)
+  였고, `453da49c8` 이 도메인 기반 compact 형식(고정폭 값은 정렬해 그대로, 가변 길이는 짧은 길이 헤더, NULL 이 있을 때만 비트맵 —
+  `qfile_tuple_layout.h/.c`, 커밋 메시지 기준)으로 바꿨다. — 정소희(.50) 2026-10-28
 
 ### qdata_add_dbval (query_opfunc.c:2438)
 
@@ -129,6 +138,91 @@
 - 통계·히스토그램을 갱신해도 **기존 캐시 플랜을 계속 사용** — 플랜 A/B 비교는 서버 재시작 또는
   쿼리 텍스트 변형으로. 주석은 캐시 키에서 정규화로 제거되므로 **주석 변경으로는 캐시를 우회할 수
   없다**(별칭을 바꿔야 함).
+  `UPDATE STATISTICS` 를 커밋한 뒤에도 같은 SQL 은 캐시된 구 플랜(iscan card 100)을 그대로 쓰고, `/*+ RECOMPILE */` 또는 서버 재시작
+  뒤에만 새 플랜(sscan card 99004)이 나왔다(.51, PR#7900 빌드, 2026-09-09 실측 — develop `620ceaf6a` 이전). develop `2d925cb86` 정적
+  재확인 2026-10-28: statistics_sr.c·statistics_cl.c·schema_manager.c 에 XASL 캐시 무효화 호출이 없다. 바뀐 점: `620ceaf6a`(CBRD-27490)부터
+  바인드 변형 대상 질의(실클래스 spec 2개 이상·MCV 컬럼·유니크 키 고정 없음인 SELECT·서버측 UPDATE/DELETE — 커밋 메시지 기준)는 바인드
+  지문마다 최대 `plan_cache_bind_variants`(기본 5)개 플랜을 각자 별도 엔트리로 두므로, 같은 SQL 텍스트라도 바인드 값에 따라 다른 플랜을 쓸
+  수 있다 — A/B 때는 바인드 값도 고정할 것(규칙은 src-compat §2 「do_replan_statement_with_bind_peek …」). — 정소희(.50) 2026-10-28
+- **XASL 캐시 키(SHA1) 계산 지점은 5곳이고 `PT_PRINT_DIFFERENT_SYSTEM_PARAMETERS` 는 `do_prepare_select` 에만 있다**
+  (.50, `87b25579e`, 2026-09-22; develop `2d925cb86` 재확인 2026-10-28): execute_statement.c 의 `do_prepare_update`(:9954/:9962)·
+  `do_prepare_delete`(:11352/:11360)·`do_prepare_insert_internal`(:12029/:12032)·`do_prepare_select`(:15376/:15385)·`do_prepare_merge`
+  (:18476/:18478). 출력 플래그는 모두 `CUSTOM_PRINT_4_SHA_COMPUTE | PT_PRINT_LOWER`(:109)이고 select 만 `PT_PRINT_DIFFERENT_SYSTEM_PARAMETERS`
+  를 더해, `parser_print_tree` 가 `?` 뒤에 `sysprm_print_parameters_for_qry_string ()` 출력을 붙인다(parse_tree_cl.c:3119-3124). 따라서
+  `PRM_FOR_QRY_STRING` 파라미터(`cost_*` — [CBRD-27126] `fa551431b`, `max_hash_list_scan_size`, `memoize_memory_limit` 등)는
+  **UPDATE/DELETE/INSERT/MERGE 서버측 플랜의 캐시 키에 반영되지 않는다** → §3. (`87b25579e` 에도 MERGE 포함 5곳 — 처음 기록의 "4곳"은
+  MERGE 누락.) develop `620ceaf6a`([CBRD-27490] #8013, 2026-10-21)부터 select·update·delete 는 SHA1 직전에 바인드 변형 키를 해시 텍스트
+  뒤에 붙여(`do_append_bind_variant_key ()` :15279, 호출 :9956·:11354·:15379) 변형마다 별도 캐시 엔트리가 된다(insert·merge 는 붙이지 않음;
+  지문·변형 규칙은 src-compat §2 「do_replan_statement_with_bind_peek …」). 짝: src-base §2 「sysprm_print_parameters_for_qry_string」 끝 줄
+  (출력 플래그를 켜는 곳은 `do_prepare_select` :15376 하나). — 정소희(.50) 2026-10-28
+
+### XASL clone 보관·폐기와 clear 표시 규칙 — 플랜 캐시 세 모양·px 워커 트리·메모리 래퍼·trace·NULL 순서 (xasl_cache.c / query_executor.c / stream_to_xasl.c)
+
+> 출처: .52, 기준 `baa9ba017`(feature/expression-compile) / develop `a0c1b6c41` 머지본, 2026-09-17 — CBRD-27215 작업 중 확인한 엔진 쪽 계약.
+> "develop" 이라고 적은 줄 번호·차이는 develop `2d925cb86`(PR#7658 머지 `b8199438e` 이후)로 재확인 2026-10-28. — 정소희(.50) 2026-10-28
+
+#### 메모리 래퍼 — `malloc` 은 SERVER_MODE 에서 추적된다
+
+`src/base/memory_cwrapper.h:186-190`(develop :201-205)이 SERVER_MODE 에서 `malloc`/`calloc`/`realloc`/`strdup` 을
+`cub_alloc (…, __FILE__, __LINE__)` 계열로, `free` 를 `cub_free` 로 `#define` 치환한다. 그래서 소스에 raw `malloc` 을 써도
+`cubrid memmon` 이 **파일:줄 단위**로 집계한다(통계 이름은 basename 이 아니라 마지막 `/src/` 이후 경로 — `memory_monitor_sr.hpp` 의
+`m_target_pos`). 조건: 그 파일이 `memory_wrapper.hpp` 를 **마지막에** include 해야 하고 CI(`.github/workflows/check.yml`)가 이를 강제한다.
+**`posix_memalign` 은 치환 목록에 없다** — 정렬 할당은 `cub_aligned_alloc ()`([CBRD-26964] `b646647ec`, `memory_cwrapper.h:202`; develop :208-245)를
+써야 추적된다. 추적 밖 블록을 `cub_free` 로 놓아도 오계상은 없다: `memory_monitor_sr.hpp` 의 `sub_stat ()`(develop :267-292)이 metainfo 의
+magic number 를 대조해 불일치면 아무것도 빼지 않는다.
+
+#### 플랜 캐시는 세 모양이고 트리 폐기 주체가 서로 다르다
+
+| 설정 | 트리 | 폐기 주체 |
+|---|---|---|
+| 기본 | clone 을 캐시에 보관·재사용 | `xcache_clone_decache ()` — 플래그 세우고 `qexec_clear_xasl ()` |
+| `max_plan_cache_clones=0` | `xcache_uses_clones ()` 가 거짓 → 실행마다 `stx_map_stream_to_xasl (…, use_xasl_clone=false, …)` 로 새 트리 | `xcache_retire_clone ()` 의 꼬리 — 원래 `free_xasl_unpack_info` 만 했다 |
+| `max_plan_cache_entries=0` | 캐시 비활성(`xcache_Soft_capacity <= 0` → `xcache_Enabled=false`), 원샷 | `qmgr_process_query ()` |
+
+develop: `xcache_uses_clones ()` = `xcache_Max_clones > 0`(xasl_cache.c:2906), 비활성 판정 :344. PR#7658 머지 뒤로 `xcache_retire_clone ()`
+꼬리(:2518-2527)와 `qmgr_process_query ()`(query_manager.c:1270-1281)가 둘 다 `XASL_DECACHE_CLONE` 를 세운 `qexec_clear_xasl ()` 를 한 번 더
+돌려 컴파일된 식 프로그램까지 놓는다(아래 clear 규칙의 2패스).
+
+#### clear 루틴은 플래그에 따라 표시를 **반대로** 읽는다
+
+`qexec_clear_regu_var ()` TYPE_CONSTANT(`query_executor.c:1551-1566`; develop :1588-1605) 와 `qexec_clear_agg_list ()`(develop :2328-2361)
+— `qexec_clear_access_spec_list ()` 의 `clear_value_at_clone_decache`(develop :1940-1955)도 같은 규칙이다:
+- `XASL_DECACHE_CLONE` **있음** → `CLEAR_AT_CLONE_DECACHE` 표시가 **있는** 값만 `pr_clear_value`
+- **없음** → 표시가 **없는** 값만
+
+`use_xasl_clone=false` 로 푼 트리는 그 표시가 하나도 없다(`stream_to_xasl.c` 의 `4770`·`5716`·`5736`·`6024`·`6043`·`3633` 이 전부
+`use_xasl_clone` 가드 아래; develop :3706·:4873·:5864·:5884·:6171·:6190). 따라서 **표시 없는 트리에 플래그를 세운 단일 패스는 값을 하나도
+해제하지 않는다.** 원샷 경로가 2패스(무플래그 최종 clear → 플래그 pass)인 이유가 이것이다.
+
+#### px 워커는 자기 트리를 갖는다
+
+`px_scan_task.cpp` 의 `clone_xasl ()`(develop :631) 이 `m_uses_xasl_clone` 이면 `xcache_find_xasl_id_for_execute ()` 로 자기 clone 을,
+아니면 `stx_map_stream_to_xasl ()` 로 자기 트리를 푼다. 이어서 `m_xasl = xasl_find_by_id (…)`, `m_scan_id = &m_xasl->spec_list->s_id`(:675).
+따라서 워커 간 `PRED_EXPR` 공유가 없다(`scan_prog` 레이스 없음). develop 은 clone 이 아닌 워커 트리도 `finalize ()` 에서 같은 2패스로
+정리한다(px_scan_task.cpp:563-577).
+
+#### trace 포맷 두 갈래
+
+`qdump_print_expr_compile_text ()` 를 부르는 곳은 `qdump_print_stats_text ()` 하나다. JSON 쪽 `qdump_print_stats_json ()` 에는 대응 절이 없다.
+CCI 인터페이스는 JSON trace 를 쓰므로 `.answer_cci` 에는 EXPR_COMPILE 줄이 나오지 않는다(CCI 26건 실행으로 확인). develop 에서는 호출처가
+하나 늘었다 — px 워커의 `trace_handler::add_expr_compile_dump ()`(px_scan_trace_handler.cpp:120-151, 태그 " [px worker]"). JSON 은 직렬
+`qdump_print_stats_json ()`(query_dump.c:3679)에 여전히 절이 없고, 병렬 노드의 `parallel` 객체에만 `expr_compile` 문자열이 붙는다
+(px_scan_trace_handler.cpp:550-552) — 병렬 플랜의 CCI 답에 나오는지는 미확인.
+
+#### 산술 커널의 NULL 처리 순서
+
+`EXPR_ARITH_PROLOGUE` 가 두 피연산자의 NULL 을 **타입 가드(`EXPR_ARITH_REQUIRE_TYPE`)보다 먼저** 걸러 `PRIM_SET_NULL (step->out)` 후
+반환한다(develop expr_compile.c:338-345 → :358). 커널 선택만 타입으로 하고 실행은 NULL 을 이미 다룬다. 호스트 변수의 타입은
+`expr_leaf_type ()` 이 바인딩된 값에서 얻으므로 NULL 바인딩은 `DB_TYPE_NULL` 이 되고 `expr_arith_kernel ()` 에 항목이 없어 거절된다
+(→ CBRD-27455). develop 에서는 산술 커널의 타입이 바인딩 값이 아니라 resolve_domains 의 number plan(`expr_arith_number_plan ()` 의
+`plan->arith.type`, :5036-5068)에서 오고, (opcode, 타입) 칸이 없으면 거절 대신 `expr_compile_generic ()` 으로 간다; 해석 결과가
+'값 없음'(`DB_TYPE_NULL`)인 노드는 거절한다(:2414-2422 머리 주석, :2488). CBRD-27455 키의 커밋은 develop 에 없다.
+
+#### 해석 경로의 NULL 시맨틱·오류 순서 (csql 실측)
+
+산술만 전파: `a*?`·`a+?`·`a/?` → NULL (`a / NULL` 은 0 나누기 오류가 아니다).
+비전파: `nvl(?, a)`·`coalesce(?, a)`·`nullif(a, ?)` → a 값, `case when a > ?` → else 분기, `a > ?` → NULL.
+오류 순서: `(a / (a-10)) * ?` (?=NULL) → **0 나누기 오류**(왼쪽 먼저 평가) / `? * (a / (a-10))` → **NULL**(왼쪽이 NULL 이라 오른쪽 미평가).
 
 ### hjoin_merge_tuple (query_hash_join.c:4313)
 
@@ -174,10 +268,10 @@
 
 ### px_scan_slot_iterator (parallel/px_scan/px_scan_slot_iterator.cpp)
 
-- **버그(미수정)**: `qualified_rows++`가 `if (ev_res != V_TRUE) continue`(:138) **앞**에 있어(원
-  메모 :124; develop 95b79e7ed에서 :125로 확인) 병렬 heap 스캔의 qualified==read가 항상 성립 →
-  SET TRACE ON 선택도가 무의미(비용모델이 읽는 데이터). 직렬(scan_manager.c:6173)·병렬
-  LIST(px_scan_slot_iterator_list.cpp:170; 원 메모 :168)는 정상.
+- **버그(수정됨: `6663cd894` CBRD-27604, 2026-10-15)**: 예전에는 `qualified_rows++`가 `if (ev_res != V_TRUE) continue`
+  **앞**에 있어(develop 95b79e7ed :125) 병렬 heap 스캔의 qualified==read가 항상 성립했다 → SET TRACE ON 선택도가 무의미.
+  develop `2d925cb86` 에서는 `continue`(:136) 뒤 `if (m_on_trace)` 안(:139-141)으로 옮겨져 직렬(scan_manager.c)·병렬
+  LIST 와 같다. — 정소희(.50) 2026-10-28
 
 ### result_handler (parallel/px_scan/px_scan_result_handler.hpp / .cpp)
 
@@ -194,9 +288,148 @@
   자기비활성(원 메모 L907; develop에서 자기비활성 분기는 :900대 초반으로 확인). 직렬 기준
   캘리브레이션이라 병렬에서 조용히 꺼질 수 있음. TRACE hit/miss로 확인.
 
+### qexec_next_scan_block_renew_memoize (query_executor.c:8600)
+
+- **row memo 는 그것을 채운 scan block 에만 유효하고, 갱신은 chain block 반복기가 *파티션된* inner 를 다음 block 으로 옮길 때만 한다**
+  (develop `2d925cb86` 정적 확인 2026-10-28 — .52 PR#8009 head `616c704bd` 리뷰(2026-09-29)의 서술을 머지본 기준으로 고쳐 씀):
+  `qexec_next_scan_block_renew_memoize ()`(query_executor.c:8600-8615)가 `qexec_next_scan_block ()` 성공 뒤 `memoize_storage &&
+  spec_list->parts != NULL && !XASL_IS_PER_OUTER_ROW (xasl)` 일 때만 `clear_memoize_storage`+`new_memoize_storage` 하고, 이것을 부르는 곳은
+  `qexec_next_scan_block_iterations ()`(:8624-8796) 뿐이다. 파티션 안 된 inner 는 block 이 하나라 반복기가 재시작만 하고 memo 를 유지한다
+  (갱신하면 outer block 마다 키를 다시 읽고 hit/miss 가 리셋된다 — 머리 주석 :8581-8598). SEMI/ANTI inner 는 반복기가 block 으로 쪼개지
+  않는다 — 파티션 순회가 outer 행 하나의 프로브라 match memo 가 전 파티션에 유효하고([CBRD-27465] `64516d22e`), 그 뒤 following join 의
+  row memo 도 그 순회 전체에 걸친다([CBRD-27493] `88c88d359`). 행 단위 되감기 `qexec_reset_sa_inner_scan_block ()`(:8813)가 이 둘 전용이다
+  (`XASL_IS_PER_OUTER_ROW`, xasl.h:567). PR head 의 "`qexec_next_scan_block ()` 세 지점(되감기·파티션 전진·spec 전진)에서 clear+new" 는
+  머지본 [CBRD-27484] `15e7dc8b5` 에 들어가지 않았다(머지 커밋이 #7991 통합 뒤 중복 reset 제거를 명시). — 정소희(.50) 2026-10-28
+
 ### px_scan_task (parallel/px_scan/px_scan_task.cpp)
 
 - 인터럽트 검사는 페이지 단위로 올바름(:840). `shared_ptr`는 src/query 전체 0건.
+- **`ACCESS_SPEC_TYPE.btid` 는 언팩 때 `indexptr->btid` 를 백업한 컴파일 시점(부모 클래스) BTID 이고, 파티션 프루닝 뒤 `indexptr->btid` 를
+  원상 복원하는 원본이다** (.52, PR#8009 head `616c704bd`, 2026-09-29; 머지 [CBRD-27484] `15e7dc8b5`, develop `2d925cb86` 재확인 2026-10-28):
+  stream_to_xasl.c:4752 "backup index id"(당시 :4634). 직렬은 `qexec_close_scan ()` 이 `parts != NULL` 일 때 복원하고(query_executor.c:8344-8354,
+  당시 :8086), 병렬 워커는 `initialize ()` 에서 `indexptr->btid` 를 파티션 BTID 로 덮어쓴 뒤(px_scan_task.cpp:199-206) `finalize ()` 에서 이
+  필드로 **parts 와 무관하게** 복원한다(:535-543). 머지 전에는 `parts != NULL` 일 때만 복원해, 프루닝하지 않은 clone 에 남은 파티션 BTID 가
+  XASL cache clone 풀로 새고 그 clone 을 집은 리더가 파티션 BTID 로 프루닝하다 -495(`ER_PT_EXECUTE`) 레이스를 냈다
+  (`heap_get_indexinfo_of_btid ()` 가 에러 설정 없이 거절 — 머지본 주석). — 정소희(.50) 2026-10-28
+- **병렬 스캔 워커(MERGEABLE_LIST/BUILDVALUE_OPT)가 clone 위에서 연 스캔은 `finalize ()` 의 `qexec_clear_xasl ()` 이 닫는다 — `curr_spec` 이
+  NULL 로 남던 구멍은 [CBRD-27485] `f1bd99ed4` 가 막았다** (수정됨: `f1bd99ed4` CBRD-27485 — .52 PR#8009 head `616c704bd` 2026-09-29 의 정적
+  의심 "워커 경로에서 `scan_close_scan ()` 을 못 찾았다"를 develop `2d925cb86` 에서 정적 재확인 2026-10-28): 워커가 `scan_close_scan ()` 을
+  직접 부르는 것은 XASL_SNAPSHOT 뿐이지만(px_scan_task.cpp:553-559), `finalize ()` 끝의 `qexec_clear_xasl ()`(:574·:577)이 BUILDLIST/
+  BUILDVALUE/SCAN_PROC 의 `curr_spec` 을 `scan_end_scan`+`scan_close_scan` 하고(query_executor.c:2563-2567·:2665-2669·:2689-2693) scan_ptr
+  체인으로 내려간다(:2466). 비커버링 인덱스 워커가 잡는 oid 버퍼(`scan_alloc_iscan_oid_buf_list ()`, scan_manager.c:3422)와 key_vals·copy_buf 는
+  `scan_close_scan ()`(:5242-5269)만 놓고 `qexec_clear_access_spec_list ()` 는 놓지 않으므로, 마지막 파티션을 지나 `curr_spec` 이 NULL 이 된
+  파티션 SEMI/ANTI inner 는 닫히지 않던 자리다 — `f1bd99ed4` 가 `finalize ()` 에서 `curr_spec` 을 `spec_list` 로 되돌린다(px_scan_task.cpp:522-528 — 그 뒤 [CBRD-27493] `88c88d359` 가 following join 까지 넓힘).
+  — 정소희(.50) 2026-10-28
+- **병렬 워커는 부모 트랜잭션의 `tran_index` 를 복사해 쓴다** — CBRD-25447 병렬 힙 스캔(2025-05-21)부터. "트랜잭션 = 스레드 하나" 를
+  전제한 TDES 하위 상태(대기 시간·잠금 대기 등)가 여러 스레드에 공유되며 깨진 결함 계열이 CBRD-26571·27308·27198·27183/27486 이다 —
+  TDES 필드를 새로 읽고 쓰는 변경은 워커 스레드에서도 불리는지 본다(src-thread §2 「entry_manager::retire_context / recycle_context」,
+  src-transaction §2 대기 시간 조회) (.52, PR#8034 리뷰, 2026-10-01). — 정소희(.50) 2026-10-28
+
+### scan_next_heap_scan (scan_manager.c:5683)
+
+- **힙 스캔의 기본은 PEEK 이고 술어 평가 뒤 페이지 LSA 가 바뀌면 COPY 로 재시도한다** (.52, `a7a1db84b`, 2026-09-16; develop `2d925cb86`
+  재확인 2026-10-28): `scan_next_heap_scan` 이 `is_peeking = scan_id->fixed`(= `ACCESS_SPEC_TYPE.fixed_scan`, xasl.h:1104 → develop :1131;
+  `grouped` 면 PEEK)로 `heap_next` 를 부르고, `eval_data_filter` 뒤 `PGBUF_IS_PAGE_CHANGED (page_watcher.pgptr, &ref_lsa)` 면
+  `is_peeking = COPY` 로 같은 OID 를 다시 읽는다(scan_manager.c:5905-5989 → develop :5719·:5796-5802; rest 값·레코드 정보를 읽은 뒤에도 같은
+  재시도 :5975-6036). 병렬 슬롯 반복기도 같은 재시도를 따로 갖고 있다(px_scan_slot_iterator.cpp:127-133). 실행기가 pgbuf LSA 를 직접 보는
+  자리 — 경계 누수. ✅ 스캔 매니저에 pgbuf/RECDES 타입을 더 노출하는 변경은 이 자리를 넓힌다. — 정소희(.50) 2026-10-28
+
+### scan_next_scan_local — NL semi/anti inner 의 첫 매치 정지 (`QPROC_SINGLE_INNER`, scan_manager.c:7550)
+
+- **`QPROC_SINGLE_INNER` 게이트는 배치를 다 읽은 뒤에야 듣는다 — 그래서 [CBRD-27465] `64516d22e`(PR#7991)가 NL semi/anti inner 인덱스
+  스캔에 key limit 1 을 건다** (.51, PR#7991 head, 2026-09-22; 머지 `64516d22e`, develop `2d925cb86` 재확인 2026-10-28): 게이트
+  (scan_manager.c:7550-7570)는 `single_fetched` 뒤의 **재진입**만 S_END 로 막는다. 인덱스 접근은 `scan_get_index_oidset ()`(:2430)이 OID
+  배치를 채우고 `curr_oidp` 로 훑으므로 `next_scan` 1회가 이미 배치 하나를 읽는다. 머지본은 optimizer 쪽 `add_semi_anti_key_limit ()`
+  (optimizer/plan_generation.c:923-939, 주석 "the join-level first-match gate (QPROC_SINGLE_INNER) does not stop the btree: it only stops
+  re-entry after the batch is read")를 `mark_access_as_semi_anti_join ()`(:1027)에서 부르되, inner XASL 에 `if_pred`·`after_join_pred`·
+  `bptr/dptr/fptr` 가 없고 spec 에 `where_pred` 가 없을 때 ISS·loose scan 이 아닌 `ACCESS_METHOD_INDEX` 에만 건다(:1039-1063).
+  — 정소희(.50) 2026-10-28
+- **힙(순차) inner 는 게이트만으로 끊긴다** (.51, `CBRD-27251` 로컬 트리, 2026-09-22 — 코드 판독, 실측 재확인 안 함; develop `2d925cb86`
+  재확인 2026-10-28): `S_HEAP_SCAN → scan_next_heap_scan ()` 은 자격 행 하나마다 `S_SUCCESS` 를 돌려주므로(scan_manager.c:6043) 배치 초과
+  읽기가 없다 — key limit 이 인덱스 접근에만 붙는 것(plan_generation.c:1054-1055)과 일관된다. — 정소희(.50) 2026-10-28
+- **key limit 은 outer 행마다 재무장된다** (.51, PR#7991 head, 2026-09-22; develop `2d925cb86` 재확인 2026-10-28): `scan_reset_scan_block ()`
+  (scan_manager.c:4683) → `scan_init_index_key_limit ()`(:4764, 당시 :4944). 그래서 상수 1 로 충분하고 조인 결과가 1행으로 잘리지 않는다
+  (머지본 `add_semi_anti_key_limit ()` 머리 주석도 같은 근거). `key_limit_reset` 플래그는 **다른 축**이다 — 한 스캔 안에서 range 마다 다시
+  줄지 여부(`scan_get_index_oidset ()` :2746·:2779·:2819·:2899). 사용자 KEYLIMIT 이 이미 있으면 LEAST() 로 합치고 `key_limit_reset` 은
+  건드리지 않는다(plan_generation.c:935-936 주석). — 정소희(.50) 2026-10-28
+- **해시조인 SEMI/ANTI 의 프로브는 첫 매치에서 build 체인 훑기를 멈춘다** (수정됨: [CBRD-27379] `8ea02c8e8`(#8001, 2026-10-16) — .51
+  2026-09-22 에 "미확인·미조사"로 남긴 질문을 develop `2d925cb86` 에서 정적 확인 2026-10-28): 직렬 query_hash_join.c:3633-3637(SEMI — 매치
+  1건을 결과에 쓴 뒤 `qfile_slot_reset` + break)·:3939-3946(ANTI — during-join 술어를 통과한 매치 1건이면 break, 그 행은 억제), 병렬
+  px_hash_join_task_manager.cpp:1085-1087·:1438-1440 이 같은 형태다. NL 경로는 `mark_access_as_semi_anti_join ()` 이 inner scan proc 의 spec
+  전부에 `QPROC_SINGLE_INNER` 를 다므로(plan_generation.c:1049-1052) 리스트 inner(해시 리스트 스캔 포함)도 같은 게이트를 지난다(정적 판독,
+  실측 미확인). — 정소희(.50) 2026-10-28
+
+### qmgr_get_new_page (query_manager.c:2922)
+
+- **리스트 파일은 `QMGR_TEMP_FILE.membuf` 메모리 페이지를 먼저 쓰고 `membuf_npages` 를 넘으면 임시 볼륨 페이지로 간다** (.52, `a7a1db84b`,
+  2026-09-16; develop `2d925cb86` 재확인 2026-10-28): `qmgr_get_new_page`(query_manager.c:2870-2882 → develop :2933-2939, 소진되면 그때
+  `file_create_temp` :2941~), 크기 파라미터 `temp_file_memory_size_in_pages`(system_parameter.c:238 → develop :237). 중간 결과는 처음부터
+  파일 페이지 형식이다. — 정소희(.50) 2026-10-28
+
+### float_numeric_db_value_sub / float_numeric_normalize_for_hash (numeric_opfunc.c:2820 / :4117)
+
+- **float NUMERIC 의 뺄셈은 scale 을 `MAX (scale1, scale2)` 로 두고 precision 을 결과 자릿수로 다시 세므로, 음수 scale 과 작은 precision 의
+  표현 `(계수 1, p1, s−2)` 가 생기고 float NUMERIC 열이 그대로 저장한다** (.50, `89722cf4e`, 2026-10-27 단위 실측; develop `2d925cb86` 까지
+  numeric_opfunc.c 변경 없음): numeric_opfunc.c:2857 `result_scale = MAX (scale1, scale2)`, :2927-2929 "check and recalculate precision/scale
+  of the subtraction result"(`float_numeric_get_decimal_digit`). 41자리 이상 정수 리터럴은 p40·s<0 으로 들어온다(:5453-5458 Case 1-B).
+  42자리 리터럴 두 개의 뺄셈 → (1, p1, s−2), float NUMERIC 열 캐스트가 유지. 같은 값에 `(1,p1,s−2)`·`(100,p3,s0)` 두 표현이 공존하므로
+  해시·같음 키는 `float_numeric_normalize_for_hash ()`(:4117)의 정규화 이미지로 만들어야 한다 — 그 함수는 음수 scale 을 계수에
+  10^MIN(−s, 40−p) 를 곱해 없앤다(:4175-4190, 남는 scale = s + MIN(−s, 40−p)). — 정소희(.50) 2026-10-28
+
+### do_update_stats / update_or_drop_histogram_helper (execute_statement.c:4815 / execute_schema.c:4399)
+
+- **컬럼 순회가 서버 왕복을 가로질러 `SM_ATTRIBUTE` 를 들고 있으면 부분 롤백의 decache 로 SIGSEGV 가 난다 — 지금은 위치 기반 순회 +
+  이름을 지역 버퍼로 복사한다** (.50, 동적 gdb, 2026-09-18; 수정됨: 브랜치 `2d5a35d24` → [CBRD-27369] `0d0809963`(PR#7900), develop
+  `2d925cb86` 재확인 2026-10-28): `tran_abort_upto_system_savepoint` 가 클래스를 decache 하면 `db_get_attributes_force` 로 받은 목록이
+  해제된다 — 당시 `execute_schema.c:4408 TP_DOMAIN_TYPE (att->domain)` 에서 6세션 중 5 크래시. develop 은 :4495-4517(주석 "Walk the attributes
+  by position, re-reading the list each time, and keep the name in a local buffer"). `do_update_stats ()` 도 같은 이유로 `class_mop->object`
+  를 직접 읽지 않고 `au_fetch_class_force ()` 로 다시 받는다(execute_statement.c:4930-4939, [CBRD-26959] `532ce4b6d`, 주석의 CI 크래시
+  bug_bts_14492). ✅ 이 경로의 순회·참조는 서버 왕복 사이에 스키마 포인터(`SM_ATTRIBUTE`·`SM_CLASS`)를 들면 안 된다. — 정소희(.50) 2026-10-28
+- **문장 시작에 잡아 커밋까지 쥐는 클래스 게이트는 전수 스캔까지 직렬화한다** (.50, 동적, 3회 median, 2026-09-18 — PR#7900 의 설계 대안
+  실측; 머지본 `0d0809963`·develop `2d925cb86` 에는 게이트가 없다): 같은 폭풍(80워커×20회)이 게이트+수집 생략 26초, **게이트만 291초(11배)**,
+  둘 다 없음 28초. 게이트만 남긴 판에서는 분 단위로 깊어진 대기 줄에서 문장이 `ER_LK_OBJECT_DL_TIMEOUT_SIMPLE_MSG`(-966) 로 간헐 실패(3/4800).
+  데드락 제거 자체는 `_db_histogram` 행 X-first(속성 순서)만으로 충분하다 — 게이트 없이 폭풍 3회·ALL CLASSES 8×5 모두 0(develop 의 X-first
+  경로는 `db_find_multi_unique_for_update ()`, compat/db_obj.c:1252). — 정소희(.50) 2026-10-28
+
+### `;trace`·플랜 덤프 읽는 법 — JOB 측정에서 확인한 카운터 의미 (query_dump.c / optimizer.h)
+
+> 전제 — 측정 계약 `AK-par4`(.52, develop `07480dfd1` release, 2026-09-18): JOB 113질의(DB `joinorder`), `parallelism=4`·`data_buffer_size=16G`·`taskset -c 0-15`, 21테이블 `UPDATE STATISTICS … WITH FULLSCAN, 300 BUCKETS` 뒤 서버 재기동, recompile 없이 warmup 1패스로 XASL 을 채운 정상상태. 카디널리티는 별도 `qref` 레인(직렬 + 전 스텝 `NO_USE_HASH` + `memoize_memory_limit=0`).
+
+- **`SET OPTIMIZATION LEVEL 514` 는 플랜만 찍고 실행을 건너뛴다** (.52, `07480dfd1`, 2026-09-18): `PLAN_DUMP_ENABLED(level) = level >= 0x100`,
+  `OPT_LEVEL(level) = level & 0xff`(`optimizer.h:82-84`, develop 같음). 실측 — 무힌트 19.7초짜리 `16b` 가 **0.017초·0 row** 로 끝나고
+  `Query plan:` 블록이 나온다. ✅ 플랜 검증·이웃 열거를 **실행 비용 0** 으로 할 수 있다. 단 `SELECT COUNT(*) FROM t`(무술어)는 아예 플랜을
+  생성하지 않고 메타데이터로 답한다(0.85ms vs 술어 있으면 110ms) — 항진 술어(`id IS NOT NULL`)도 제거되어 같은 fast path 로 간다.
+  — 정소희(.50) 2026-10-28
+- **trace 는 병렬 노드의 실제 수치를 본 줄이 아니라 이어지는 줄에 워커별 범위로 준다** (.52, `07480dfd1`, 2026-09-18):
+  `SCAN (table: dba.keyword), (heap time: 10600, fetch: 0, ioread: 0, readrows: 0, rows: 0)` 다음 줄에 `(parallel workers: 2, heap time:
+  13..10600, readrows: 61257..72913, rows: 61257..72913, gather: buildvalue)`. 본 줄 카운터가 **0** 이므로 이 줄을 안 읽으면 "실제 0행"이라는
+  거짓을 쓰게 된다. 워커 2개면 min+max 가 곧 두 워커 값이라 정확하다(61,257+72,913 = 134,170 = `keyword` 전체 행수). ✅ — 정소희(.50) 2026-10-28
+- **실현 병렬도가 trace 텍스트에 찍힌다 — 설정값이 아니라 실제로 쓴 스레드 수다** (.52, `07480dfd1`): `query_dump.c:3855`
+  `fprintf(fp, ", parallel workers: %d)\n", xasl_p->executed_parallelism)`(develop :4520), 값의 출처는 `query_hash_join.c:197/:215`(develop
+  :194/:212)의 `manager.num_parallel_threads`. 조건은 `stats_group.status == HASHJOIN_STATUS_PARALLEL && executed_parallelism > 1`. 병렬 스캔은
+  `query_dump.c:3737` 의 `dump_stats_text`. ✅ 병렬도는 힌트로 못 박지 못하지만 **관측해서 리비전 간 달라지면 무효 표시**할 수 있다.
+  — 정소희(.50) 2026-10-28
+- **해시조인 플랜의 trace 는 구조가 다르다 — HASHJOIN / BUILD / PROBE / SUBQUERY 노드가 있고 중첩 SELECT 가 나온다** (.52, `07480dfd1`):
+  `BUILD (time, fetch, ioread, rows, method: memory)` 가 **빌드 측 행수와 방법**을 준다. ⚠ 루트 SELECT 는 **첫 번째**다 — 중첩 SUBQUERY 안에도
+  SELECT 가 있어 마지막을 집으면 서브질의 시간을 전체 시간으로 오인한다(`8c` 가 15,885ms 인데 19ms 로 잘못 읽혔다). ✅ — 정소희(.50) 2026-10-28
+- **`memoize_memory_limit=0` 이면 MEMOIZE 가 꺼지고, 세션에서 바꿀 수 있다** (.52, `07480dfd1`): `memoize.cpp:1046-1050`
+  `if (storage_size == 0) return NO_ERROR;`(develop :1346). 파라미터 플래그는 `PRM_USER_CHANGE | PRM_FOR_CLIENT | PRM_FOR_SERVER |
+  PRM_FOR_SESSION | PRM_FOR_QRY_STRING | PRM_SIZE_UNIT`(`system_parameter.c:5418-5419`, 기본 2MB) — `PRM_FOR_QRY_STRING` 이라 세션에서 바꾸면
+  SELECT 의 XASL 캐시 키도 달라진다(위 「xcache 계열」). ✅ MEMOIZE 가 켜져 있으면 작은 차원 테이블의 PK 룩업이 히트로 걷혀 스캔의 `rows` 가
+  조인 출력보다 작게 나온다(`1a`: hit 145 / miss 2) — 스텝별 카디널리티 오차가 `÷18267`, `×31071` 처럼 허위로 튄다. 카디널리티 검증에는
+  반드시 꺼야 한다. — 정소희(.50) 2026-10-28
+- **인덱스 스캔 리프의 감소는 4단계이고 각 단계가 다른 trace 카운터로 나온다** (.52, `07480dfd1`): ① 키레인지(조인 술어) = `readkeys`
+  ② 키 필터 = `readkeys → filteredkeys` ③ 힙 lookup = `btree rows` ④ 데이터 필터 = `btree rows → lookup rows`. ✅ "필터 선택도가 틀렸다"를
+  판정할 때 ②와 ④를 합쳐 보면 안 되고, 조인 선택도를 계산할 때는 ②④를 **모두 나눠 빼야** 한다(안 빼면 그 감소가 조인 오차로 잘못 찍힌다 —
+  `16a` `mc` 가 ÷11.72 로 보였지만 빼면 ÷2.65). — 정소희(.50) 2026-10-28
+- **이너 리프의 필터 선택도는 무조건부가 아니다** (.52, `07480dfd1`): left-deep 에서 첫 테이블(구동 리프)만 전수 스캔되고 나머지는 조인 키로
+  프로브된 행만 읽는다. 따라서 이너 리프의 측정 통과율은 **그 조인 키에 조건부**이고 옵티마이저의 테이블 전체 기준 `sel` 과 같은 것을 재는
+  게 아니다. `16a` `t`: 추정 2.70e-02 vs 측정 3.49e-03(÷7.75) — 필터가 진짜 선택적인지 조인이 유별난 부분집합을 데려온 것인지 이 값만으로는
+  못 가른다. ✅ — 정소희(.50) 2026-10-28
+- **JOB 워크로드는 AK-par4 계약에서 IO bound 가 아니라 CPU·버퍼풀 bound 다** (.52, `07480dfd1`, 2026-09-18): 113질의 중 루트 `ioread > 0` 이
+  11개, 스캔 노드 977개 중 26개뿐. 스캔 `fetch`(논리 페이지) 총합은 2억 322만. `data_buffer_size=16G` + warmup 1패스면 작업 집합이 버퍼풀에
+  올라간다. ✅ 비용모델의 IO 항이 사실상 무력한 상태에서 CPU 항만으로 비용이 결정된다 — src-optimizer §3 의 행수 의존 항 결함을 해석할 때
+  전제. — 정소희(.50) 2026-10-28
 
 ### expr_compile 계열 (**develop `b8199438e` 에 머지됨 — PR#7658 squash, 2026-10-16**; 아래 서술은 브랜치 시절 리비전 기준)
 
@@ -282,6 +515,9 @@ include하지 않는다. 주석에 "server-side runtime state, never serialized"
 `expr_compile.c`에는 `db_private_alloc` 호출이 0회이고 raw `malloc` 15회, `posix_memalign`
 1회(slot 배열 캐시라인 정렬)를 쓴다. 즉 이 모듈의 할당은 엔진 자원 추적기(restrack)가 잡아주지
 않으므로 누수·이중해제를 자동 검출에 기댈 수 없다.
+develop `2d925cb86`(머지본) 재확인 2026-10-28: `db_private_alloc` 0곳·raw `malloc` 20곳·`posix_memalign` 0곳 — slot 배열은
+`cub_aligned_alloc ()`(:5383)로 잡고 `memory_wrapper.hpp` 를 마지막(:59)에 include 하므로, SERVER_MODE 에서는 memmon 이 이 파일의 할당을
+파일:줄로 집계한다(래퍼 규칙은 위 「XASL clone 보관·폐기와 clear 표시 규칙」 절의 메모리 래퍼). — 정소희(.50) 2026-10-28
 - ✅ **리뷰 체크포인트**: 엔진 코드에서 raw malloc/posix_memalign을 쓰는 신규 모듈은 (a) 왜 `db_private_alloc`이 아닌지 근거, (b) 해제 경로가 전부 짝지어졌는지를 수동으로 대조할 것.
 
 #### 컴파일된 경로는 엔진 인터프리터로 역방향 재진입한다 (단방향 호출이 아님)
@@ -299,7 +535,8 @@ include하지 않는다. 주석에 "server-side runtime state, never serialized"
 한다는 게 설계의 핵심 제약이다. 술어 프로그램(`pred_root->scan_prog`)은 클론당 1회 지연 생성되고,
 해제는 `qexec_clear_pred()`의 `is_final || XASL_IS_FLAGED (xasl_p, XASL_DECACHE_CLONE)` 분기에서만
 한다(브랜치 query_executor.c:1784, 주석: "a clone kept cached keeps its compiled tree"). 캐시에
-남는 클론은 컴파일 트리를 유지하는 게 의도된 동작이다.
+남는 클론은 컴파일 트리를 유지하는 게 의도된 동작이다. clone 이 아닌 트리(`max_plan_cache_clones=0`·원샷·px 워커)가 프로그램까지
+놓는 2패스 규칙은 위 「XASL clone 보관·폐기와 clear 표시 규칙」 절. — 정소희(.50) 2026-10-28
 - ✅ **리뷰 체크포인트**: 컴파일 산출물 해제가 clone decache / `qexec_clear_pred(is_final||DECACHE)` 경로에 빠짐없이 걸려 있는지, 호스트변수 타입이 바뀐 재실행에서 옛 프로그램이 재사용되지 않는지 확인할 것.
 
 #### 안전장치는 프로그램 전체 포기가 아니라 노드 단위 폴백(`k_fallback`)
@@ -569,6 +806,33 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
   점프 모델에서도 같은 가드 아래 rhs만 재사용한다. `n_compute`는 점프 스텝을 세지 않는다(Q1: `steps: 6 … compute: 4`).
 - **검증**: 이전 head 대비 54+12문장 결과·에러 위치 동일, TPC-H q1/q6/q14/q19 동일, CTP `cbrd_27215_*` 14/14 + `lazy_chain`.
 
+### 식 컴파일 머지본 재확인 — 호이스팅 오류 순서·점프 경계·호스트 변수 키·도메인 해석 (.52 2026-09-16 → develop `2d925cb86` 재확인 2026-10-28)
+
+> PR#7658 은 [CBRD-27215] `b8199438e`(2026-10-16)로 머지됐다. 아래 넷은 브랜치(`2628b943d`~`9a13c297d`) 시절 확인한 사실을 develop 에서 다시
+> 본 것 — 넷째는 머지본이 다른 방식이라 develop 기준으로 고쳐 썼다.
+
+- **실패 가능 스텝의 호이스팅 조건은 "메인 루프 + 앞에 실패 가능한 행 스텝 없음"** (.52, `9a13c297d`, 2026-09-16; develop expr_compile.c:1812-1853
+  재확인): 끌어올린 스텝은 첫 행의 모든 행 스텝보다 먼저 돌므로 `select cast(s as int), 1 / ?`(`'abc'`, 0)에서 두 오류 중 해석 경로가 먼저 내는
+  것(cast)을 유지하려면 뒤의 `1/?` 를 행 루프에 남겨야 한다. `expr_step_hoist ()` 가 빌드 순서상 앞 스텝을 `expr_step_is_fallible ()`(:2015)로
+  검사하고, 실패 가능 스텝은 가드된 rhs(`cur_guard != 0`)와 CASE 분기 안에서는 끌어올리지 않는다. A/B(develop `519cc1a43` SA 모드) 오류 순서
+  프로브 6건 byte 동일, TC `cbrd_27215_hoist_chain` h8~h13. — 정소희(.50) 2026-10-28
+- **점프 경계는 `remap[]` 이 아니라 `remap_boundary[]`(그 위치 이후의 첫 행 스텝)로 되메운다** (.52, `2628b943d`, 2026-09-16; develop
+  expr_compile.c:5445-5475 재확인): lazy 노드의 NULL 검사 점프가 프롤로그로 올라간 스텝(E 프롤로그의 호스트 변수 읽기)을 가리키면 행 루프가 뒤로
+  뛰어 무한 루프 — `a + (? + 1), (? - 1) * n` 은 그 앞 head `68909640f` 에서도 재현된 기존 결함이었다(머지본 주석이 같은 예를 든다).
+  — 정소희(.50) 2026-10-28
+- **호스트 변수는 위치로 키가 잡힌다 — 값 공유 대상이 아니다** (.52, 2026-09-16 trace 실측; develop `2d925cb86` 재확인): `sum(a*?), sum(a*?)` 는
+  셀 두 개 — CSE 키가 `(TYPE_POS_VALUE, 값 인덱스)` 다(expr_compile.c:4559·:4575, 공유 비교 :1719-1720). 리터럴 값 공유(`expr_literal_same ()`,
+  :2190)는 NUMERIC 에서 `DB_VALUE_NUMERIC_IS_VALUE_NEGATIVE` 도 비교해야 한다(:2210-2218) — 빠뜨리면 `n * 1.5` 와 `n * -1.5` 가 한 셀(전체 CTP 로
+  발견, TC `cbrd_27215_literal_sign`). — 정소희(.50) 2026-10-28
+- **호스트 변수가 든 투영·필터의 도메인은 실행 전 resolve_domains 게이트가 정하고, 프로그램은 그 뒤에 lazy 컴파일된다** (develop `2d925cb86`
+  정적 확인 2026-10-28 — .52 `2628b943d` 의 브랜치 사실을 머지본 기준으로 고쳐 씀): 컴파일러는 값이 타입을 정하는 노드를 `DB_TYPE_VARIABLE` 로
+  두고, `qexec_resolve_domains ()`(query_executor.c:18354-18356, [CBRD-27510] `be683e04c`)가 실행당 1회 main block 전에 해석해 XASL_STATE 에
+  넣는다. 프로그램은 그 뒤 첫 행에서 컴파일돼 해석 경로와 같은 해석을 읽고, 게이트가 못 정했거나 '값 없음'(전 행 NULL)으로 정한 노드는 거절한다
+  (expr_compile.c:2414-2422 머리 주석, :2488). 브랜치 시절에는 `DB_TYPE_VARIABLE` 도메인이라 호스트 변수가 든 투영·필터가 컴파일되지 않다가
+  (D26 이전), 한 행(`EXPR_DOMAIN_DEFER_ROWS`)을 해석 경로에 넘겨 도메인을 받은 뒤 컴파일하고 재실행 때 `qdata_valptr_prog_resolve_domains`·
+  `qexec_clear_regu_var` 의 `original_domain` 복원으로 다시 정했다 — 이 세 심볼은 머지본 `b8199438e` 에 없다(git grep 0건).
+  — 정소희(.50) 2026-10-28
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
@@ -595,9 +859,9 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 - **[해소됨 — 4aeeae07b, .50]** 비교 리프·TORDER·EXTRACT 커널의 타입 드리프트 가드 부재(BIGINT를 `db_get_int`로 읽으면 하위 32비트 비교) —
   가드 추가. 실제 드리프트 재현 형상은 재귀 CTE `count()` 케이스만 확인됨.
 - **[해소됨 — 4aeeae07b, .50]** `REGU_VARIABLE_APPLY_COLLATION` 미확인 — 거절로 폴백. TC `cbrd_27215_collate`.
-- **[미수정 버그]** `px_scan_slot_iterator.cpp` — `qualified_rows++`가 필터 판정(`ev_res != V_TRUE`
-  continue) 앞이라 병렬 heap 스캔의 SET TRACE ON 선택도가 무의미. develop 95b79e7ed에서 :125로
-  잔존 확인(원 메모 :124). 직렬·병렬 LIST는 정상.
+- **[수정됨 — `6663cd894` CBRD-27604, 2026-10-15]** `px_scan_slot_iterator.cpp` — `qualified_rows++`가 필터 판정 앞이던
+  결함(병렬 heap 스캔의 SET TRACE ON 선택도 무의미). develop `2d925cb86` 에서 `continue` 뒤로 옮겨진 것을 확인했다(§2 같은 항목).
+  — 정소희(.50) 2026-10-28
 - **[의심 — 작성자 확인 필요]** `px_scan_result_handler.hpp:97`(원 메모 :96)
   `is_list_id_domain_resolved`: 워커 공유 플래그가 워커 전용 도메인 보정을 가드(cpp:885-888).
   develop 95b79e7ed 잔존 확인.
@@ -608,6 +872,19 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
   `QFILE_TUPLE_DESCRIPTOR`에 f_size 배열이면 해소.
 - memoize가 직렬 기준 캘리브레이션(1000프로브 후 히트율<0.5 영구 자기비활성)이라 병렬에서 조용히
   자기비활성 가능. develop 95b79e7ed 잔존 확인(memoize.cpp:900대).
+- **[미수정 — 결함 후보, 발번 미결]** XASL 캐시 키에 시스템 파라미터 차이를 싣는 것은 `do_prepare_select` 하나다 — `do_prepare_update`/
+  `_delete`/`_insert_internal`/`_merge` 의 SHA1 은 `PT_PRINT_DIFFERENT_SYSTEM_PARAMETERS` 없이 계산되므로, `PRM_FOR_QRY_STRING` 파라미터
+  (`cost_*`·`max_hash_list_scan_size`·`memoize_memory_limit` 등)를 바꾼 세션도 DML 서버측 플랜은 같은 캐시 엔트리(바인드 변형이면 같은 변형 엔트리 — develop `620ceaf6a`)를 쓴다(근거 §2 「xcache 계열」).
+  (.50, `87b25579e`, 2026-09-22; develop `2d925cb86` 재확인 2026-10-28) — 정소희(.50) 2026-10-28
+- **[미수정 버그]** `update_or_drop_histogram_helper ()`(execute_schema.c:4399)의 에러 경로가 `error = dump_histogram (…, error, stdout)` 로
+  **에러를 덮어써** 세이브포인트 롤백 뒤에도 문장이 `Statistics updated successfully` 로 끝난다 — `dump_histogram ()`
+  (optimizer/histogram/histogram_cl.cpp:3905)은 `error != NO_ERROR` 면 메시지만 찍고 `NO_ERROR` 를 돌려준다(:3922-3933). (.50, static + 동적,
+  2026-09-18: 동시 첫 수집의 패자 79/1600 이 아무것도 저장하지 않고 성공 보고 — 요청한 `7 BUCKETS` 대신 상대의 283버킷이 남음.)
+  [CBRD-27369] `0d0809963`(PR#7900)은 그 트리거만 없앴다 — `sm_add_histogram ()` 이 동시 첫 수집의 `ER_BTREE_UNIQUE_FAILED` 를
+  `ER_LC_CLASSNAME_EXIST` 로 번역한다(schema_manager.c:15618-15634). 덮어쓰기 자체는 develop `2d925cb86` 에 그대로다(재확인 2026-10-28):
+  `UPDATE STATISTICS` 가 타는 전 컬럼 경로(`target_columns == NULL`, `quiet=true`)는 :4549-4555 에서 `quiet` 와 무관하게 덮어쓰고, 컬럼 지정
+  경로는 `!quiet` 일 때만 덮어쓴다(:4718-4729). 그 밖의 `sm_add_histogram ()` 실패(락 타임아웃 등)는 지금도 성공으로 보고된다(정적 판독).
+  — 정소희(.50) 2026-10-28
 
 ## 4. 진행중인 작업
 

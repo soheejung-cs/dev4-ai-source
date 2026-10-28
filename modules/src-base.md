@@ -59,7 +59,35 @@
 ### prm_get_integer_value / sysprm_load_and_init (system_parameter.c)
 
 - 시스템 파라미터 추가는 `PRM_ID_*` 추가 + `prm_Def` 엔트리 + `PRM_LAST_ID` 갱신 세트.
+  **`prm_Def[]`(와 `enum param_id`)는 끝에만 추가한다 — PL 서버(SysParam.java)가 ordinal 을 하드코딩** (.50, 4f0f90b62, 2026-09-21; develop
+  `2d925cb86` 재확인): system_parameter.h:93-96 "insert it before PRM_LAST_ID and change PRM_LAST_ID to it". `xsysprm_get_pl_context_parameters ()`
+  (system_parameter.c:8604)가 파라미터를 `prm_Def[]` 인덱스로 보내고 `pl_engine/pl_server/.../SysParam.java` 가 ordinal 8개를 상수로 박아 둔다 —
+  그 위에 넣거나 빼면 ordinal 이 밀려 PL 서버 조회가 빗나가고 SP 컴파일이 전부 중단된다. 배열 뒤 주석과 `static_assert` 8개(:5701-5715, 마지막
+  `PRM_ID_STORED_PROCEDURE_DUMP_ICODE == 353`)가 빌드를 깨뜨려 알려 주며, 고칠 곳은 assert 가 아니라 SysParam.java 다(중간 삭제 실례
+  `5de66400a` CBRD-27324 가 354→353 으로 함께 고침). — 정소희(.50) 2026-10-28
+- **`prm_get_<type>_value()` 는 클라이언트(비 SERVER_MODE)에서 `ALWAYS_INLINE` 배열 인덱스 1회다** (.50, 4f0f90b62, 2026-09-21; develop
+  `2d925cb86` 재확인): system_parameter.h:847-852 선언, :862 `prm_get_integer_value` 본문 `PRM_GET_INT (GET_PRM (prm_id)->value)`
+  (`GET_PRM(id)` = `&prm_Def[(id)]`, :715) — SERVER_MODE 만 `PRM_SERVER_SESSION` 이면 `prm_get_value ()` 를 거치고, Windows 는 inline 이
+  꺼져 있다. 비용 함수가 매번 이렇게 읽는다: `qo_sort_cost` SR_NBUFFERS(query_planner.c:3251), `qo_hjoin_cost` MAX_HASH_LIST_SCAN_SIZE(:4713),
+  `qo_follow_cost` PB_NBUFFERS(:4998), `fa551431b`(CBRD-27126) 이후 비용 단가 `cost_*` 매크로(:95-160, 근거 주석 :90-94). 비용 함수용
+  캐시 계층은 근거 없는 전역 상태. — 정소희(.50) 2026-10-28
+- **병렬 관련 기본값과 CI 빌드 모드**: `parallelism` 기본 **4**(develop `2d925cb86` system_parameter.c:5148), `parallel_scan_page_threshold`
+  256. gha-ci 의 suites(shell/sql/medium)는 **debug 빌드**로 돈다(`.github/workflows/gha-ci.yml`) — debug 의 `page_validation_level` 은 모든
+  `pgbuf_fix` 를 검사해 release 와 실패 양상이 다를 수 있다(src-storage §2). 텍스트 trace 의 `parallel workers: N` 은 query_dump.c
+  (develop :4479·:4502·:4520), JSON 은 `"parallel workers"`(:3784·:3908·:3945) (.52, PR#8034 head `db66b7879`·TC PR#4266, 2026-10-01).
+  — 정소희(.50) 2026-10-28
 - ✅ **리뷰 체크포인트**: 새 `PRM_ID_*`가 `prm_Def`와 `PRM_LAST_ID`까지 함께 갱신됐는가?
+
+### sysprm_print_parameters_for_qry_string — `PRM_FOR_QRY_STRING` 과 XASL 캐시 키 (system_parameter.c:12222)
+
+- **플랜에 영향 주는 클라이언트 파라미터는 `PRM_FOR_QRY_STRING` 이 있어야 XASL 캐시 키에 들어간다** (.50, 87b25579e, 2026-09-21; develop
+  `2d925cb86` 재확인): `sysprm_print_parameters_for_qry_string()`(system_parameter.c:12222, 클라이언트 전용)이 `PRM_PRINT_QRY_STRING`(:984-988 —
+  CS 는 `PRM_IS_DIFFERENT && PRM_IS_FOR_QRY_STRING`, SA 는 FOR_QRY_STRING 전부)인 것만 출력 → `parser_print_tree ()` 가
+  `PT_PRINT_DIFFERENT_SYSTEM_PARAMETERS` 일 때 `?` 뒤에 붙임(parse_tree_cl.c:3119-3124) → `execute_statement.c` SHA1. `PRM_DIFFERENT` 는 모든
+  `prm_set_*_value()` 끝의 `sysprm_update_flag_different()`(:11088 — CS_MODE 에서 FOR_QRY_STRING·FOR_HA_CONTEXT 파라미터만)로 갱신. 루프 상한
+  `MAX_SYSTEM_PARAMS = prm_Def_size`(:5719-5720, 동적). 전례 `max_hash_list_scan_size`(:3567-3569), `fa551431b` 의 `cost_*` 도 이 플래그를 단다.
+  없으면 단가를 바꾼 세션이 옛 플랜을 재사용(재현 `projects/CBRD-27126/repro/cache_repro.sql`). 이 출력 플래그를 켜는 곳은 SELECT 준비
+  (`do_prepare_select`, execute_statement.c:15376) 하나다. — 정소희(.50) 2026-10-28
 
 ### lf_hash_find (lock_free.c) — 락프리 공통 규칙
 
@@ -96,11 +124,45 @@
   정상 동작하고 성능도 동일하다"만 근거로 달려 있으면 불충분하다고 지적하고 디버그 빌드 CTP 결과를
   요구할 것.
 
+### mht_get_hash_number (memory_hash.c) — DB_VALUE 해시의 문자열 처리
+
+> 아래 세 항목의 줄 번호는 `89722cf4e` 기준이다. develop `2d925cb86` 에서 language_support.c·object_primitive.c 는 그대로이고
+> memory_hash.c 만 위쪽에 함수 하나가 늘어 27줄 밀렸다(본문 동일). SERVER·SA·CS 공통 코드.
+
+- **`mht_get_hash_number ()` 는 문자열의 뒤 ASCII 공백(0x20)을 떼고 해시하고, 빈 문자열·공백만 있는 값은 0 을 돌려준다** (.50,
+  `89722cf4e`, 2026-10-27 단위 실측): memory_hash.c:2468-2477 루프(주석 "only the trailing ASCII space is ignored"), :2479-2481
+  `hashcode = 0`(develop :2495-2508). 기본 `ignore_trailing_space=no` 의 VARCHAR 비교는 `'a'`·`'a '` 를 다르게 본다 — `lang_fastcmp_byte ()` 가
+  앞부분이 같으면 길이 차를 돌려주고(language_support.c:5574-5577), 인덱스 키 비교 `mr_cmpval_string ()` 도 같은 기준이다
+  (object_primitive.c:11416 의 static `ti`, :11472 `QSTR_COMPARE`). CHAR 만 비교도 뒤 공백을 무시한다(object_primitive.c:12401-12404).
+  해시 테이블 버킷으로 쓰면 충돌이 늘 뿐 무해하지만(같음은 비교가 다시 판정), **해시 값의 개수로 고유값을 세는 곳(distinct 추정)에 쓰면 뒤
+  공백만 다른 VARCHAR 가 접혀 과소**가 된다. — 정소희(.50) 2026-10-28
+
+### lang_mht2str_byte / mht_2str_pseudo_key — 콜레이션 문자열 해시 (language_support.c:5753, memory_hash.c:183)
+
+- **콜레이션 문자열 해시는 PJW/ELF 계열이라 상위 니블이 늘 0(사실상 28비트)이고, 자릿수가 같은 정형 문자열이 구조적으로 충돌한다** (.50,
+  `89722cf4e`, 2026-10-27 단위 실측): `lang_mht2str_byte ()`(language_support.c:5753) 의 `ADD_TO_HASH`(:3240-3250)가 4비트 이동 + 상위 니블
+  접기, iso88591_bin 은 `mht_2str_pseudo_key ()`(memory_hash.c:183, 같은 hashpjw). `'2015-01-20'` = `'2025-01-10'`, 날짜 문자열 4,096일 →
+  해시 3,809개; 같은 집합을 바이트 FNV 로 해시하면 충돌 0. 해시 테이블엔 성능 문제일 뿐이지만, 표본 해시의 고유 개수로 추정하는 Duj1
+  식에서는 표본 4,096개 안 충돌 4쌍만으로 고유값 100만 열이 677,357 로 내려간다. — 정소희(.50) 2026-10-28
+
+### lang_fastcmp_byte / lang_fastcmp_ko — 이진 콜레이션의 문자열 비교 (language_support.c:5535, :6138)
+
+- **이진 콜레이션의 비교는 공백을 NUL 과 같은 0 가중치로 본다** (.50, `89722cf4e`, 정적 + 2026-10-27 단위 실측): `lang_fastcmp_byte ()`
+  (language_support.c:5535)가 `ASCII_SPACE` 를 `ZERO` 로 바꿔 비교한다(:5547-5549·:5557-5559) — utf8_bin·iso88591_bin 에서 `'a b'` =
+  `'a\0b'`. euckr_bin 의 `lang_fastcmp_ko ()`(:6138)는 ASCII 공백과 EUC 공백 쌍 `0xA1A1` 을 0 단위로 본다(:6155·:6159). binary 콜레이션
+  `lang_fastcmp_binary ()` 는 뒤 NUL 만 무시한다(단위 실측). 그래서 "비교의 같음과 맞는 해시" 를 이진 콜레이션에 만들려면 바이트가 아니라
+  이 0 단위로 섞어야 한다(그렇게 섞은 해시는 반례 탐색에서 utf8_bin VARCHAR 6/18·CHAR 13/9 → 0/0). — 정소희(.50) 2026-10-28
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
 
-- (현재 등록된 예비 이슈 없음)
+- **euckr_bin 의 같음은 뒤 NUL 에서 추이적이지 않다 — `'a'` = `'a\0'`, `'a\0'` = `'a '`, 그런데 `'a'` ≠ `'a '`(ti off VARCHAR)** —
+  **미수정**, 이슈 없음(영향 미조사) (develop `2d925cb86` 재확인 2026-10-28 — 정적: language_support.c 는 `89722cf4e` 이후 변경 없음) (.50,
+  `89722cf4e`, 2026-10-27 단위 실측, 공백·NUL·EUC 공백 19~26개 문자열 전 쌍 탐색): `lang_fastcmp_ko ()` 의 길이가 다른 꼬리 처리
+  (language_support.c:6188 이후) 중 어느 줄이 갈리는지는 정적으로 따라가지 않았다(단위 결과만). 같음이 추이적이지 않으므로 이 콜레이션에서는
+  어떤 해시도 비교와 완전히 맞출 수 없다(뒤 NUL 5쌍이 남는다) — 해시를 비교에 맞추는 작업은 euckr_bin 뒤 NUL 을 예외로 적는다. 정렬·인덱스
+  순서에 미치는 영향은 보지 않았다. — 정소희(.50) 2026-10-28
 
 ## 4. 진행중인 작업
 

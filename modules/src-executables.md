@@ -50,10 +50,35 @@
 ### main (master.c)
 
 - `master.c`는 데이터베이스 서버가 아니라 서버 프로세스들의 관리자.
+- **`auto_restart_server` 는 master 가 기동할 때 한 번, DB 섹션 없이 읽는다** (.51, `959314906`, 2026-10-21~23 · develop `2d925cb86` 재확인): `main` 이
+  `master_util_config_startup ((argc > 1) ? argv[1] : NULL, …)` → `sysprm_load_and_init (db_name, …)`(master_util.c:42-44)로 파라미터를 읽고
+  `auto_Restart_server = prm_get_bool_value (PRM_ID_AUTO_RESTART_SERVER)`(master.c:1521)를 그때 한 번 정한다. master 는 보통 인자 없이 뜨므로 `[common]` 값만 보이고
+  DB 섹션(`[@db]`) 값은 무시된다. 관찰(.51 1회): 되살린 서버가 master 에 등록되기 전에 `cubrid server start` 를 겹쳐 부르면 되살린 서버가 등록하지 못해 −677 이
+  2분쯤 이어졌다. — 정소희(.50) 2026-10-28
 
 ### csql / start_csql (csql.c)
 
 - csql은 자체 미니 프레임워크(session, result display, input handling) — 함수 접두사 `csql_`.
+
+### optimizedb / optimizedb_update_class_statistics (util_sa.c:1534/:1493) — `-n` 과 히스토그램
+
+- **`optimizedb -n <class>` 는 develop `bcd6c5936` 까지 히스토그램을 만들지 않았다 — `dce40879e`(CBRD-27249 PR#8166, 2026-10-19)부터 SQL 단일 클래스 경로와 같은
+  순서다** (.51, 2026-10-14 · develop `2d925cb86` 재확인): 예전 `optimizedb ()` 는 `sm_update_statistics (class_mop, STATS_WITH_SAMPLING)` 만 불렀고 이 함수엔
+  히스토그램 경로가 없었다(히스토그램은 전체 경로 `sm_update_all_statistics` → `update_histogram_for_all_classes` 만 만들었다). 지금은
+  `optimizedb_update_class_statistics ()`(:1493)가 `do_update_stats` 의 단일 클래스 분기를 따라 히스토그램 헬퍼(`update_or_drop_histogram_helper
+  (DO_HISTOGRAM_CREATE)`, 클래스 통계도 자기 스캔으로 갱신)를 먼저 부르고 `ER_OBJ_INVALID_ARGUMENTS` 면 `sm_update_statistics` 로 폴백한다. `--no-histogram` 이면
+  `sm_update_statistics` 만, 인자 없는 전체 실행은 `sm_update_all_statistics (STATS_WITH_SAMPLING, 0, no_histogram, …)`(:1701)에 `--no-histogram-classes` 제외 목록을
+  넘긴다. 전체 경로의 클래스당 이중 수집은 src-storage §3. — 정소희(.50) 2026-10-28
+  - ✅ **리뷰 체크포인트**: `do_update_stats` 의 단일 클래스 분기를 고치면 `optimizedb_update_class_statistics` 도 같이 고친다 — 함수 주석이 둘을 "keep the two in
+    step" 으로 묶어 둔다.
+
+### abort_handler (server.c:226, debug 전용) — SIGABRT 의 전파
+
+- **debug 서버의 SIGABRT 핸들러는 붙은 로컬 클라이언트(CAS 등)에 SIGABRT 를 보낸 뒤 자신도 abort 한다** (.51, `959314906`, 2026-10-21~23 · develop `2d925cb86`
+  재확인): `!NDEBUG` 에서만 `register_abort_signal_handler (SIGABRT)`(:287)로 걸리고(release 는 `register_fatal_signal_handler`), 재기동이 끝난 서버면
+  `logtb_collect_local_clients` 로 모은 pid 마다 `kill (client_pid, SIGABRT)`(:254) 뒤 콜스택을 찍고 `abort ()` 한다. 장애 주입의 기본 동작
+  `fault_injection_action_prefer_abort_to_exit`(숨은 파라미터, 기본 yes — system_parameter.c:4035~)와 겹치면 주입마다 CAS 코어가 `$CUBRID/log/coredump` 에 쌓인다 —
+  주입 테스트는 `no` 로. — 정소희(.50) 2026-10-28
 
 ## 3. 예비 이슈 사항
 

@@ -18,24 +18,24 @@
 <li><a href="cross.html">모듈 경계</a></li>
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
-<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">23</span><span class="iss">⚠29</span></span></a></li>
-<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠16</span></span></a></li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠36</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠18</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">24</span><span class="iss">⚠21</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">5</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-executables.html" class="cur"><span>src/executables</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">28</span><span class="iss">⚠32</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">9</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">8</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
+<li><a href="src-executables.html" class="cur"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-sp.html"><span>src/sp</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
@@ -79,10 +79,22 @@
 <h4>main (master.c)</h4>
 <ul>
 <li><code>master.c</code>는 데이터베이스 서버가 아니라 서버 프로세스들의 관리자.</li>
+<li><strong><code>auto_restart_server</code> 는 master 가 기동할 때 한 번, DB 섹션 없이 읽는다</strong> (.51, <code>959314906</code>, 2026-10-21~23 · develop <code>2d925cb86</code> 재확인): <code>main</code> 이 <code>master_util_config_startup ((argc &gt; 1) ? argv[1] : NULL, …)</code> → <code>sysprm_load_and_init (db_name, …)</code>(master_util.c:42-44)로 파라미터를 읽고 <code>auto_Restart_server = prm_get_bool_value (PRM_ID_AUTO_RESTART_SERVER)</code>(master.c:1521)를 그때 한 번 정한다. master 는 보통 인자 없이 뜨므로 <code>[common]</code> 값만 보이고 DB 섹션(<code>[@db]</code>) 값은 무시된다. 관찰(.51 1회): 되살린 서버가 master 에 등록되기 전에 <code>cubrid server start</code> 를 겹쳐 부르면 되살린 서버가 등록하지 못해 −677 이 2분쯤 이어졌다. — 정소희(.50) 2026-10-28</li>
 </ul>
 <h4>csql / start_csql (csql.c)</h4>
 <ul>
 <li>csql은 자체 미니 프레임워크(session, result display, input handling) — 함수 접두사 <code>csql_</code>.</li>
+</ul>
+<h4>optimizedb / optimizedb_update_class_statistics (util_sa.c:1534/:1493) — <code>-n</code> 과 히스토그램</h4>
+<ul>
+<li><strong><code>optimizedb -n &lt;class&gt;</code> 는 develop <code>bcd6c5936</code> 까지 히스토그램을 만들지 않았다 — <code>dce40879e</code>(CBRD-27249 PR#8166, 2026-10-19)부터 SQL 단일 클래스 경로와 같은 순서다</strong> (.51, 2026-10-14 · develop <code>2d925cb86</code> 재확인): 예전 <code>optimizedb ()</code> 는 <code>sm_update_statistics (class_mop, STATS_WITH_SAMPLING)</code> 만 불렀고 이 함수엔 히스토그램 경로가 없었다(히스토그램은 전체 경로 <code>sm_update_all_statistics</code> → <code>update_histogram_for_all_classes</code> 만 만들었다). 지금은 <code>optimizedb_update_class_statistics ()</code>(:1493)가 <code>do_update_stats</code> 의 단일 클래스 분기를 따라 히스토그램 헬퍼(<code>update_or_drop_histogram_helper (DO_HISTOGRAM_CREATE)</code>, 클래스 통계도 자기 스캔으로 갱신)를 먼저 부르고 <code>ER_OBJ_INVALID_ARGUMENTS</code> 면 <code>sm_update_statistics</code> 로 폴백한다. <code>--no-histogram</code> 이면 <code>sm_update_statistics</code> 만, 인자 없는 전체 실행은 <code>sm_update_all_statistics (STATS_WITH_SAMPLING, 0, no_histogram, …)</code>(:1701)에 <code>--no-histogram-classes</code> 제외 목록을 넘긴다. 전체 경로의 클래스당 이중 수집은 src-storage §3. — 정소희(.50) 2026-10-28</li>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span><code>do_update_stats</code> 의 단일 클래스 분기를 고치면 <code>optimizedb_update_class_statistics</code> 도 같이 고친다 — 함수 주석이 둘을 "keep the two in step" 으로 묶어 둔다.</li>
+</ul>
+</ul>
+<h4>abort_handler (server.c:226, debug 전용) — SIGABRT 의 전파</h4>
+<ul>
+<li><strong>debug 서버의 SIGABRT 핸들러는 붙은 로컬 클라이언트(CAS 등)에 SIGABRT 를 보낸 뒤 자신도 abort 한다</strong> (.51, <code>959314906</code>, 2026-10-21~23 · develop <code>2d925cb86</code> 재확인): <code>!NDEBUG</code> 에서만 <code>register_abort_signal_handler (SIGABRT)</code>(:287)로 걸리고(release 는 <code>register_fatal_signal_handler</code>), 재기동이 끝난 서버면 <code>logtb_collect_local_clients</code> 로 모은 pid 마다 <code>kill (client_pid, SIGABRT)</code>(:254) 뒤 콜스택을 찍고 <code>abort ()</code> 한다. 장애 주입의 기본 동작 <code>fault_injection_action_prefer_abort_to_exit</code>(숨은 파라미터, 기본 yes — system_parameter.c:4035~)와 겹치면 주입마다 CAS 코어가 <code>$CUBRID/log/coredump</code> 에 쌓인다 — 주입 테스트는 <code>no</code> 로. — 정소희(.50) 2026-10-28</li>
 </ul>
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>

@@ -86,6 +86,13 @@ bison/flex 문법 기반 대량 적재기. `load_grammar.yy` + `load_lexer.l`(�
 - ✅ **리뷰 체크포인트**: loaddb 적재 후 통계 경로를 바꾸면 (1) 동시 DDL/DML 테스트(_35_cherry with_dml/with_ddl)의
   답지가 락 타이밍에 의존함을 인지하고 재기준 판단은 소유자에게, (2) 통계 실패가 적재 exit code 를 오염시키지 않는지 확인.
 
+### to_db_short / to_db_int — 정수 토큰의 SMALLINT·INTEGER 변환 (load_db_value_converter.cpp:225/265)
+
+- **loaddb 의 `to_db_short`·`to_db_int` 에는 NaN 이 오지 않는다** (.50, `eb88ab4ea`, 2026-10-23 정적; develop `2d925cb86` 재확인): 두 setter 는
+  `LDR_INT`(load_db_value_converter.cpp:136·137) — 토큰 `INT_LIT` = `[\+\-]?[0-9]+`(load_lexer.l:239-243) 에만 붙는다. 자릿수가 긴 숫자 문자열만
+  `strtod` → `OR_CHECK_SHORT_OVERFLOW`/`OR_CHECK_INT_OVERFLOW` 경로를 탄다(:234-239, :286-288). 그래서 서버 CAST 쪽의 NaN 구멍(src-object §2
+  「tp_value_convert_number」, `e07b3b09a` 에서 수정)은 loaddb 정수 setter 와 무관하다. — 정소희(.50) 2026-10-28
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.

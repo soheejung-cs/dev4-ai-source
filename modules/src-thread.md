@@ -65,6 +65,15 @@
 - ✅ **리뷰 체크포인트**: 병렬 질의 크래시 조사 시 `cub_server` 이름의 코어만 찾지 말고
   `$CUBRID/core.parallel-query.*`를 함께 확인할 것.
 
+### entry_manager::retire_context / recycle_context (thread_entry_task.cpp:62/:90) — 대기 시간 override 리셋
+
+- **스레드 엔트리의 `wait_msecs_override` 는 생성·회수·재활용 때 `LK_WAIT_NOT_OVERRIDDEN`(−3)으로 돌아가고, 워커는 부모 스레드의 override 를 물려받지 않는다**
+  (.52, PR#8034 head `db66b7879` 2026-10-01 → 머지 `9699a883c` · develop `2d925cb86` 재확인): 생성자(thread_entry.cpp:113), `retire_context`(thread_entry_task.cpp:75),
+  `recycle_context`(:97-98 — 머지본은 여기서 `assert (context.wait_msecs_override == LK_WAIT_NOT_OVERRIDDEN)` 으로 "task 는 자기가 세운 override 를 끝나기 전에
+  복원한다" 를 강제한다). override 는 엔트리별 필드라 워커는 TDES 값을 읽는다. "override 를 세운 채 워커를 띄우지 않는다" 는 규약은 `logtb_set_thread_wait_msecs`
+  머리 주석(log_tran_table.c:2613~)뿐이고 코드 강제는 없다. 대기 시간 조회 규칙은 src-transaction §2 「대기 시간 조회」. — 정소희(.50) 2026-10-28
+  - ✅ **리뷰 체크포인트**: `THREAD_ENTRY` 에 대기·락 관련 상태를 새로 둘 때는 retire/recycle 리셋과 "워커에 물려줄지" 를 함께 정한다.
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
