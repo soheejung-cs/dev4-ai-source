@@ -1,7 +1,7 @@
 # 정소희 — CBRD-27361 후속: INSERT … SELECT 집계 … ON DUPLICATE KEY UPDATE 의 숨은 컬럼 (환류 대기)
 
 작성: 정소희 (.51) · 기준 develop `1684945ed`(#8196 머지 `309265e6d` 포함), 비교 `ad7a255c5`(#8196 직전) · 2026-11-02
-상태: 수정 PR 미발행 — 로컬 브랜치 `odku-bv-fix` `66652e424`. 제보 개발 3팀(CBRD-27336 shell TC `cbrd_27336_forms` 칸 13).
+상태: 수정 **CBRD-27870 / PR #8364** `ac9d895db`(미머지) — 배치 제외·병렬 끔·스캔 닫기 전 값 복제(`qexec_own_scan_values ()`), TC cubrid-testcases#3985. 제보 개발 3팀(CBRD-27336 shell TC `cbrd_27336_forms` 칸 13).
 재현: `INSERT INTO t (id) SELECT MAX(s.g) + 1 FROM s s WHERE s.g = 2 ON DUPLICATE KEY UPDATE c = s.c` — 중복 키 행의 c 가 `ad7a255c5` 'g2', develop NULL.
 
 - **[src-parser §2] ODKU 가 읽는 소스 컬럼은 SELECT 목록의 숨은 컬럼이 된다** — `pt_to_insert_xasl ()` 이 aptr XASL 을 만들기 전에 `pt_append_assignment_references ()` 로 붙인다
