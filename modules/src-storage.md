@@ -111,6 +111,7 @@
 - buf_hash_table(측정 시점 L554/L5581): 버킷 56B×2^20=56MB인데 히트 경로는 8B(hash_next)만 읽음 —
   mutex는 미스/insert 전용. SoA 분리 시 8MB. 해시가 pageid 순서를 보존하므로 분리 후 프리페치 가능.
 - trylock→lock 패턴(측정 시점 L7513): 형식상 중복이나 trylock 대체로 성공 — 접어도 무익(비검토 대상 판정).
+- **인덱스 중첩 루프 조인의 페이지 고정 비용은 버퍼 해시 체인의 BCB 미스다** (.51, PR#8196 헤드 `46fd2be49` release 프로파일 — 측정 조건은 src-query §2 「페이지 배치 실행(expr_batch) 프로파일」, 2026-10-31): Q3(직렬 32.7초)에서 `pgbuf_fix_release ()` 15.5%, 그 샘플의 약 60% 가 해시 체인 걷기(`bufptr = hash_anchor->hash_next`, `VPID_EQ (&bufptr->vpid, vpid)`, `iopage.prv.volid` 검사)이고 원자 CAS 는 6.5% 다. 조인 질의 축(prof_bucket): Q3 페이지 버퍼 28%·B-tree 29%·힙 28%·식 11%, Q9 32·25·23·12, JOB 16b 24·32·21·12, 17e 29·28·24·10 — 키 비교·읽기(`btree_compare_search_key`·`mr_index_readval_int`·`mr_cmpval_int`)는 합 4~5%. 바깥 행마다 루트부터 다시 내려가는 구조가 비용의 중심이다. — 정소희(.50) 2026-11-03
 
 ### pgbuf_hash_func_mirror (page_buffer.c:1500)
 
@@ -151,6 +152,8 @@
   index scan needs it"이라 하나 git grep상 btree.c 밖 호출자 없음. static이면 끝.
   `btree_reset_common_prefix_page_info`(btree.c:1769)도 non-static(헤더 선언 없음)인데 호출자는
   btree.c 내부뿐 — 같은 문제.
+- start_col 미초기화(위 첫 항목)는 develop `1802aa581` 에도 그대로다(btree.c:5308 선언, 2026-11-03 재확인). 수정 PR#8353(CBRD-27862, .51)이 0 으로 초기화한다 — 미머지. — 정소희(.50) 2026-11-03
+- **인덱스 스캔의 검색 키 경계(DOMAIN_KEY_BOUND, CBRD-27583)는 키가 있는 경계마다 항상 만들어진다** (.51, CBRD-27361 헤드 `0efc06bf1`, 2026-11-01): `xasl_generation.c` 의 경계 결정(14580~)이 같은 도메인 쌍(INT 열 = INT 값)에도 `DOMAIN_COMPARE_DIRECT`(cmp = 그 형의 pr_type, 변환 없음)를 담는다. 따라서 `btree_search_leaf_page`·`btree_search_nonleaf_page` 의 `bound` 는 질의의 인덱스 스캔에서 NULL 이 아니고, NULL 은 삽입·삭제·고유 검사 같은 자기 도메인 키 탐색이다. — 정소희(.50) 2026-11-03
 
 ### btree_compare_key (btree.c:20048)
 
@@ -186,6 +189,22 @@
   `btree_check_foreign_key ()` 가 `xbtree_find_unique (…, S_SELECT_WITH_LOCK, …)` 로 부모를 찾고(btree.c:26255), 바로 아래 `/* TODO: For read committed... Do we need
   to keep the lock? */`(:26276) 가 남아 있다. 그래서 부모의 키가 아닌 컬럼 UPDATE(행 X)와 자식 INSERT(부모 행 S)가 서로 막는다. **미수정** — CBRD-27463 PR#8198
   (부모 행 락 제거) 열림 → §3. — 정소희(.50) 2026-10-28
+
+### btree 레코드의 키 위치 — btree_read_record_without_decompression (btree.c)
+
+> 기준 (.51, CBRD-27361 헤드 `0efc06bf1` + CBRD-27862 로컬 커밋 `83db0659a`, 2026-11-01).
+
+- **leaf 레코드의 키 위치**: 첫 OID 8 → (고유 인덱스이고 첫 OID slotid 칸에 `BTREE_LEAF_RECORD_CLASS_OID` 면 클래스 OID 8) → (첫 OID volid 칸에 `BTREE_OID_HAS_MVCC_INSID` 면 8) → (`BTREE_OID_HAS_MVCC_DELID` 면 8) → 키. `BTREE_LEAF_RECORD_OVERFLOW_KEY` 면 키 자리에 overflow VPID. fence 레코드도 같은 배치로 읽힌다. 레코드 플래그는 첫 OID 의 slotid 칸, MVCC 플래그는 volid 칸(둘 다 `OR_GET_SHORT`). — 정소희(.50) 2026-11-03
+- **non-leaf 레코드의 키 위치**: 고정부(child pageid 4, volid 2, key_len 2 = `NON_LEAF_RECORD_SIZE` 8, 빅엔디언) 바로 뒤. key_len 음수면 overflow 키. non-leaf 키의 도메인은 `btid->nonleaf_key_type`(`btree_generate_prefix_domain` — BIT 만 VARBIT 로 바뀌고 나머지는 key_type 그대로). — 정소희(.50) 2026-11-03
+- 정수 키 이미지(원시 바이트)는 src-object §2 「mr_data_readval_int / mr_index_readval_int」.
+
+### btree_locate_key — 비용 구성 (JOB 113 직렬)
+
+- **`btree_locate_key` 28.5% = leaf 탐색 10.8 + non-leaf 탐색 8.4 + 자식 고정 4.0 + 루트 고정 1.8 + unfix 1.8 + 노드 헤더 1.1** (.51, CBRD-27361 헤드 `0efc06bf1`, JOB 113 직렬, VTune sw hotspots, CPU 192s, 2026-11-01). 레코드 읽기의 `or_init` 자기 시간(3.8%)은 or_init 자체(포인터 대입뿐, ALWAYS_INLINE)가 아니라 그 직후 레코드 첫 접근의 캐시 미스가 인라인 구간에 잡힌 것이다(힙 쪽 같은 현상은 src-base §2 「or_mvcc_get_repid_and_flags」). — 정소희(.50) 2026-11-03
+
+### btree 통계의 접두 distinct(pkeys) — btree_get_stats_duj1_estimate / btree_get_stats_prefix_value_hash (btree.c, PR#8237 머지본)
+
+- **다중 컬럼 인덱스의 접두 distinct 는 레벨마다 예산 안에서 skip scan 으로 센다 — 다 세면 그 값(정확), 예산을 넘기면 키 저수지 표본의 Duj1 추정과 센 값 중 큰 것, 예산 상한에 걸려 세지 못한 레벨은 Duj1 이다** (.50, PR#8237 head `3a53a044b` 정적 2026-10-27 → 머지본 develop `1802aa581` 재확인 2026-11-03, btree.c:7724-7770): 마지막 레벨(키 전체)은 세지도 추정하지도 않는다(저수지가 고유한 B-tree 키라 Duj1 이 키 수로 퇴화). 단일 컬럼 인덱스는 이 단계를 건너뛴다. 저수지 4,096칸(`BTREE_STATS_DUJ1_SAMPLE`, :320) 위에서 `D = n·d / (n − f1 + f1·n/N)`(`btree_get_stats_duj1_estimate ()`, CBRD-26903), 결과는 `MIN (추정, total_keys)` 로 잘린다(:7686) — 그래서 `keys >= pkeys` assert 는 안전하다. 원소 해시는 `mht_valhash ()` 대신 64비트 FNV-1a `btree_get_stats_prefix_value_hash ()`(:7461) — 문자열은 콜레이션 비교 단위로 섞고(`btree_get_stats_hash_string ()` :7370), NULL 은 `~0ULL` 표지(:6828). 리뷰 지적 R1(VARCHAR 뒤 공백)·R2(float NUMERIC 음수 scale)·R3(문자열 PJW 충돌)을 다룬 커밋은 `10c6793c0`("Hash strings by their collation units and fix the negative scale of a float NUMERIC")이고 PR#8237 은 `0604b690b` 로 머지됐다. — 정소희(.50) 2026-11-03
 
 ### heap_scancache_start_internal (heap_file.c:6359)
 

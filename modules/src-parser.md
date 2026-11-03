@@ -108,6 +108,10 @@ SQL 텍스트 → `csql_lexer.l` → `csql_grammar.y`(646KB bison) → PT_NODE �
   들어가 head_list NULL·a_eval_list NULL. `e7b1605f5`(CBRD-27503 PR#8141) 는 분석 노드를 재작성에서 빼고(위 항목) a_eval_list NULL 을 내부
   오류로 막는다(xasl_generation.c:17280) — 플래그 캐시 자체는 그대로다. — 정소희(.50) 2026-10-28
 
+### pt_to_insert_xasl / pt_append_assignment_references — ODKU 가 읽는 소스 컬럼 (xasl_generation.c)
+
+- **ODKU 가 읽는 소스 컬럼은 SELECT 목록의 숨은 컬럼이 된다** (.51, develop `1684945ed`, 2026-11-02): `pt_to_insert_xasl ()` 이 aptr XASL 을 만들기 전에 `pt_append_assignment_references ()` 로 붙인다(trace rewritten query `select max(s.g)+1, s.c from … where s.g=?`). 사용자가 쓰면 "not single valued" 로 거절되는 "집계 옆 비집계 컬럼" 이 여기서만 생긴다. 실행기가 그 값을 어디서 읽는지는 src-query §2 「qexec_execute_mainblock」, 채우지 않는 경로는 src-query §3(CBRD-27870). — 정소희(.50) 2026-11-03
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.

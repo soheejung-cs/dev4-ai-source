@@ -18,14 +18,14 @@
 <li><a href="cross.html">모듈 경계</a></li>
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
-<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠36</span></span></a></li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">33</span><span class="iss">⚠36</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠18</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">28</span><span class="iss">⚠32</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">9</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html" class="cur"><span>src/compat</span><span class="bd"><span class="cnt">8</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-compat.html" class="cur"><span>src/compat</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
@@ -102,6 +102,14 @@
 <h4>show trace 의 <code>Query Plan:</code> 블록 — plan_trace (query_planner.c, execute_statement.c)</h4>
 <ul>
 <li><strong><code>show trace</code> 의 <code>Query Plan:</code> 블록은 그 세션 파서가 컴파일/재플랜하며 <code>plan_trace</code> 를 남긴 실행에만 나타난다 — 첫 peek 재플랜과 한 줄 형태의 kept-tree 재플랜에서 보이고, 캐시 히트 실행에서는 없다</strong> (.52, <code>c76ac823d</code>, 2026-09-22; develop <code>2d925cb86</code> 정적 재확인): 플랜 생성 때 <code>qo_top_plan_print_json/text ()</code> 가 <code>parser-&gt;plan_trace</code> 에 쌓고(query_planner.c:15848·16201) <code>do_send_plan_trace_to_session ()</code> (execute_statement.c:21414)이 세션 trace 로 보낸다. 재플랜은 마커 컴파일이 쌓은 plan_trace 를 버리고 실제로 도는 플랜만 남긴다 (<code>do_replan_statement_internal ()</code> db_vdb.c:4133-4159). TC 에서 "재플랜이 일어났나" 의 판정 신호로 쓸 수 있다. 한 줄 형태의 첫 <code>show trace</code> 가 <code>TABLE SCAN (dual)</code>(<code>trace_stats()</code> 자신의 플랜)을 보이는 것은 표기 잡음. — 정소희(.50) 2026-10-28</li>
+</ul>
+<h4>values_list_to_values_array — <code>EXECUTE … USING</code> 의 세션 변수 (db_vdb.c)</h4>
+<ul>
+<li><strong><code>EXECUTE … USING @v</code> 의 세션 변수는 EXECUTE 때 값으로 풀려 bind 값이 된다 — 첫 EXECUTE 피킹이 상수 USING 과 똑같이 걸린다</strong> (.50, develop <code>604ab8b22</code> release CS 실측, 2026-10-30): <code>values_list_to_values_array ()</code>(db_vdb.c, 2014년부터 같음)가 PT_EVALUATE_VARIABLE 원소를 <code>db_get_variable ()</code> 로 꺼내 값 배열에 복제하고, <code>do_set_user_host_variables ()</code> 가 <code>db_push_values ()</code> 로 넣는다. 실측(10만 행, 질의마다 텍스트를 select 식으로 갈랐다): 값 0 은 TABLE fetch 938, 값 99990 은 PREPARE 플랜이 TABLE 이었다가 첫 EXECUTE 재플랜으로 INDEX fetch 12. CBRD-27144 원래 본문의 "USING 의 세션 변수는 폴백" 은 맞지 않았다. 질의 본문에 쓴 <code>@v</code> 는 이 경로를 타지 않고 기본 선택도다(src-optimizer §2 「세션 변수 술어」). — 정소희(.50) 2026-11-03</li>
+</ul>
+<h4>세션 변수 값의 타입 — DATE·DATETIME 은 문자열로 보관된다</h4>
+<ul>
+<li><strong>세션 변수는 DATE·DATETIME 값을 문자열로 보관한다</strong> (.50, develop <code>582fa3941</code> 실측, 2026-10-30): <code>set @d = date'2022-09-20'</code> 뒤 <code>typeof(@d)</code> 는 <code>character varying (1073741823)</code> 이다. 그래서 날짜 열 술어는 타입 검사가 <code>cast(@d as date)</code> 로 감싸고, 옵티마이저에는 맨 세션 변수 읽기가 아니라 cast 식으로 도착한다. 문자열 값과 INT 열(<code>a = @v</code>, @v = '1')은 cast 없이 맨 읽기로 남고, 히스토그램은 키 종류 불일치로 기본값에 남는다(histogram_cl.cpp:1207). 문자열로 바뀌는 지점(대입 경로의 어느 함수)은 <strong>미확인</strong>. — 정소희(.50) 2026-11-03</li>
 </ul>
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>

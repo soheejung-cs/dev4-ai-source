@@ -136,6 +136,7 @@
   (object_primitive.c:11416 의 static `ti`, :11472 `QSTR_COMPARE`). CHAR 만 비교도 뒤 공백을 무시한다(object_primitive.c:12401-12404).
   해시 테이블 버킷으로 쓰면 충돌이 늘 뿐 무해하지만(같음은 비교가 다시 판정), **해시 값의 개수로 고유값을 세는 곳(distinct 추정)에 쓰면 뒤
   공백만 다른 VARCHAR 가 접혀 과소**가 된다. — 정소희(.50) 2026-10-28
+- **`mht_get_hash_number ()` 의 DOUBLE(·MONETARY) 해시는 32비트 반쪽마다 하위 4비트를 버리고(`& 0xFFFFFFF0`) FLOAT 도 같은 마스크다 — 1 ulp 차이는 대개 같은 해시지만 16-ulp 묶음 경계를 넘으면 갈린다; -0.0 과 +0.0 은 비트가 달라 다른 해시** (.52, develop `d6ca98121`·PR#8213 head memory_hash.c ~2400-2416, 2026-10-28): CONNECT BY 사이클 해시(`qexec_connect_by_hash_column`)는 0 을 먼저 접는다(query_executor.c, PR#8213 head 20571 — #8213 은 `52193efa9` 로 머지). 해시 키에 DOUBLE 을 쓰는 곳은 이 두 가지를 같이 본다. — 정소희(.50) 2026-11-03
 
 ### lang_mht2str_byte / mht_2str_pseudo_key — 콜레이션 문자열 해시 (language_support.c:5753, memory_hash.c:183)
 
@@ -152,6 +153,10 @@
   `'a\0b'`. euckr_bin 의 `lang_fastcmp_ko ()`(:6138)는 ASCII 공백과 EUC 공백 쌍 `0xA1A1` 을 0 단위로 본다(:6155·:6159). binary 콜레이션
   `lang_fastcmp_binary ()` 는 뒤 NUL 만 무시한다(단위 실측). 그래서 "비교의 같음과 맞는 해시" 를 이진 콜레이션에 만들려면 바이트가 아니라
   이 0 단위로 섞어야 한다(그렇게 섞은 해시는 반례 탐색에서 utf8_bin VARCHAR 6/18·CHAR 13/9 → 0/0). — 정소희(.50) 2026-10-28
+
+### or_mvcc_get_repid_and_flags / or_mvcc_get_header — 힙 레코드 첫 접근의 DRAM 미스 (object_representation.c)
+
+- **힙 스캔의 레코드 첫 접근은 `or_mvcc_get_repid_and_flags ()` 의 첫 load 에서 DRAM 미스로 드러난다** (.51, PR#8196 헤드 `46fd2be49` release 프로파일 — 측정 조건은 src-query §2 「페이지 배치 실행(expr_batch) 프로파일」, 2026-10-31): F01(`count(*), sum(l_extendedprice) … where l_quantity < 24`, 직렬 6.0초)에서 자기 시간 20.0%, 그 함수 샘플의 98.3% 가 `mov (%rdx),%eax`(레코드 첫 4바이트) 한 명령이다. 함수 본체는 load 하나라 명령 비용이 아니라 대기다. 같은 질의의 `or_mvcc_get_header ()` 7.0%(레코드마다 `or_init` + 다른 번역 단위 함수 chn·insid·delid·prev_lsa 호출). 배치(`heap_page_collect_visible ()`)와 행 경로 둘 다 레코드마다 이 파서를 부른다. 하드웨어 프리페처는 4KB 경계를 넘지 않아 16KB 페이지 안에서도 네 번 새로 시작한다(일반 사실). 이 측정 뒤 PR#8196 은 배치가 페이지의 첫 묶음을 모을 때(`*slot == 0`) 페이지 전체를 64바이트 줄마다 prefetch 한다 — `heap_page_prefetch ()`(develop `1802aa581` heap_file.c:8203, 호출 :8335, 2026-11-03 확인; .51 실측 LLC 미스 36.0M → 6.8M). 행 경로 prefetch·배치 전용 얕은 헤더 파서는 미측정. — 정소희(.50) 2026-11-03
 
 ## 3. 예비 이슈 사항
 

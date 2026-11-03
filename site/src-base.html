@@ -18,14 +18,14 @@
 <li><a href="cross.html">모듈 경계</a></li>
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
-<li><a href="src-base.html" class="cur"><span>src/base</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠36</span></span></a></li>
+<li><a href="src-base.html" class="cur"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">33</span><span class="iss">⚠36</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠18</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">28</span><span class="iss">⚠32</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">9</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">8</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
@@ -117,6 +117,7 @@
 <blockquote>memory_hash.c 만 위쪽에 함수 하나가 늘어 27줄 밀렸다(본문 동일). SERVER·SA·CS 공통 코드.</blockquote>
 <ul>
 <li><strong><code>mht_get_hash_number ()</code> 는 문자열의 뒤 ASCII 공백(0x20)을 떼고 해시하고, 빈 문자열·공백만 있는 값은 0 을 돌려준다</strong> (.50, <code>89722cf4e</code>, 2026-10-27 단위 실측): memory_hash.c:2468-2477 루프(주석 "only the trailing ASCII space is ignored"), :2479-2481 <code>hashcode = 0</code>(develop :2495-2508). 기본 <code>ignore_trailing_space=no</code> 의 VARCHAR 비교는 <code>'a'</code>·<code>'a '</code> 를 다르게 본다 — <code>lang_fastcmp_byte ()</code> 가 앞부분이 같으면 길이 차를 돌려주고(language_support.c:5574-5577), 인덱스 키 비교 <code>mr_cmpval_string ()</code> 도 같은 기준이다 (object_primitive.c:11416 의 static <code>ti</code>, :11472 <code>QSTR_COMPARE</code>). CHAR 만 비교도 뒤 공백을 무시한다(object_primitive.c:12401-12404). 해시 테이블 버킷으로 쓰면 충돌이 늘 뿐 무해하지만(같음은 비교가 다시 판정), <strong>해시 값의 개수로 고유값을 세는 곳(distinct 추정)에 쓰면 뒤 공백만 다른 VARCHAR 가 접혀 과소</strong>가 된다. — 정소희(.50) 2026-10-28</li>
+<li><strong><code>mht_get_hash_number ()</code> 의 DOUBLE(·MONETARY) 해시는 32비트 반쪽마다 하위 4비트를 버리고(<code>&amp; 0xFFFFFFF0</code>) FLOAT 도 같은 마스크다 — 1 ulp 차이는 대개 같은 해시지만 16-ulp 묶음 경계를 넘으면 갈린다; -0.0 과 +0.0 은 비트가 달라 다른 해시</strong> (.52, develop <code>d6ca98121</code>·PR#8213 head memory_hash.c ~2400-2416, 2026-10-28): CONNECT BY 사이클 해시(<code>qexec_connect_by_hash_column</code>)는 0 을 먼저 접는다(query_executor.c, PR#8213 head 20571 — #8213 은 <code>52193efa9</code> 로 머지). 해시 키에 DOUBLE 을 쓰는 곳은 이 두 가지를 같이 본다. — 정소희(.50) 2026-11-03</li>
 </ul>
 <h4>lang_mht2str_byte / mht_2str_pseudo_key — 콜레이션 문자열 해시 (language_support.c:5753, memory_hash.c:183)</h4>
 <ul>
@@ -125,6 +126,10 @@
 <h4>lang_fastcmp_byte / lang_fastcmp_ko — 이진 콜레이션의 문자열 비교 (language_support.c:5535, :6138)</h4>
 <ul>
 <li><strong>이진 콜레이션의 비교는 공백을 NUL 과 같은 0 가중치로 본다</strong> (.50, <code>89722cf4e</code>, 정적 + 2026-10-27 단위 실측): <code>lang_fastcmp_byte ()</code> (language_support.c:5535)가 <code>ASCII_SPACE</code> 를 <code>ZERO</code> 로 바꿔 비교한다(:5547-5549·:5557-5559) — utf8_bin·iso88591_bin 에서 <code>'a b'</code> = <code>'a\0b'</code>. euckr_bin 의 <code>lang_fastcmp_ko ()</code>(:6138)는 ASCII 공백과 EUC 공백 쌍 <code>0xA1A1</code> 을 0 단위로 본다(:6155·:6159). binary 콜레이션 <code>lang_fastcmp_binary ()</code> 는 뒤 NUL 만 무시한다(단위 실측). 그래서 "비교의 같음과 맞는 해시" 를 이진 콜레이션에 만들려면 바이트가 아니라 이 0 단위로 섞어야 한다(그렇게 섞은 해시는 반례 탐색에서 utf8_bin VARCHAR 6/18·CHAR 13/9 → 0/0). — 정소희(.50) 2026-10-28</li>
+</ul>
+<h4>or_mvcc_get_repid_and_flags / or_mvcc_get_header — 힙 레코드 첫 접근의 DRAM 미스 (object_representation.c)</h4>
+<ul>
+<li><strong>힙 스캔의 레코드 첫 접근은 <code>or_mvcc_get_repid_and_flags ()</code> 의 첫 load 에서 DRAM 미스로 드러난다</strong> (.51, PR#8196 헤드 <code>46fd2be49</code> release 프로파일 — 측정 조건은 src-query §2 「페이지 배치 실행(expr_batch) 프로파일」, 2026-10-31): F01(<code>count(*), sum(l_extendedprice) … where l_quantity &lt; 24</code>, 직렬 6.0초)에서 자기 시간 20.0%, 그 함수 샘플의 98.3% 가 <code>mov (%rdx),%eax</code>(레코드 첫 4바이트) 한 명령이다. 함수 본체는 load 하나라 명령 비용이 아니라 대기다. 같은 질의의 <code>or_mvcc_get_header ()</code> 7.0%(레코드마다 <code>or_init</code> + 다른 번역 단위 함수 chn·insid·delid·prev_lsa 호출). 배치(<code>heap_page_collect_visible ()</code>)와 행 경로 둘 다 레코드마다 이 파서를 부른다. 하드웨어 프리페처는 4KB 경계를 넘지 않아 16KB 페이지 안에서도 네 번 새로 시작한다(일반 사실). 이 측정 뒤 PR#8196 은 배치가 페이지의 첫 묶음을 모을 때(<code>*slot == 0</code>) 페이지 전체를 64바이트 줄마다 prefetch 한다 — <code>heap_page_prefetch ()</code>(develop <code>1802aa581</code> heap_file.c:8203, 호출 :8335, 2026-11-03 확인; .51 실측 LLC 미스 36.0M → 6.8M). 행 경로 prefetch·배치 전용 얕은 헤더 파서는 미측정. — 정소희(.50) 2026-11-03</li>
 </ul>
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>

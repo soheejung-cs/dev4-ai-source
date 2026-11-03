@@ -18,14 +18,14 @@
 <li><a href="cross.html">모듈 경계</a></li>
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
-<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠36</span></span></a></li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">33</span><span class="iss">⚠36</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠18</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html" class="cur"><span>src/optimizer</span><span class="bd"><span class="cnt">28</span><span class="iss">⚠32</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">9</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">8</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-optimizer.html" class="cur"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/optimizer</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 32건</p>
+<h1>src/optimizer</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 33건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>비용 기반 쿼리 플래닝, 클라이언트 측(<code>#if !defined(SERVER_MODE)</code>). <code>query_graph.c</code>(노드=테이블, 엣지=조인, 서버 통계 로드), <code>query_planner.c</code>(QO_ENV→QO_PLAN, 조인 순서 DP·비용 함수·선택도), <code>plan_generation.c</code>(QO_PLAN→XASL 술어 변환), <code>query_bitset.c</code>, <code>histogram/</code>(HST2 히스토그램 리더·선택도), <code>rewriter/</code>(최적화 전 쿼리 재작성). 파이프라인 위치: parser(PT_NODE) → optimizer(QO_PLAN) → parser/xasl_generation.c(XASL_NODE).</p>
@@ -176,6 +176,13 @@
 <p><strong>IN 리스트 선택도 — 원소별 MCV 프로브가 없다</strong> — IN 리스트 선택도는 원소 개수 × 등호 선택도로만 계산하고(<code>list_card = pt_length_of_list(...)</code> develop :11486/:11490, 서브쿼리는 XASL cardinality :11497, 실패 시 legacy 1000), 원소별로 MCV/히스토그램을 프로브하지 않는다. 따라서 선택적인 IN 리스트(희소값)에서 선택도가 크게 과대평가된다. develop 은 하드 상한 0.5 를 그대로 유지한다(<code>in_selectivity &gt; 0.5 ? 0.5 : in_selectivity</code>, :11507-11508 "compute selectivity--cap at 0.5"); 상한을 <code>MIN(in_selectivity, 1.0)</code> 으로 바꾸고 "the former hard cap of 0.5 had no distributional basis" 주석을 단 것은 CBRD-27094 브랜치다(develop 에 없음 — CBRD-27094/PR#7622 계열).</p>
 <ul>
 <li class="ck"><span class="cklab">리뷰 체크포인트</span>IN 조건 질의의 플랜이 이상하면 <code>list_card * equal_selectivity</code> 근사를 먼저 확인하고, 개선 시 원소별 MCV 프로브 후 중복 보정을 포함해 합산할 것.</li>
+</ul>
+<h4>세션 변수 술어 — <code>qo_classify</code> 의 PC_OTHER (query_graph.c)</h4>
+<ul>
+<li><strong>질의 본문의 세션 변수 술어(<code>c1 &gt; @v</code>, <code>c1 = @v</code>)는 기본 선택도로 추정된다(범위 0.1, 등호 1/NDV) — 고치지 않기로 했다(CBRD-27144 Won't Do, PR#8344 close 2026-11-02)</strong> (.50, develop <code>604ab8b22</code> 실측, 2026-10-30): <code>qo_classify ()</code> 가 PT_EXPR(PT_EVALUATE_VARIABLE) 를 PC_OTHER 로 분류하고, 히스토그램 탐침은 PC_CONST·PC_HOST_VAR 의 값만 쓴다. 10만 행에서 <code>set @v = 0; … c1 &gt; @v</code> 는 sel 0.1 → INDEX, fetch 100193 이고, 같은 값의 리터럴은 TABLE, fetch 938 이다. 옵티마이저에 도착하는 꼴: <code>&gt;</code>·<code>&lt;</code>·BETWEEN·IN·OR·LEFT JOIN ON 은 재작성에서 RANGE 가 되어(<code>@v &lt; c1</code> 도 뒤집혀 RANGE) <code>qo_between_range_arg_value ()</code> 를 타고, 단일 <code>=</code>·<code>&lt;&gt;</code> 는 <code>qo_equal_selectivity ()</code>, 원소 둘 이상의 NOT IN 은 <code>qo_all_some_in_selectivity ()</code> 의 PC_OTHER 경로로 기본값이다. <code>EXECUTE … USING @v</code> 는 다르다 — bind 값으로 풀려 피킹된다(src-compat §2 「values_list_to_values_array」). 고치지 않는 이유(리뷰어 판단): 세션 변수는 실사용이 드물어, 이 술어를 쓰는 기존 질의의 플랜이 바뀌는 리그레션 위험이 이득보다 크다.</li>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>세션 변수 술어의 플랜이 같은 값의 상수와 다르게 나오는 것은 정상이다. 세션 변수 값으로 추정하는 변경이 오면 이 결정(CBRD-27144)부터 본다. — 정소희(.50) 2026-11-03</li>
+</ul>
 </ul>
 <h4>planner_visit_node (query_planner.c:7564)</h4>
 <p><strong>조인 카디널리티의 MAX(1.0) 바닥이 분수 카디널리티를 없애 조인 순서를 노이즈로 만든다</strong> — 조인 결과 card 를 1.0 으로 바닥 처리하는 지점은 <code>planner_visit_node()</code> 안의 <code>cardinality = MAX (1.0, cardinality);</code>(develop :8124, :8134, :8158)와 <code>total_rows = MAX (1.0, total_rows);</code>(:8160)이다. 그 결과 25/30 계열 쿼리는 조인 2단계부터 모든 중간 결과가 card=1 이 되고, 이후 조인 순서는 ±1~4 코스트 틱 수준의 노이즈로 결정된다. 같은 함수의 조인 선택도 루프도 곱할 때마다 <code>selectivity = MAX (1.0 / MAX (cardinality, 1.0), selectivity)</code> 로 바닥을 누른다 — 술어 여럿의 곱이 바닥에 눌리는 사정은 §3 보강(.52, <code>07480dfd1</code>). — 정소희(.50) 2026-10-28</p>
@@ -480,6 +487,9 @@
 <li><strong><code>col LIKE ?</code> 의 파생 range 항 선택도가 기본값에 머문다 — 희귀 접두어의 인덱스 스캔 비용이 비관적</strong> (.52, c0e06bef9, 2026-09-22): 경계가 <code>like_match_lower_bound(?)</code> 식이라 히스토그램 범위 추정을 못 받는다(§2 「qo_rewrite_like_terms」). <strong>미수정</strong>(후속 후보; develop <code>2d925cb86</code> 재확인 2026-10-28 — <code>histogram_split_hv_range ()</code> histogram_cl.cpp:2902 는 직접 PT_HOST_VAR 경계만 보고, <code>qo_between_range_arg_value ()</code> query_planner.c:12828 은 함수 경계에 NULL 을 줘 기본값으로 떨어진다). — 정소희(.50) 2026-10-28</li>
 <li><strong><code>ignore_trailing_space=yes</code> 에서 문자열 범위 추정(<code>string_domain_frac_lt</code>, 바이트 순서)은 파라미터를 무시한다</strong> (.50, PR#7977 적용 빌드, 2026-09-17): <code>t_vc.c &lt; 'abcd '</code> 추정 200행 vs 참값 0. 히든 파라미터·기본 no 라 영향은 작다. <strong>미수정</strong>(별건 후보; develop <code>2d925cb86</code> 재확인 2026-10-28 — histogram_cl.cpp:1011 은 바이트 위치(<code>string_pos</code>)만 보고 파라미터를 읽지 않는다). — 정소희(.50) 2026-10-28</li>
 <li><strong>CHAR↔VARCHAR 조인의 <code>mcv_join_parts_str</code> 은 한쪽 스트립·한쪽 원본 MCV 를 비교하지만, 런타임은 패딩된 CHAR 와 원본 VARCHAR 바이트를 비교한다 — 정합 여부 미검증</strong> (.50, 2026-09-17). <strong>미수정</strong>(별건 후보; develop <code>2d925cb86</code> 재확인 2026-10-28 — histogram_cl.cpp:1614 는 저장 MCV 끼리 <code>string_values_equal_under_collation</code> 으로 비교하고 재패딩하지 않는다). — 정소희(.50) 2026-10-28</li>
+</ul>
+<ul>
+<li><strong>UPDATE / DELETE 의 <code>col LIKE ?</code> 는 LIKE 파생 범위 항(<code>like_match_lower_bound(?) ge_lt like_match_upper_bound(?)</code>)이 두 번 붙는다 — SELECT 는 한 번</strong> — <strong>미수정(develop 선재) — 수정 PR#8006(미머지, 2026-11-03 열림)</strong> (.52, develop <code>d7378784f</code>·PR#8006 <code>2364bcc7a</code> release CS 실측, 2026-10-28): <code>set optimization level 513</code> 의 PREPARE 덤프에서 <code>update t set pad = pad where s like ?</code> 는 같은 범위 항이 term[0](sel 0.01)·term[2](sel 10) 두 개로 나오고 인덱스 term[2] + 필터 term[0] AND term[1](LIKE), 같은 조건의 <code>select count(pad) from t where s like ?</code> 는 범위 항 하나(sel 0.1). trace 의 플랜 문자열도 UPDATE/DELETE 에서 <code>key filter: (s&gt;= like_match_lower_bound(?) and s&lt; …)</code> 가 key range 와 중복된다. 영향: PR#8006 의 첫 실행 peek 가 UPDATE 에도 걸리지만(trace <code>Query Plan:</code> 블록) 다수 접두어 <code>'abc%'</code>(90%)에서도 INDEX SCAN 이 남는다 — 상수 <code>'abc%'</code> UPDATE 와 바인드 SELECT 는 TABLE SCAN, 바인드 등호 UPDATE(<code>g = ?</code> 90% 값)는 develop 에서도 peek 뒤 TABLE SCAN. 결과 행 수는 같다(계획만 비관). 원인 미규명 — UPDATE/DELETE 의 내부 SELECT 생성 경로가 LIKE 리라이트를 한 번 더 거치는 것으로 추정(<code>qo_rewrite_like_terms ()</code> 호출 경로 확인 필요). 재현 <code>claude-workspace/projects/CBRD-27143/repro/dml_trace.sql</code>·<code>dml_dump.sql</code>·<code>dml_eq.sql</code>. — 정소희(.50) 2026-11-03</li>
 </ul>
 <p><strong>JOB 실측 예비 이슈</strong> — 측정 계약 <code>AK-par4</code>(JOB 113질의, <code>parallelism=4</code>·<code>data_buffer_size=16G</code>·<code>taskset -c 0-15</code>, 21테이블 <code>WITH FULLSCAN, 300 BUCKETS</code> 후 재기동, warmup 1패스, 기준 develop <code>07480dfd1</code> release; 카디널리티는 <code>qref</code> 레인) — §2 「JOB 실측」 절 첫 줄과 같다.</p>
 <ul>

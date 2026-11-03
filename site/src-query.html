@@ -18,14 +18,14 @@
 <li><a href="cross.html">모듈 경계</a></li>
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
-<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠36</span></span></a></li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">33</span><span class="iss">⚠36</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-query.html" class="cur"><span>src/query</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠18</span></span></a></li>
+<li><a href="src-query.html" class="cur"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">28</span><span class="iss">⚠32</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">9</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">8</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/query</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 18건</p>
+<h1>src/query</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 24건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>서버 측. 역직렬화된 XASL 플랜 실행. 핵심: <code>query_executor.c</code>(~27K, XASL 트리 워커), <code>scan_manager.c</code>(힙·인덱스·리스트·셋·메서드 스캔), <code>fetch.c</code>(REGU_VARIABLE 평가), <code>string_opfunc.c</code>(~28K)·<code>arithmetic.c</code>·<code>query_opfunc.c</code>(함수·집계 구현), <code>xasl_to_stream.c</code>(클라: 직렬화)/<code>stream_to_xasl.c</code>(서버: 역직렬화), <code>list_file.c</code>(중간 결과 임시 파일), <code>xasl_cache.c</code>(XASL 캐시), <code>vacuum.c</code>(MVCC GC). <code>parallel/</code> 하위에 병렬 실행(px 스캔·해시조인·쿼리실행·정렬, 코어는 <code>px_parallel.hpp</code>·<code>px_worker_manager.hpp</code>).</p>
@@ -68,6 +68,7 @@
 <tr><td><code>parallel_query::worker_manager::try_reserve_workers</code></td><td>parallel/px_worker_manager.cpp</td><td>워커 풀 예약(실패 시 nullptr → 직렬 폴백)</td><td>query_executor.c:16260, px_scan.cpp:427·:892·:1415</td></tr>
 <tr><td><code>parallel_query::make_parallel_query_executor_recursively</code></td><td>parallel/px_query_execute/px_query_executor.cpp</td><td>서브쿼리 병렬 실행기 구성</td><td>query_executor.c:16261 부근</td></tr>
 <tr><td><code>new_memoize_storage</code></td><td>memoize.cpp:1044</td><td>XASL 노드에 memoize 스토리지 부착</td><td>px_scan_task.cpp:364</td></tr>
+<tr><td><code>scan_check_parallel_scan_possible</code></td><td>parallel/px_scan/px_scan_checker.cpp</td><td>XASL 의 스캔마다 병렬 가능 여부를 판정해 CANNOT_PARALLEL_SCAN 등을 세운다 — <strong>클라이언트 코드</strong>(cs·sa 라이브러리, 서버 타깃에 없음; <code>582fa3941</code>)</td><td>xasl_generation.c:20612·20852·22457·27458·31265</td></tr>
 </tbody></table></div>
 <h3>2. 분석 내용 (함수별)</h3>
 <blockquote>항목은 함수 단위로 기술한다 — 각 항목의 제목/선두가 함수·파일명이다. 새 분석도 함수명을 앞세워 추가할 것.</blockquote>
@@ -91,6 +92,9 @@
 <ul>
 <li>진입 직후 <code>static int max_recursion_sql_depth = prm_get_integer_value(...)</code>(:15673) — PRM_USER_CHANGE 파라미터를 프로세스 수명 동안 캐시(경미). <code>eval_pred</code>(query_evaluator.c:1676)와 동일 패턴이고, scan_manager.c:4968·:6626도 같은 static-PRM 캐시 관용구다(그쪽은 PRM_ID_MAX_PAGES_IN_TEMP_FILE_CACHE — develop 확인).</li>
 <li class="ck"><span class="cklab">리뷰 체크포인트</span>재귀 평가 경로에 깊이 제한/스택 고려가 있는가?</li>
+</ul>
+<ul>
+<li><strong>BUILDVALUE 의 출력 목록은 스캔이 닫힌 뒤 val_list 슬롯을 읽는다</strong> (.51, develop <code>1684945ed</code>(#8196 머지 <code>309265e6d</code> 포함), 2026-11-02): <code>qexec_execute_mainblock_internal ()</code> 이 블록의 스캔을 모두 <code>qexec_end_scan ()</code>·<code>qexec_close_scan ()</code> 한 다음 <code>qexec_end_mainblock_iterations ()</code> → <code>qexec_end_buildvalueblock_iterations ()</code> 가 출력을 계산한다. 그래서 집계 옆 숨은 컬럼(ODKU 가 읽는 소스 컬럼 — src-parser §2 「pt_to_insert_xasl」)의 값은 행 루프가 마지막으로 필터를 통과한 행에서 읽어 둔 값이다(WHERE·GROUP BY 없음: 마지막 행, GROUP BY 가 있으면 그룹의 첫 행). 이 값을 채우지 않는 경로는 §3(CBRD-27870). — 정소희(.50) 2026-11-03</li>
 </ul>
 <h4>qexec_execute_scan (query_executor.c:8483)</h4>
 <ul>
@@ -426,6 +430,26 @@ else
 <li><strong>호스트 변수는 위치로 키가 잡힌다 — 값 공유 대상이 아니다</strong> (.52, 2026-09-16 trace 실측; develop <code>2d925cb86</code> 재확인): <code>sum(a*?), sum(a*?)</code> 는 셀 두 개 — CSE 키가 <code>(TYPE_POS_VALUE, 값 인덱스)</code> 다(expr_compile.c:4559·:4575, 공유 비교 :1719-1720). 리터럴 값 공유(<code>expr_literal_same ()</code>, :2190)는 NUMERIC 에서 <code>DB_VALUE_NUMERIC_IS_VALUE_NEGATIVE</code> 도 비교해야 한다(:2210-2218) — 빠뜨리면 <code>n * 1.5</code> 와 <code>n * -1.5</code> 가 한 셀(전체 CTP 로 발견, TC <code>cbrd_27215_literal_sign</code>). — 정소희(.50) 2026-10-28</li>
 <li><strong>호스트 변수가 든 투영·필터의 도메인은 실행 전 resolve_domains 게이트가 정하고, 프로그램은 그 뒤에 lazy 컴파일된다</strong> (develop <code>2d925cb86</code> 정적 확인 2026-10-28 — .52 <code>2628b943d</code> 의 브랜치 사실을 머지본 기준으로 고쳐 씀): 컴파일러는 값이 타입을 정하는 노드를 <code>DB_TYPE_VARIABLE</code> 로 두고, <code>qexec_resolve_domains ()</code>(query_executor.c:18354-18356, [CBRD-27510] <code>be683e04c</code>)가 실행당 1회 main block 전에 해석해 XASL_STATE 에 넣는다. 프로그램은 그 뒤 첫 행에서 컴파일돼 해석 경로와 같은 해석을 읽고, 게이트가 못 정했거나 '값 없음'(전 행 NULL)으로 정한 노드는 거절한다 (expr_compile.c:2414-2422 머리 주석, :2488). 브랜치 시절에는 <code>DB_TYPE_VARIABLE</code> 도메인이라 호스트 변수가 든 투영·필터가 컴파일되지 않다가 (D26 이전), 한 행(<code>EXPR_DOMAIN_DEFER_ROWS</code>)을 해석 경로에 넘겨 도메인을 받은 뒤 컴파일하고 재실행 때 <code>qdata_valptr_prog_resolve_domains</code>· <code>qexec_clear_regu_var</code> 의 <code>original_domain</code> 복원으로 다시 정했다 — 이 세 심볼은 머지본 <code>b8199438e</code> 에 없다(git grep 0건). — 정소희(.50) 2026-10-28</li>
 </ul>
+<h4>scan_check_parallel_scan_possible — 병렬 스캔 판정은 XASL 생성 단계(클라이언트)에서 (parallel/px_scan/px_scan_checker.cpp)</h4>
+<ul>
+<li><strong>병렬 스캔 검사기는 클라이언트에서 돈다</strong> (.51, develop <code>1684945ed</code>, 2026-11-02; .50 <code>582fa3941</code> 재확인 2026-11-03 — cs/CMakeLists.txt:434·sa/CMakeLists.txt:407 에만 있다): <code>scan_check_parallel_scan_possible ()</code> 은 <code>xasl_generation.c</code> 가 XASL 을 만든 뒤 부르고, 판정은 XASL 플래그로 서버에 간다. 서버 전용 <code>query_executor.h</code> 를 넣으면 CS 빌드가 <code>#error Belongs to server module</code> 로 깨진다. 검사기와 실행기가 같은 판정을 써야 하면 XASL 플래그로 넘긴다(<code>XASL_NO_FIXED_SCAN</code> 선례). — 정소희(.50) 2026-11-03</li>
+<li><strong>스캔 식에 세션 변수 읽기가 있으면 병렬 스캔을 하지 않는다</strong> (.50, develop <code>582fa3941</code> 소스 + 100만 행 실측, 2026-10-30): 검사기(px_scan_checker.cpp:371)가 T_EVALUATE_VARIABLE·T_DEFINE_VARIABLE(T_TRACE_STATS·T_CURRENT_VALUE·T_NEXT_VALUE 도)에 CANNOT_PARALLEL_SCAN 을 세우고, 주석이 옵티마이저 <code>qo_check_serial_block_expr ()</code>(query_planner.c)와 짝임을 밝힌다. 실측: 인덱스 1095쪽에서 <code>count(*) … c1 &gt; @v</code> 는 직렬, 같은 모양의 리터럴은 parallel workers 4. 그래서 옵티마이저가 그 항에 <code>QO_TERM_SEL_FROM_HISTOGRAM</code> 을 세우더라도 병렬로 가지 않는다(CBRD-27144 자기 리뷰 G1-01). 대기소 처음 기록은 이 검사기를 서버 쪽으로 적었다 — 위 항목대로 클라이언트다. — 정소희(.50) 2026-11-03</li>
+</ul>
+<h4>분할 가지치기 — partition.c (develop <code>d6ca98121</code>, PR#8213 리뷰)</h4>
+<ul>
+<li><strong>식 분할의 함수 가지치기는 <code>partition_supports_pruning_op_for_function</code> 이 허용하는 opcode 만 탄다 — <code>k mod 3</code>(연산자 <code>mod</code>·<code>%</code>, PT_MOD)은 <code>T_INTMOD</code> 로 컴파일되는데 허용 목록에는 <code>T_MOD</code>(MOD() 함수)만 있어 가지치기하지 않는다</strong> (.52, develop d6ca98121 xasl_generation.c:8437-8438 PT_MOD→T_INTMOD; PR#8213 head 96776158e debug gdb 로 supports(op=PO_IN, opcode=T_INTMOD) 가 거절함을 확인, 2026-10-28): partition.c 의 같은 함수(2631-). <strong>미수정</strong>(성능 — 후보 F5). — 정소희(.50) 2026-11-03</li>
+<li><strong><code>k in (상수 목록)</code> 은 OR 로 풀린 비교 항(T_PRED B_OR + T_COMP_EVAL_TERM)으로 가지치기에 오고, <code>k = any {집합}</code> 은 ALSM(F_SOME) 항으로 남는다</strong> (.52, PR#8213 head 96776158e debug gdb, 2026-10-28; #8213 은 <code>52193efa9</code> 로 머지 — 머지 뒤 develop 에서 다시 보지는 않았다). — 정소희(.50) 2026-11-03</li>
+</ul>
+<h4>결과 캐시(<code>/*+ QUERY_CACHE */</code>)가 켜지는 조건 — qfile_initialize (list_file.c:1066)</h4>
+<ul>
+<li><strong>결과 캐시가 켜지려면 <code>max_query_cache_entries &gt; 0</code> 과 <code>query_cache_size_in_pages &gt; 0</code> 이 둘 다 필요하다 — 후자 기본값 0 이면 <code>qfile_Is_list_cache_disabled</code>; <code>query_cache_mode</code> 기본 2(SELECTIVELY_ON — 힌트 있는 문장만)</strong> (.52, develop <code>d6ca98121</code>·PR#8213 head, list_file.c <code>qfile_initialize</code> 1066-1069, system_parameter.c 의 두 파라미터 기본값, query_manager.c <code>qmgr_is_allowed_result_cache</code>, 2026-10-28). SA 모드에서는 <code>qfile_List_cache.n_hts == 0</code> 이라 조회 경로(<code>qfile_lookup_list_cache_entry</code>)를 타지 않았다. — 정소희(.50) 2026-11-03</li>
+</ul>
+<h4>페이지 배치 실행(expr_batch) 프로파일 — CBRD-27361 (PR#8196, develop <code>309265e6d</code> 머지)</h4>
+<blockquote>측정 (.51, 2026-10-31): PR#8196 헤드 <code>46fd2be49</code>, release(RelWithDebInfo <code>-O2 -finline-functions -g</code>, GCC 8.5), <code>perf record -F 997 -g</code> 를 cub_server 전 스레드에(dev4 <code>tools/perf/perf_attach.sh</code>), 직렬(parallelism=0), node0 핀, TPC-H SF10 lineitem 6천만 행·JOB. 머지된 코드에도 해당한다(.52 post-merge 확인). 같은 측정의 힙 레코드 첫 접근은 src-base §2 「or_mvcc_get_repid_and_flags」, 페이지 고정은 src-storage §2 「pgbuf_search_hash_chain」.</blockquote>
+<ul>
+<li><strong>배치 NUMERIC 산술은 표현 변환과 행마다 호출이 비용이다</strong> — Q1(직렬 18.4초): 벡터는 부호 있는 <code>__int128</code>, <code>numeric_agg_expr_add/mul ()</code> 은 부호·크기 구조체라 행마다 <code>eb_num_get ()</code>·<code>eb_num_put ()</code> 변환(<code>expr_batch_run</code> 21.4% 안의 최대 줄 <code>out-&gt;coefficient = (uint128_t) ((c &lt; 0) ? -c : c)</code> 20.9%) + out-of-line 호출 <code>numeric_agg_expr_add</code> 9.7%·<code>mul</code> 2.5%. 같은 질의 GROUP BY 키 경로 합 약 14%(<code>qexec_batch_gby_consume_chunk</code> 7.9%·<code>expr_batch_key_bytes</code> 3.6%·<code>qexec_batch_gby_flush</code> 2.7%), NUMERIC 디코드 <code>eb_extract</code> 13.6%. — 정소희(.50) 2026-11-03</li>
+<li><strong>배치 비교 리프의 NUMERIC 경로는 스택 구조체 왕복에서 멈춘다</strong> — F01 의 <code>eb_raw_kid ()</code> 29.3% 중 15.9% 가 <code>eb_cell_num ()</code> 이 <code>NUMERIC_AGG_EXPR_VAL</code> 에 쓴 직후 <code>an = nv.is_negative ? … : nv.coefficient</code> 의 16바이트 load(<code>movdqa -0x50(%rbp)</code>)에 몰린다(store-to-load forwarding 실패로 보임), <code>batch-&gt;sel[n++] = r</code> 의 <code>batch-&gt;sel</code> 재로드 7.7%. 레코드 바이트 load(NUMERIC 첫 바이트·오프셋 테이블) 약 10%p. — 정소희(.50) 2026-11-03</li>
+</ul>
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
 <ul>
@@ -445,6 +469,14 @@ else
 <li>memoize가 직렬 기준 캘리브레이션(1000프로브 후 히트율&lt;0.5 영구 자기비활성)이라 병렬에서 조용히 자기비활성 가능. develop 95b79e7ed 잔존 확인(memoize.cpp:900대).</li>
 <li><strong>[미수정 — 결함 후보, 발번 미결]</strong> XASL 캐시 키에 시스템 파라미터 차이를 싣는 것은 <code>do_prepare_select</code> 하나다 — <code>do_prepare_update</code>/ <code>_delete</code>/<code>_insert_internal</code>/<code>_merge</code> 의 SHA1 은 <code>PT_PRINT_DIFFERENT_SYSTEM_PARAMETERS</code> 없이 계산되므로, <code>PRM_FOR_QRY_STRING</code> 파라미터 (<code>cost_*</code>·<code>max_hash_list_scan_size</code>·<code>memoize_memory_limit</code> 등)를 바꾼 세션도 DML 서버측 플랜은 같은 캐시 엔트리(바인드 변형이면 같은 변형 엔트리 — develop <code>620ceaf6a</code>)를 쓴다(근거 §2 「xcache 계열」). (.50, <code>87b25579e</code>, 2026-09-22; develop <code>2d925cb86</code> 재확인 2026-10-28) — 정소희(.50) 2026-10-28</li>
 <li><strong>[미수정 버그]</strong> <code>update_or_drop_histogram_helper ()</code>(execute_schema.c:4399)의 에러 경로가 <code>error = dump_histogram (…, error, stdout)</code> 로 <strong>에러를 덮어써</strong> 세이브포인트 롤백 뒤에도 문장이 <code>Statistics updated successfully</code> 로 끝난다 — <code>dump_histogram ()</code> (optimizer/histogram/histogram_cl.cpp:3905)은 <code>error != NO_ERROR</code> 면 메시지만 찍고 <code>NO_ERROR</code> 를 돌려준다(:3922-3933). (.50, static + 동적, 2026-09-18: 동시 첫 수집의 패자 79/1600 이 아무것도 저장하지 않고 성공 보고 — 요청한 <code>7 BUCKETS</code> 대신 상대의 283버킷이 남음.) [CBRD-27369] <code>0d0809963</code>(PR#7900)은 그 트리거만 없앴다 — <code>sm_add_histogram ()</code> 이 동시 첫 수집의 <code>ER_BTREE_UNIQUE_FAILED</code> 를 <code>ER_LC_CLASSNAME_EXIST</code> 로 번역한다(schema_manager.c:15618-15634). 덮어쓰기 자체는 develop <code>2d925cb86</code> 에 그대로다(재확인 2026-10-28): <code>UPDATE STATISTICS</code> 가 타는 전 컬럼 경로(<code>target_columns == NULL</code>, <code>quiet=true</code>)는 :4549-4555 에서 <code>quiet</code> 와 무관하게 덮어쓰고, 컬럼 지정 경로는 <code>!quiet</code> 일 때만 덮어쓴다(:4718-4729). 그 밖의 <code>sm_add_histogram ()</code> 실패(락 타임아웃 등)는 지금도 성공으로 보고된다(정적 판독). — 정소희(.50) 2026-10-28</li>
+</ul>
+<ul>
+<li><strong>[미수정 — CBRD-27796, 2026-11-03 Open]</strong> list 가지치기의 <code>PO_NOT_IN</code> 은 값 목록과 교집합이 빈 파티션만 남기고, <code>&lt;&gt; SOME {집합}</code>(ALSM F_SOME + R_NE)이 <code>PO_NOT_IN</code> 으로 매핑되어 조건에 맞는 행이 든 파티션이 빠진다 (.52, develop d6ca98121, 2026-10-28): partition.c <code>partition_match_pred_expr</code> 2056-2064, <code>partition_prune_list</code> 1144-. <code>k &lt;&gt; some {1, 9}</code> 0행(비분할 4행). NOT IN 은 이 경로로 오지 않아 정답. — 정소희(.50) 2026-11-03</li>
+<li><strong>[미수정 — CBRD-27703(LIST), 2026-11-03 Analysis]</strong> list 가지치기 <code>PO_EQ</code> 는 값이 든 첫 파티션에서 멈춘다("partition values are disjoint") — 비교가 손실 변환(BIGINT 키 대 DOUBLE 값, 2^53 근처)이면 여러 파티션의 값이 같다고 나와 행이 빠진다; range 의 "the only partition" 판정도 같다(RANGE 는 그 이슈에 없음) (.52, develop d6ca98121 partition.c 1185·1196·1459, 2026-10-28). — 정소희(.50) 2026-11-03</li>
+<li><strong>[미수정 — CBRD-27798, 2026-11-03 Open]</strong> 해시 리스트 스캔은 키 쌍의 타입이 다를 때만(<code>need_coerce_type</code>) 빌드 값을 probe 키 도메인으로 바꿔 해시한다 — 둘 다 NUMERIC 이면 scale 이 달라도 그대로 해시해, 같은 값이 다른 해시가 되어 행이 빠진다 (.52, develop d6ca98121 query_hash_scan.c 505-520, 재현 <code>NUMERIC(18,2)</code> 열 대 <code>753980177740969.0 + b</code> 파생 키: 해시 0 / NO_HASH 1, 2026-10-28). — 정소희(.50) 2026-11-03</li>
+<li><strong>[미수정 — 수정 CBRD-27870 / PR#8364 <code>ac9d895db</code>, 미머지]</strong> 집계 옆 숨은 컬럼(BUILDVALUE 출력이 스캔 뒤 읽는 val_list 슬롯 — §2 「qexec_execute_mainblock」)을 채우지 않는 경로 셋 (.51, develop <code>1684945ed</code>, 비교 <code>ad7a255c5</code>(#8196 직전), 2026-11-02): ① 페이지 배치(<code>qexec_batch_eligible ()</code> → <code>eb_build_aggs ()</code>): 집계 피연산자만 벡터로 디코드하고 val_list 를 안 채운다 → NULL(#8196 회귀). ② 병렬 <code>gather: buildvalue</code>(ACCESS_SPEC_FLAG_BUILDVALUE_OPT): 워커 클론이 집계만 누적하고 리더 val_list 는 비어 있다 → NULL(#8196 전부터, 소스 ≥ parallel_scan_page_threshold). ③ 병렬 <code>gather: row by row</code>(XASL_SNAPSHOT): 리더가 워커 리스트를 <code>qfile_scan_list_next (…, PEEK)</code> + <code>qfile_tuple_walk_read_value (…, copy=false)</code> 로 읽어 슬롯이 리스트 페이지·튜플 버퍼를 가리킨다 → 스캔이 닫히면 해제된 메모리(실측: STDDEV 마무리 할당이 덮어 VARCHAR 'g2' 가 길이만 남은 <code>'  '</code>). 재현 <code>INSERT INTO t (id) SELECT MAX(s.g) + 1 FROM s s WHERE s.g = 2 ON DUPLICATE KEY UPDATE c = s.c</code> — 중복 키 행의 c 가 <code>ad7a255c5</code> 'g2', develop NULL. 제보 개발 3팀(CBRD-27336 shell TC <code>cbrd_27336_forms</code> 칸 13). 수정 PR 은 배치 제외·병렬 끔·스캔 닫기 전 값 복제(<code>qexec_own_scan_values ()</code>)이고, <code>pt_to_buildvalue_proc ()</code> 이 세우는 <code>XASL_OUTPUT_READS_SCAN</code>(비트 29)을 배치 자격과 검사기의 CANNOT_PARALLEL_SCAN 이 읽는다(TC cubrid-testcases#3985). — 정소희(.50) 2026-11-03</li>
+<li><strong>[잠재 — 재현 안 됨, #8196 전부터]</strong> fixed 힙 스캔의 val_list 값은 페이지 프레임을 가리킨다 — <code>scan_next_heap_scan ()</code> 의 <code>is_peeking = scan_id-&gt;fixed</code>. 출력이 스캔 뒤 읽는 숨은 컬럼은 unfix 된 프레임을 읽는 셈이다(그 사이 프레임이 다른 페이지로 바뀌면 틀린 값) (.51, develop <code>1684945ed</code>, 2026-11-02). — 정소희(.50) 2026-11-03</li>
+<li><strong>[구조적 한계]</strong> release 빌드(RelWithDebInfo)는 <code>-O2</code> 라 GCC 8.5 가 자동 벡터화·루프 unswitch 를 하지 않는다 — 배치 커널의 행 루프 안 루프 불변 분기·switch(<code>eb_raw_kid</code>·<code>eb_extract</code>·<code>eb_run_steps</code> 의 mask)는 매 행 그대로 실행된다. 손으로 특수화하지 않으면 "배열 위 연산" 이 스칼라 루프로 남는다 (.51, PR#8196 헤드 <code>46fd2be49</code> 프로파일, 2026-10-31 — §2 「페이지 배치 실행(expr_batch) 프로파일」). — 정소희(.50) 2026-11-03</li>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>

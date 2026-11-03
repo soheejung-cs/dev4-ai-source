@@ -74,6 +74,7 @@ primitive 타입 연산, 디스크↔메모리 변환. 접두사: `sm_`(schema),
 - PR_TYPE이 .bss 동적 초기화(`pr_type` 생성자가 non-constexpr, object_primitive.h:114~) →
   disksize/함수포인터 상수폴딩 불가. `mr_index_readval_int` 39명령어 + memcpy@plt(4바이트!) vs
   `mr_data_readval_int` 21명령어. 실측 1.02% vs 0.29%. 개선안: constexpr화 또는 `OR_*_SIZE` 리터럴 사용.
+- **SHORT·INTEGER·BIGINT 의 인덱스 키 이미지는 원시(native) 바이트다** (.51, CBRD-27361 헤드 `0efc06bf1`, 2026-11-01): `mr_index_writeval_int` 는 `or_put_data (buf, &i, tp_Integer.disksize)` 로 4바이트를 그대로 쓰고 `mr_index_readval_int` 는 `or_get_data` 로 그대로 읽는다(object_primitive.c:2434·2444; short :2605, bigint :2776 도 같다). 힙(데이터) 표현의 `OR_GET_INT`(빅엔디언)와 다르다. 인덱스 키 비교 `mr_index_cmpdisk_int` 도 `COPYMEM` 으로 원시 값을 비교한다. DATE·TIME·OID 키의 인덱스 이미지가 원시인지는 **미확인**(`mr_index_writeval_date` 등은 보지 않았다). `MR_CMP` 는 object_primitive.c 안의 지역 매크로다(헤더에 없음) — btree.c 에서 쓰려면 직접 비교식을 쓴다. — 정소희(.50) 2026-11-03
 
 ### smt_edit_class_mop / sm_update_class (schema_template.c / schema_manager.c)
 

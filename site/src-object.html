@@ -18,14 +18,14 @@
 <li><a href="cross.html">모듈 경계</a></li>
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
-<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠36</span></span></a></li>
+<li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">33</span><span class="iss">⚠36</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">30</span><span class="iss">⚠18</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">28</span><span class="iss">⚠32</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">9</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">8</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-object.html" class="cur"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
@@ -86,6 +86,7 @@
 <ul>
 <li>static 함수(선언 L372/L375), <code>tp_Integer</code> 등 PR_TYPE 인스턴스의 함수 포인터로만 호출된다.</li>
 <li>PR_TYPE이 .bss 동적 초기화(<code>pr_type</code> 생성자가 non-constexpr, object_primitive.h:114~) → disksize/함수포인터 상수폴딩 불가. <code>mr_index_readval_int</code> 39명령어 + memcpy@plt(4바이트!) vs <code>mr_data_readval_int</code> 21명령어. 실측 1.02% vs 0.29%. 개선안: constexpr화 또는 <code>OR_*_SIZE</code> 리터럴 사용.</li>
+<li><strong>SHORT·INTEGER·BIGINT 의 인덱스 키 이미지는 원시(native) 바이트다</strong> (.51, CBRD-27361 헤드 <code>0efc06bf1</code>, 2026-11-01): <code>mr_index_writeval_int</code> 는 <code>or_put_data (buf, &amp;i, tp_Integer.disksize)</code> 로 4바이트를 그대로 쓰고 <code>mr_index_readval_int</code> 는 <code>or_get_data</code> 로 그대로 읽는다(object_primitive.c:2434·2444; short :2605, bigint :2776 도 같다). 힙(데이터) 표현의 <code>OR_GET_INT</code>(빅엔디언)와 다르다. 인덱스 키 비교 <code>mr_index_cmpdisk_int</code> 도 <code>COPYMEM</code> 으로 원시 값을 비교한다. DATE·TIME·OID 키의 인덱스 이미지가 원시인지는 <strong>미확인</strong>(<code>mr_index_writeval_date</code> 등은 보지 않았다). <code>MR_CMP</code> 는 object_primitive.c 안의 지역 매크로다(헤더에 없음) — btree.c 에서 쓰려면 직접 비교식을 쓴다. — 정소희(.50) 2026-11-03</li>
 </ul>
 <h4>smt_edit_class_mop / sm_update_class (schema_template.c / schema_manager.c)</h4>
 <ul>

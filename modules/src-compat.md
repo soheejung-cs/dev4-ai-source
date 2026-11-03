@@ -109,6 +109,14 @@
   (`do_replan_statement_internal ()` db_vdb.c:4133-4159). TC 에서 "재플랜이 일어났나" 의 판정 신호로 쓸 수 있다. 한 줄 형태의 첫
   `show trace` 가 `TABLE SCAN (dual)`(`trace_stats()` 자신의 플랜)을 보이는 것은 표기 잡음. — 정소희(.50) 2026-10-28
 
+### values_list_to_values_array — `EXECUTE … USING` 의 세션 변수 (db_vdb.c)
+
+- **`EXECUTE … USING @v` 의 세션 변수는 EXECUTE 때 값으로 풀려 bind 값이 된다 — 첫 EXECUTE 피킹이 상수 USING 과 똑같이 걸린다** (.50, develop `604ab8b22` release CS 실측, 2026-10-30): `values_list_to_values_array ()`(db_vdb.c, 2014년부터 같음)가 PT_EVALUATE_VARIABLE 원소를 `db_get_variable ()` 로 꺼내 값 배열에 복제하고, `do_set_user_host_variables ()` 가 `db_push_values ()` 로 넣는다. 실측(10만 행, 질의마다 텍스트를 select 식으로 갈랐다): 값 0 은 TABLE fetch 938, 값 99990 은 PREPARE 플랜이 TABLE 이었다가 첫 EXECUTE 재플랜으로 INDEX fetch 12. CBRD-27144 원래 본문의 "USING 의 세션 변수는 폴백" 은 맞지 않았다. 질의 본문에 쓴 `@v` 는 이 경로를 타지 않고 기본 선택도다(src-optimizer §2 「세션 변수 술어」). — 정소희(.50) 2026-11-03
+
+### 세션 변수 값의 타입 — DATE·DATETIME 은 문자열로 보관된다
+
+- **세션 변수는 DATE·DATETIME 값을 문자열로 보관한다** (.50, develop `582fa3941` 실측, 2026-10-30): `set @d = date'2022-09-20'` 뒤 `typeof(@d)` 는 `character varying (1073741823)` 이다. 그래서 날짜 열 술어는 타입 검사가 `cast(@d as date)` 로 감싸고, 옵티마이저에는 맨 세션 변수 읽기가 아니라 cast 식으로 도착한다. 문자열 값과 INT 열(`a = @v`, @v = '1')은 cast 없이 맨 읽기로 남고, 히스토그램은 키 종류 불일치로 기본값에 남는다(histogram_cl.cpp:1207). 문자열로 바뀌는 지점(대입 경로의 어느 함수)은 **미확인**. — 정소희(.50) 2026-11-03
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
