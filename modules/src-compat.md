@@ -141,7 +141,7 @@
   `do_reexecute_prepared_statement_from_kept_tree(force_replan=true)`(:2727, :4188). "OFF = 첫값 플랜 고정" 계약과 어긋남. CBRD-27231 과 함께
   볼 것. — 정소희(.50) 2026-10-28
 
-- **[미수정 — 수정 CBRD-27852 / PR#8343 `ec36a772f`(head `0c389b3f7`, 승인), 미머지] 같은 SQL EXECUTE 핸들을 되풀이하면 재컴파일 서브세션이 실행마다 쌓인다** (.52, develop `604ab8b22`, 2026-10-30): §2 「do_recompile_and_execute_prepared_statement — 서브세션의 수명」. 수정은 이 함수 입구에서 바깥 세션(`!is_subsession_for_prepared`)의 `next` 를 닫는다. TC private-ex `cbrd_27852`(Case 4 = 매번 실패 INSERT, #8006 과 무관). 머지되면 이 항목을 해소로 바꾼다. — 정소희(.52) 2026-11-03
+- **[해소됨 — `80b84317d`(CBRD-27852 / PR#8343 머지 2026-11-03), .51] 같은 SQL EXECUTE 핸들을 되풀이하면 재컴파일 서브세션이 실행마다 쌓인다** (.52, develop `604ab8b22`, 2026-10-30): §2 「do_recompile_and_execute_prepared_statement — 서브세션의 수명」. 수정은 이 함수 입구에서 바깥 세션(`!is_subsession_for_prepared`)의 `next` 를 닫는다. TC private-ex `cbrd_27852`(Case 4 = 매번 실패 INSERT, #8006 과 무관). 머지되면 이 항목을 해소로 바꾼다. — 정소희(.52) 2026-11-03
 ## 4. 진행중인 작업
 
 > 각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.
