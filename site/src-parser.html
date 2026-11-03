@@ -19,13 +19,13 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">33</span><span class="iss">⚠36</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠39</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
 <li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
 <li><a href="src-parser.html" class="cur"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠6</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
@@ -113,6 +113,7 @@
 <h4>pt_to_insert_xasl / pt_append_assignment_references — ODKU 가 읽는 소스 컬럼 (xasl_generation.c)</h4>
 <ul>
 <li><strong>ODKU 가 읽는 소스 컬럼은 SELECT 목록의 숨은 컬럼이 된다</strong> (.51, develop <code>1684945ed</code>, 2026-11-02): <code>pt_to_insert_xasl ()</code> 이 aptr XASL 을 만들기 전에 <code>pt_append_assignment_references ()</code> 로 붙인다(trace rewritten query <code>select max(s.g)+1, s.c from … where s.g=?</code>). 사용자가 쓰면 "not single valued" 로 거절되는 "집계 옆 비집계 컬럼" 이 여기서만 생긴다. 실행기가 그 값을 어디서 읽는지는 src-query §2 「qexec_execute_mainblock」, 채우지 않는 경로는 src-query §3(CBRD-27870). — 정소희(.50) 2026-11-03</li>
+<li><strong>집계 옆 숨은 컬럼을 만드는 두 번째 재작성: SELECT 목록 상관 서브쿼리</strong> (.51, develop <code>1684945ed</code>, 비교 <code>ad7a255c5</code>, PR#8364 <code>756c19e28</code>, 2026-11-03): 집계 SELECT 의 SELECT 목록에 상관 서브쿼리가 있으면 <code>mq_translate_local ()</code> 이(<code>mq_has_class_methods_corr_subqueries ()</code>) <code>mq_rewrite_aggregate_as_derived ()</code> 로 집계 부분을 파생 테이블로 만들고, 서브쿼리가 읽는 소스 컬럼을 그 파생 테이블의 숨은 컬럼으로 싣는다(rewritten query <code>select a_?, ?, (select count(a_?) from dual dual) from (select count(...), t?.a from t? t? where ...) t? (a_?, a_?)</code>). 의미 검사를 통과하는 것은 외부 컬럼을 집계로 감싼 서브쿼리뿐이다(<code>(select max(s3.c))</code>, <code>(select count(a))</code>); <code>(select s3.c from db_root)</code> 와 분석 함수의 비집계 컬럼(<code>first_value(c) over ()</code>)은 "not single valued". 실측(release SA): <code>SELECT COUNT(*), (SELECT MAX(s3.c)) FROM s3 WHERE g = 2</code>(s3 = (1,'g1',1),(2,'g2',2),(1,'g1b',3))가 <code>ad7a255c5</code> 1·'g2', develop 1·NULL(페이지 배치), <code>756c19e28</code> 1·'g2'; <code>(SELECT COUNT(s3.c))</code> 는 1 / 0 / 1. — 정소희(.51) 2026-11-03, 환류 정소희(.52) 2026-11-03</li>
 </ul>
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>

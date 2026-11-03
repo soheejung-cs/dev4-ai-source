@@ -569,6 +569,10 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   도입 검토는 `imports/vimkim/storage/CBRD-26788-prefetch-survey.md` (CBRD-26788, PR 없음). 원문이 인용한 `parallel_heap_scan_page_threshold`(기본 2048) 는 develop 에 없고, 현행은 **`parallel_scan_page_threshold`(hidden, 기본 256)** 등 `PRM_NAME_PARALLEL_*` 6종(system_parameter.c:781~789) — 원문 수치를 그대로 쓰면 오판. — vimkim 2026-09-30; .51 대조
 - **복구(restart) 중에는 temp 볼륨 판정이 항상 false 다** — `pgbuf_is_temporary_volume()` 이 `!LOG_ISRESTARTED()` 면 false 를 반환(주석: "until database is loaded and restarted, I will return false always"). 복구 중 temp 페이지는 WAL 면제·LRU 승격 억제·DWB 우회 등 temp 특수 처리를 받지 않는다 — 보수 측 동작이지만 근거 주석이 없다(원문 P8). — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md) 2026-09-30; .51 대조 develop 0d0809963
 
+### btree_range_scan_start / btree_range_scan_resume — `force_restart_from_root` 계약 (btree.c, SERVER/SA)
+- **내림차순 스캔의 "루트부터 다시" 요청은 플래그로 호출자에게 돌아가고, 요청을 채우는 쪽(위치를 다시 잡는 쪽)이 입구에서 내린다** (.52, develop `1684945ed`, 2026-11-02): 세우는 곳은 `btree_range_scan_descending_fix_prev_leaf ()` 의 경합 가지(왼쪽 리프 조건부 래치 실패 뒤 재fix 에서 해제됨·무효 리프·연결 끊김·위치 못 찾음 — btree.c:29535·29542·29552·29640·29702 @1684945ed). 읽는 곳은 `btree_range_scan_advance_over_filtered_keys ()`(29375, 이전 리프 단계 뒤 서 있으면 곧바로 반환), 시작의 재시작 가지(29130), `btree_range_scan ()` 루프(29888 — **시작/재개가 돌아온 뒤** 플래그로 재시작을 안다, 29946). 내리는 곳은 develop 에서 `btree_range_scan_resume ()` 입구(29178-29182)와 `BTREE_INIT_SCAN` 뿐 — `BTREE_RESET_SCAN`·`bts_reset_scan ()`(loose index scan 재시작)은 내리지 않는다.
+  - ✅ 리뷰 체크포인트: 재시작 요청을 내리는 자리는 **다음 위치 잡기의 입구**다. 요청을 낸 함수 안(재시작 가지)에서 내리고 돌아가면 루프가 재시작을 모르고 `C_page == NULL` 로 키 루프에 떨어진다(assert 29914 — PR#8363 단위 변이 `mut_alt_B` 로 확인). 시작·재개를 부르는 쪽은 돌아온 뒤 플래그를 봐야 한다 — `btree_get_next_key_info ()` 는 보지 않는다(§3 CBRD-27871). — 정소희(.52) 2026-11-03
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
@@ -683,6 +687,9 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 볼륨)은 `.50`이 demodb DDL까지 양방향 안전을 실측. **이 커밋을 걸치는 브랜치 전환·TC
 재실행 시 DB 재적재 여부를 먼저 판단할 것.** [출처 .52/.50 교차, 기준 develop 04620b2ce]
 
+- **[미수정 — 수정 CBRD-27851 / PR#8363 `570e44137`, 미머지] 내림차순 스캔이 첫 키 전에 재시작하면 시작을 끝없이 되풀이한다(질의 멈춤)** (.52, develop `1684945ed`, 2026-11-02): 시작 쪽에서 플래그를 내리는 곳이 없어 다음 시작이 왼쪽 리프를 정상으로 잡아도 남은 플래그로 다시 재시작(§2 「force_restart_from_root 계약」). 2015 `87587c68b3` 부터. 반복 경로에 인터럽트 검사 없음. gdb 주입(왼쪽 리프 조건부 래치 실패 + 재fix 에서 해제됨): develop 시작 7회 재진입 / 수정본 재시작 1회 뒤 0행. loose index scan 재시작도 같은 원인. 수정은 시작 입구에서 내림. 머지되면 해소로. — 정소희(.52) 2026-11-03
+- **[미수정 — CBRD-27848, #8213 회귀] 다른 타입 하한(merges 경계)의 내림차순 스캔이 왼쪽 리프 래치 실패의 특수 경우에서 시작 위치를 잘못 다시 찾는다** (.52, develop `cd341a6d6`, 2026-10-30): `btree_range_scan_descending_fix_prev_leaf ()` 특수 경우(29627-29637 @cd341a6d6)가 `search_key.bound` 만 세우고 `equal_as` 는 `DB_EQ` 그대로 — 배타 하한은 같은 키를 결과에 넣고(gdb 주입 0 → 192행), 포괄 하한은 하나를 잃고(100 → 99행), 두 번 실패하면 bound 없는 비교로 `ER_TP_CANT_COERCE`(-181). 재현 claude-workspace `projects/CBRD-27583/repro/d1_r19_02/`. — 정소희(.52) 2026-11-03
+- **[미수정 — CBRD-27871, develop 선재] 내림차순 `SELECT_KEY_INFO` 조회가 리프 경계 경합의 재시작 요청을 처리하지 않아 키가 아닌 행을 낸다** (.52, develop `1684945ed`, 2026-11-02): `btree_get_next_key_info ()`(20857)는 start/resume 뒤 플래그를 보지 않고 `C_page` 의 현재 키를 읽는다(20931 `assert (C_page != NULL)`). gdb 주입(래치 실패 + 왼쪽 리프 해제)에서 3,000 → 3,001행, 끼어든 행 `837 0 1 NULL`(놓은 리프의 슬롯 0, key_first_oid NULL). 최소 표 `create table t (a int); create index i_t_a on t (a);` 3,000행 + `select /*+ select_key_info(i_t_a) use_desc_idx */ key_pageid, key_slotid, key_oid_count, key_first_oid from t`. debug 는 assert 자리(미실행). 재현 claude-workspace `projects/CBRD-27851/repro/key_info_27871/`. — 정소희(.52) 2026-11-03
 ## 4. 진행중인 작업
 
 > 각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.

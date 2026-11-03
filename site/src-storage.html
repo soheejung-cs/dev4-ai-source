@@ -19,13 +19,13 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html" class="cur"><span>src/storage</span><span class="bd"><span class="cnt">33</span><span class="iss">⚠36</span></span></a></li>
+<li><a href="src-storage.html" class="cur"><span>src/storage</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠39</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
 <li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
 <li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠6</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/storage</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 36건</p>
+<h1>src/storage</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 39건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>버퍼풀, 힙 파일, B-tree, 디스크/파일 관리, 서버측 통계. 대부분 SERVER/SA 전용이며 소수 파일 (<code>byte_order.c</code>, <code>es.c</code>, <code>file_io.c</code>, <code>oid.c</code>, <code>statistics_cl.c</code>, <code>storage_common.c</code>, <code>tde.c</code> 등)만 <code>cubridcs</code>에도 컴파일된다. 핵심 파일: <code>page_buffer.c</code>(pgbuf_fix/unfix/dirty), <code>heap_file.c</code>(MVCC 버전·스캔), <code>btree.c</code>(검색·범위스캔·MVCC 인덱스), <code>disk_manager.c</code>/<code>file_manager.c</code>, <code>slotted_page.c</code>, <code>statistics_sr.c</code>/<code>statistics_ndv.c</code>, <code>system_catalog.c</code>. 상세는 <code>docs/</code> 하위 참조 문서 7종.</p>
@@ -342,6 +342,13 @@ pgbuf_timed_sleep → pgbuf_block_bcb (:7054) → pgbuf_latch_bcb_upon_fix (:649
 <li>heap/btree 스캔에 사용자 질의 경로용 page prefetch 는 없다(<code>prefetch</code> 는 vacuum 로그·파서 클래스 락·커서 OID·<code>__builtin_prefetch</code> 뿐); <code>posix_fadvise</code> 는 볼륨 open 시 1회 hint(<code>file_io.c</code>, <code>data_file_os_advise</code>). 도입 검토는 <code>imports/vimkim/storage/CBRD-26788-prefetch-survey.md</code> (CBRD-26788, PR 없음). 원문이 인용한 <code>parallel_heap_scan_page_threshold</code>(기본 2048) 는 develop 에 없고, 현행은 <strong><code>parallel_scan_page_threshold</code>(hidden, 기본 256)</strong> 등 <code>PRM_NAME_PARALLEL_*</code> 6종(system_parameter.c:781~789) — 원문 수치를 그대로 쓰면 오판. — vimkim 2026-09-30; .51 대조</li>
 <li><strong>복구(restart) 중에는 temp 볼륨 판정이 항상 false 다</strong> — <code>pgbuf_is_temporary_volume()</code> 이 <code>!LOG_ISRESTARTED()</code> 면 false 를 반환(주석: "until database is loaded and restarted, I will return false always"). 복구 중 temp 페이지는 WAL 면제·LRU 승격 억제·DWB 우회 등 temp 특수 처리를 받지 않는다 — 보수 측 동작이지만 근거 주석이 없다(원문 P8). — vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md) 2026-09-30; .51 대조 develop 0d0809963</li>
 </ul>
+<h4>btree_range_scan_start / btree_range_scan_resume — <code>force_restart_from_root</code> 계약 (btree.c, SERVER/SA)</h4>
+<ul>
+<li><strong>내림차순 스캔의 "루트부터 다시" 요청은 플래그로 호출자에게 돌아가고, 요청을 채우는 쪽(위치를 다시 잡는 쪽)이 입구에서 내린다</strong> (.52, develop <code>1684945ed</code>, 2026-11-02): 세우는 곳은 <code>btree_range_scan_descending_fix_prev_leaf ()</code> 의 경합 가지(왼쪽 리프 조건부 래치 실패 뒤 재fix 에서 해제됨·무효 리프·연결 끊김·위치 못 찾음 — btree.c:29535·29542·29552·29640·29702 @1684945ed). 읽는 곳은 <code>btree_range_scan_advance_over_filtered_keys ()</code>(29375, 이전 리프 단계 뒤 서 있으면 곧바로 반환), 시작의 재시작 가지(29130), <code>btree_range_scan ()</code> 루프(29888 — <strong>시작/재개가 돌아온 뒤</strong> 플래그로 재시작을 안다, 29946). 내리는 곳은 develop 에서 <code>btree_range_scan_resume ()</code> 입구(29178-29182)와 <code>BTREE_INIT_SCAN</code> 뿐 — <code>BTREE_RESET_SCAN</code>·<code>bts_reset_scan ()</code>(loose index scan 재시작)은 내리지 않는다.</li>
+<ul>
+<li>✅ 리뷰 체크포인트: 재시작 요청을 내리는 자리는 <strong>다음 위치 잡기의 입구</strong>다. 요청을 낸 함수 안(재시작 가지)에서 내리고 돌아가면 루프가 재시작을 모르고 <code>C_page == NULL</code> 로 키 루프에 떨어진다(assert 29914 — PR#8363 단위 변이 <code>mut_alt_B</code> 로 확인). 시작·재개를 부르는 쪽은 돌아온 뒤 플래그를 봐야 한다 — <code>btree_get_next_key_info ()</code> 는 보지 않는다(§3 CBRD-27871). — 정소희(.52) 2026-11-03</li>
+</ul>
+</ul>
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
 <ul>
@@ -378,6 +385,11 @@ pgbuf_timed_sleep → pgbuf_block_bcb (:7054) → pgbuf_latch_bcb_upon_fix (:649
 <li><strong>[미수정(잠재, 지금은 도달 불가) — <code>pgbuf_claim_bcb_for_fix</code> 의 <code>dwb_read_page</code> 실패 경로가 BCB mutex·버퍼 락을 쥔 채 반환]</strong> (develop <code>2d925cb86</code> 대조 2026-10-28): <code>pgbuf_allocate_bcb</code> 뒤 호출자는 <code>bufptr-&gt;mutex</code> 를 쥐고 있는데(page_buffer.c:8458 주석) <code>dwb_read_page</code> 실패 분기(:8486-8491)는 <code>assert (false); return NULL;</code> 뿐이라, 형제 실패 경로(<code>fileio_read</code> 실패 :8499-8520, TDE 복호 실패 :8527-8535)가 하는 <code>pgbuf_put_bcb_into_invalid_list</code>(mutex 해제)·<code>pgbuf_unlock_page</code>(같은 VPID 대기자 해제)를 건너뛴다. 지금은 <code>dwb_read_page ()</code>(double_write_buffer.cpp:3979)가 언제나 <code>NO_ERROR</code> 를 돌려줘 이 분기에 오지 않는다 — DWB 읽기에 실패 반환을 넣는 변경이 이 구멍을 연다. 출처 vimkim(원문 imports/vimkim/pgbuf/09-issue-proposals.md P2 부수 주장, 호출 문맥 미대조였음) — 정소희(.50) 2026-10-28</li>
 </ul>
 <p><strong>CBRD-24094(10a1df3e6, OID-ordered overflow chains + separator directory)는 온디스크 포맷 비호환</strong> — 구 포맷 볼륨을 새 빌드로 열면 <strong>읽기는 되지만 뷰 생성 등 카탈로그 쓰기에서 깨진다</strong>(사용자 실측 2026-08-28, 3컨테이너 전체 재적재로 대응). 역방향(구 빌드 ↔ 새 포맷 볼륨)은 <code>.50</code>이 demodb DDL까지 양방향 안전을 실측. <strong>이 커밋을 걸치는 브랜치 전환·TC 재실행 시 DB 재적재 여부를 먼저 판단할 것.</strong> [출처 .52/.50 교차, 기준 develop 04620b2ce]</p>
+<ul>
+<li><strong>[미수정 — 수정 CBRD-27851 / PR#8363 <code>570e44137</code>, 미머지] 내림차순 스캔이 첫 키 전에 재시작하면 시작을 끝없이 되풀이한다(질의 멈춤)</strong> (.52, develop <code>1684945ed</code>, 2026-11-02): 시작 쪽에서 플래그를 내리는 곳이 없어 다음 시작이 왼쪽 리프를 정상으로 잡아도 남은 플래그로 다시 재시작(§2 「force_restart_from_root 계약」). 2015 <code>87587c68b3</code> 부터. 반복 경로에 인터럽트 검사 없음. gdb 주입(왼쪽 리프 조건부 래치 실패 + 재fix 에서 해제됨): develop 시작 7회 재진입 / 수정본 재시작 1회 뒤 0행. loose index scan 재시작도 같은 원인. 수정은 시작 입구에서 내림. 머지되면 해소로. — 정소희(.52) 2026-11-03</li>
+<li><strong>[미수정 — CBRD-27848, #8213 회귀] 다른 타입 하한(merges 경계)의 내림차순 스캔이 왼쪽 리프 래치 실패의 특수 경우에서 시작 위치를 잘못 다시 찾는다</strong> (.52, develop <code>cd341a6d6</code>, 2026-10-30): <code>btree_range_scan_descending_fix_prev_leaf ()</code> 특수 경우(29627-29637 @cd341a6d6)가 <code>search_key.bound</code> 만 세우고 <code>equal_as</code> 는 <code>DB_EQ</code> 그대로 — 배타 하한은 같은 키를 결과에 넣고(gdb 주입 0 → 192행), 포괄 하한은 하나를 잃고(100 → 99행), 두 번 실패하면 bound 없는 비교로 <code>ER_TP_CANT_COERCE</code>(-181). 재현 claude-workspace <code>projects/CBRD-27583/repro/d1_r19_02/</code>. — 정소희(.52) 2026-11-03</li>
+<li><strong>[미수정 — CBRD-27871, develop 선재] 내림차순 <code>SELECT_KEY_INFO</code> 조회가 리프 경계 경합의 재시작 요청을 처리하지 않아 키가 아닌 행을 낸다</strong> (.52, develop <code>1684945ed</code>, 2026-11-02): <code>btree_get_next_key_info ()</code>(20857)는 start/resume 뒤 플래그를 보지 않고 <code>C_page</code> 의 현재 키를 읽는다(20931 <code>assert (C_page != NULL)</code>). gdb 주입(래치 실패 + 왼쪽 리프 해제)에서 3,000 → 3,001행, 끼어든 행 <code>837 0 1 NULL</code>(놓은 리프의 슬롯 0, key_first_oid NULL). 최소 표 <code>create table t (a int); create index i_t_a on t (a);</code> 3,000행 + <code>select /*+ select_key_info(i_t_a) use_desc_idx */ key_pageid, key_slotid, key_oid_count, key_first_oid from t</code>. debug 는 assert 자리(미실행). 재현 claude-workspace <code>projects/CBRD-27851/repro/key_info_27871/</code>. — 정소희(.52) 2026-11-03</li>
+</ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
 <h4>.50</h4>

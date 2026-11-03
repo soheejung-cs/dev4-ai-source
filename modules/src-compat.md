@@ -117,6 +117,10 @@
 
 - **세션 변수는 DATE·DATETIME 값을 문자열로 보관한다** (.50, develop `582fa3941` 실측, 2026-10-30): `set @d = date'2022-09-20'` 뒤 `typeof(@d)` 는 `character varying (1073741823)` 이다. 그래서 날짜 열 술어는 타입 검사가 `cast(@d as date)` 로 감싸고, 옵티마이저에는 맨 세션 변수 읽기가 아니라 cast 식으로 도착한다. 문자열 값과 INT 열(`a = @v`, @v = '1')은 cast 없이 맨 읽기로 남고, 히스토그램은 키 종류 불일치로 기본값에 남는다(histogram_cl.cpp:1207). 문자열로 바뀌는 지점(대입 경로의 어느 함수)은 **미확인**. — 정소희(.50) 2026-11-03
 
+### do_recompile_and_execute_prepared_statement — 서브세션의 수명 (db_vdb.c, CS/SA 클라이언트)
+- **EXECUTE 가 다시 컴파일한 서브세션은 바깥 세션 `next` 목록에 붙어 바깥 세션 close 때까지 남는다 — kept tree 로 등록되는 것만 빠진다** (.52, develop `604ab8b22`·`1684945ed`, 2026-10-30~11-03): 붙이는 곳은 이 함수 하나(db_vdb.c:5114-5123 @604ab8b22, 2014 `6522201dab`), 떼는 곳은 `db_prepared_tree_register ()`(:881 — 등록하며 목록에서 떼어 `db_Kept_trees` 로) 하나, 놓는 곳은 `db_close_session_local ()`(바깥 세션 close 가 `next` 를 차례로 닫음). 그래서 **다시 컴파일했는데 등록되지 않는 실행**만 쌓인다: ① PREPARE 가 XASL 을 남기지 않은 SELECT 중 등록 조건(`is_bind_candidate || signature_plan`)을 못 갖춘 것 — 히스토그램 없는 VARCHAR 열 `c = ?` 는 `HV_PRED_PLAN_UNPEEKED` 로 매 EXECUTE 재컴파일 + verdict STOP 이라 미등록(gdb: 50회 실행에 재컴파일 51), ② DML(언제나 재컴파일), ③ 오류로 끝난 실행(`err >= 0` 아님). CHAR·INT 열 SELECT 는 PREPARE 가 플랜을 안 만들어(`plan_at_execute`) 첫 실행 뒤 signature plan 으로 등록 → 쌓이지 않는다; `/*+ RECOMPILE */` 을 넣어 매번 재컴파일(51회)해도 등록돼 증가 0. 실측(release CS, 같은 핸들 반복): VARCHAR SELECT 약 160 KB/회, UPDATE 약 147 KB/회, 매번 PK 중복 실패 INSERT 약 145 KB/회(리뷰어 실측), CAS(CCI `cci_prepare` 한 번 + `cci_execute` 반복) 약 160 KB/회. csql `-i` 는 줄마다 바깥 세션을 새로 열고 닫아 쌓이지 않는다(재현 판정에 쓰면 오판 — 자가진화 #042).
+  - ✅ 리뷰 체크포인트: 결과 기술자는 서브세션 메모리를 참조하지 않는다 — 목록 ID 는 `pt_new_query_result_descriptor ()` 의 `cursor_open` 이 복사, 열 정보 `db_cp_query_type ()`, DML 값 `db_get_db_value_query_result ()` 의 `db_value_copy`. 서브세션 close 는 서버 질의를 끝내지 않는다. 이 함수에 서브세션(kept tree·서명 플랜)이 `session` 으로 들어오면 그 `next` 는 다른 목록이므로 손대면 안 된다. — 정소희(.52) 2026-11-03
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
@@ -137,6 +141,7 @@
   `do_reexecute_prepared_statement_from_kept_tree(force_replan=true)`(:2727, :4188). "OFF = 첫값 플랜 고정" 계약과 어긋남. CBRD-27231 과 함께
   볼 것. — 정소희(.50) 2026-10-28
 
+- **[미수정 — 수정 CBRD-27852 / PR#8343 `ec36a772f`(head `0c389b3f7`, 승인), 미머지] 같은 SQL EXECUTE 핸들을 되풀이하면 재컴파일 서브세션이 실행마다 쌓인다** (.52, develop `604ab8b22`, 2026-10-30): §2 「do_recompile_and_execute_prepared_statement — 서브세션의 수명」. 수정은 이 함수 입구에서 바깥 세션(`!is_subsession_for_prepared`)의 `next` 를 닫는다. TC private-ex `cbrd_27852`(Case 4 = 매번 실패 INSERT, #8006 과 무관). 머지되면 이 항목을 해소로 바꾼다. — 정소희(.52) 2026-11-03
 ## 4. 진행중인 작업
 
 > 각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.

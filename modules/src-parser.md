@@ -111,6 +111,7 @@ SQL 텍스트 → `csql_lexer.l` → `csql_grammar.y`(646KB bison) → PT_NODE �
 ### pt_to_insert_xasl / pt_append_assignment_references — ODKU 가 읽는 소스 컬럼 (xasl_generation.c)
 
 - **ODKU 가 읽는 소스 컬럼은 SELECT 목록의 숨은 컬럼이 된다** (.51, develop `1684945ed`, 2026-11-02): `pt_to_insert_xasl ()` 이 aptr XASL 을 만들기 전에 `pt_append_assignment_references ()` 로 붙인다(trace rewritten query `select max(s.g)+1, s.c from … where s.g=?`). 사용자가 쓰면 "not single valued" 로 거절되는 "집계 옆 비집계 컬럼" 이 여기서만 생긴다. 실행기가 그 값을 어디서 읽는지는 src-query §2 「qexec_execute_mainblock」, 채우지 않는 경로는 src-query §3(CBRD-27870). — 정소희(.50) 2026-11-03
+- **집계 옆 숨은 컬럼을 만드는 두 번째 재작성: SELECT 목록 상관 서브쿼리** (.51, develop `1684945ed`, 비교 `ad7a255c5`, PR#8364 `756c19e28`, 2026-11-03): 집계 SELECT 의 SELECT 목록에 상관 서브쿼리가 있으면 `mq_translate_local ()` 이(`mq_has_class_methods_corr_subqueries ()`) `mq_rewrite_aggregate_as_derived ()` 로 집계 부분을 파생 테이블로 만들고, 서브쿼리가 읽는 소스 컬럼을 그 파생 테이블의 숨은 컬럼으로 싣는다(rewritten query `select a_?, ?, (select count(a_?) from dual dual) from (select count(...), t?.a from t? t? where ...) t? (a_?, a_?)`). 의미 검사를 통과하는 것은 외부 컬럼을 집계로 감싼 서브쿼리뿐이다(`(select max(s3.c))`, `(select count(a))`); `(select s3.c from db_root)` 와 분석 함수의 비집계 컬럼(`first_value(c) over ()`)은 "not single valued". 실측(release SA): `SELECT COUNT(*), (SELECT MAX(s3.c)) FROM s3 WHERE g = 2`(s3 = (1,'g1',1),(2,'g2',2),(1,'g1b',3))가 `ad7a255c5` 1·'g2', develop 1·NULL(페이지 배치), `756c19e28` 1·'g2'; `(SELECT COUNT(s3.c))` 는 1 / 0 / 1. — 정소희(.51) 2026-11-03, 환류 정소희(.52) 2026-11-03
 
 ## 3. 예비 이슈 사항
 
