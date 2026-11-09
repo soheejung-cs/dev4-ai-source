@@ -19,14 +19,14 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠39</span></span></a></li>
-<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
-<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html" class="cur"><span>src/compat</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠34</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠38</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
+<li><a href="src-compat.html" class="cur"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/compat</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 6건</p>
+<h1>src/compat</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 7건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>공개 API 층 — 클라이언트/서버를 잇는 <code>db_*</code> API와 <code>DB_VALUE</code>(union 컨테이너, <code>dbtype_def.h</code>). <code>db_macro.c</code>/<code>dbtype_function.i</code>(생성·접근·정리), <code>db_vdb.c</code>(세션·컴파일·실행), <code>db_set.c</code>, <code>db_obj.c</code>, <code>db_date.c</code>, <code>db_json.cpp</code>, <code>db_elo.c</code>(LOB), <code>dbi_compat.h</code>(클라이언트 노출 에러 코드 — <code>error_code.h</code> 미러). 접두사: <code>db_</code>(공개 API), <code>pr_</code>(내부 primitive).</p>
@@ -83,6 +83,10 @@
 <li><code>db_value_free()</code>는 <code>pr_free_ext_value()</code>로 <strong>컨테이너 자체까지 해제</strong> — 스택 DB_VALUE에 쓰면 안 됨.</li>
 <li class="ck"><span class="cklab">리뷰 체크포인트</span>non-trivial 값의 모든 경로(에러 포함)에서 <code>db_value_clear()</code>가 호출되는가?</li>
 </ul>
+<h4>db_value_domain_init — 문자열·비트 정밀도 상한 (db_macro.c)</h4>
+<ul>
+<li><strong>문자열·비트 DB_VALUE 를 만드는 함수는 최대를 넘는 정밀도를 거부한다(ER_INVALID_PRECISION) — 캐스트는 그 값을 대상 도메인 정밀도로 저장한다</strong> (.50, ef2c78cda, 2026-11-03, 단위 실측): <code>db_value_domain_init</code>(db_macro.c:197·223·246)이 VARCHAR·BIT·VARBIT 정밀도 &gt; 최대면 -649. <code>mr_setval_string (copy=false)</code> 가 원천 정밀도로 <code>db_make_varchar</code> 를 부르므로, 선언 정밀도가 최대를 넘는 값을 "최대" 로 정규화(tp_domain_resolve_value 식)해 빌려 넣으면 오류가 난다(PR#8378 U3, 91465a14a 에서 캐스트로 보냄). 그런 값을 만드는 생산자는 찾지 못했다. 부동 정밀도 -1 을 최대로 바꾸는 쪽은 src-query §2 「db_string_concatenate / GROUP_CONCAT」. — 정소희(.52) 2026-11-09</li>
+</ul>
 <h4>db_open_buffer / db_compile_statement / db_execute_statement (db_vdb.c)</h4>
 <ul>
 <li>클라이언트 문장 처리 3단: <code>db_open_buffer</code>(파싱, 내부 <code>parser_parse_string_with_escapes</code> L477) → <code>db_compile_statement</code>(의미 분석·XASL 생성, <code>db_compile_statement_local</code> L820) → <code>db_execute_statement</code>(실행). csql·CAS가 이 경로를 그대로 쓴다.</li>
@@ -97,11 +101,13 @@
 </ul>
 <h4>SQL PREPARE/EXECUTE 의 kept tree — db_prepared_tree_register / do_reexecute_prepared_statement_from_kept_tree (db_vdb.c:861/4188)</h4>
 <ul>
-<li><strong><code>BIND_SENSITIVE</code>/<code>plan_cache_bind_sensitivity</code> 의 재플랜 검사는 SQL PREPARE/EXECUTE 에서 kept tree 위에서만 돌아, csql 에서 EXECUTE 를 줄마다 따로 치면(입력 버퍼 = DB_SESSION 이 줄마다 새로 생김) 관측되지 않고 한 줄에 이어 쓰면 관측된다</strong> (.52, <code>c76ac823d</code>, 2026-09-22 — <code>a = ?</code> 대조군; develop <code>2d925cb86</code> 정적 재확인): kept tree 는 소유 DB_SESSION 의 <code>kept_trees</code> 목록에 매달려 세션이 닫히면 함께 풀리고 (등록부 주석 db_vdb.c:746-760, <code>db_prepared_tree_register ()</code> :861, 첫 실행 뒤 등록 :4418), 나중 EXECUTE 는 <code>db_prepared_tree_lookup ()</code> (:2715) → <code>do_reexecute_prepared_statement_from_kept_tree ()</code>(:4188)에서만 검사한다(<code>db_execute_and_keep_statement_local ()</code> 의 같은 검사는 <code>set_host_var</code> 로 막혀 kept tree 에선 안 돈다 — :4226-4230 주석). kept tree 범위 확대는 CBRD-27231(develop 미반영). CTP(JDBC 문장별 실행) 에서도 관측 불가 — CBRD-26959·27143 TC 가 첫 peek 만 검증하는 이유. — 정소희(.50) 2026-10-28</li>
+<li><strong><code>BIND_SENSITIVE</code>/<code>plan_cache_bind_sensitivity</code> 의 재플랜 검사는 SQL PREPARE/EXECUTE 에서 kept tree 위에서만 돌아, csql 에서 EXECUTE 를 줄마다 따로 치면(입력 버퍼 = DB_SESSION 이 줄마다 새로 생김) 관측되지 않고 한 줄에 이어 쓰면 관측된다</strong> (.52, <code>c76ac823d</code>, 2026-09-22 — <code>a = ?</code> 대조군; develop <code>2d925cb86</code> 정적 재확인): kept tree 는 소유 DB_SESSION 의 <code>kept_trees</code> 목록에 매달려 세션이 닫히면 함께 풀리고 (등록부 주석 db_vdb.c:746-760, <code>db_prepared_tree_register ()</code> :861, 첫 실행 뒤 등록 :4418), 나중 EXECUTE 는 <code>db_prepared_tree_lookup ()</code> (:2715) → <code>do_reexecute_prepared_statement_from_kept_tree ()</code>(:4188)에서만 검사한다(<code>db_execute_and_keep_statement_local ()</code> 의 같은 검사는 <code>set_host_var</code> 로 막혀 kept tree 에선 안 돈다 — :4226-4230 주석). kept tree 범위 확대는 CBRD-27231(develop 미반영) → <strong>갱신(2026-11-09 .52)</strong>: 연결 범위(<code>db_Kept_trees</code>)로 옮긴 것은 #8213(<code>52193efa9</code>)이다 — 아래 항목, 그 뒤 회귀와 CBRD-27231 해소는 §3. CTP(JDBC 문장별 실행) 에서도 관측 불가 — CBRD-26959·27143 TC 가 첫 peek 만 검증하는 이유. — 정소희(.50) 2026-10-28</li>
+<li><strong>kept tree 는 첫 실행 컴파일 뒤에만 등록되고 등록 전에 <code>hv_pred_plan_unpeeked = 0</code></strong> (.52, develop <code>1684945ed</code>~<code>ef2c78cda</code>, 2026-11-03): db_vdb.c <code>do_recompile_and_execute_prepared_statement</code>. #8213(<code>52193efa9</code>) 이후 kept tree 는 연결 범위(<code>db_Kept_trees</code>)에 있다 — 그 뒤 force_replan 회귀와 해소(CBRD-27231)는 §3. — 정소희(.52) 2026-11-09</li>
 </ul>
 <h4>show trace 의 <code>Query Plan:</code> 블록 — plan_trace (query_planner.c, execute_statement.c)</h4>
 <ul>
 <li><strong><code>show trace</code> 의 <code>Query Plan:</code> 블록은 그 세션 파서가 컴파일/재플랜하며 <code>plan_trace</code> 를 남긴 실행에만 나타난다 — 첫 peek 재플랜과 한 줄 형태의 kept-tree 재플랜에서 보이고, 캐시 히트 실행에서는 없다</strong> (.52, <code>c76ac823d</code>, 2026-09-22; develop <code>2d925cb86</code> 정적 재확인): 플랜 생성 때 <code>qo_top_plan_print_json/text ()</code> 가 <code>parser-&gt;plan_trace</code> 에 쌓고(query_planner.c:15848·16201) <code>do_send_plan_trace_to_session ()</code> (execute_statement.c:21414)이 세션 trace 로 보낸다. 재플랜은 마커 컴파일이 쌓은 plan_trace 를 버리고 실제로 도는 플랜만 남긴다 (<code>do_replan_statement_internal ()</code> db_vdb.c:4133-4159). TC 에서 "재플랜이 일어났나" 의 판정 신호로 쓸 수 있다. 한 줄 형태의 첫 <code>show trace</code> 가 <code>TABLE SCAN (dual)</code>(<code>trace_stats()</code> 자신의 플랜)을 보이는 것은 표기 잡음. — 정소희(.50) 2026-10-28</li>
+<li><strong>SA(<code>csql -S</code>)에서는 재계획 여부를 이 블록으로 가르지 못했다 — PREPARE 덤프가 한 번만 보였다(원인 미확인)</strong> (.51, PR#8325 head <code>5cfef7f5b</code>, 2026-11-03): 서버 모드에서는 <code>show trace</code> 의 <code>Query Plan:</code> 출력 유무로 보인다(위 항목과 같음). — 정소희(.52) 2026-11-09</li>
 </ul>
 <h4>values_list_to_values_array — <code>EXECUTE … USING</code> 의 세션 변수 (db_vdb.c)</h4>
 <ul>
@@ -118,14 +124,26 @@
 <li>✅ 리뷰 체크포인트: 결과 기술자는 서브세션 메모리를 참조하지 않는다 — 목록 ID 는 <code>pt_new_query_result_descriptor ()</code> 의 <code>cursor_open</code> 이 복사, 열 정보 <code>db_cp_query_type ()</code>, DML 값 <code>db_get_db_value_query_result ()</code> 의 <code>db_value_copy</code>. 서브세션 close 는 서버 질의를 끝내지 않는다. 이 함수에 서브세션(kept tree·서명 플랜)이 <code>session</code> 으로 들어오면 그 <code>next</code> 는 다른 목록이므로 손대면 안 된다. — 정소희(.52) 2026-11-03</li>
 </ul>
 </ul>
+<h4>db_recompile_for_bind_signature — 바인드 서명마다 문장 텍스트로 다시 컴파일 (db_vdb.c:3069)</h4>
+<ul>
+<li><strong><code>db_recompile_for_bind_signature ()</code>(db_vdb.c:3069)는 텍스트가 없으면 ER_QPROC_INVALID_XASLNODE(-452)</strong> (.51, develop <code>953e83256</code>, 2026-11-06 — 동적 확인 <code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>): CBRD-27583 이후 CAS 는 바인드 타입 서명마다 문장 텍스트로 다시 컴파일한다. csql PREPARE/EXECUTE 는 이 경로가 아니다.</li>
+<ul>
+<li>실측(CTP JDBC 바인드): develop release 에서 접히는 갈래·남는 갈래 모두 -452. ORDER BY·LIMIT 으로 파생 테이블이 되는 꼴은 develop 도 정상. 두 갈래 모두 거짓(NULL 로 접힘)은 수정 전후 같은 오류(-21109).</li>
+<li>텍스트를 잃는 원인(집합 연산 접기)과 수정 PR#8428(미머지)은 src-parser §3(CBRD-27961). — 정소희(.52) 2026-11-09</li>
+</ul>
+</ul>
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
 <ul>
 <li><strong>히스토그램 없는 컬럼의 <code>col = ?</code> 같은, 히스토그램으로 가격 매길 술어가 없는 prepared SELECT 가 <code>HV_PRED_PLAN_UNPEEKED</code> 를 달면 kept tree 가 등록되지 않아 SQL EXECUTE 마다 새 서브세션에서 다시 파싱·컴파일된다</strong> — <strong>미수정</strong> (develop <code>2d925cb86</code> 재확인 2026-10-28 — 정적) (.52, <code>c76ac823d</code> strace 실측 113 vs 64 왕복, 2026-09-22): 표시를 다는 조건(xasl_generation.c:18556-18565 — 값 없이 컴파일 + 호스트 변수 + <code>histogram_stmt_has_hv_predicate ()</code>)의 <code>hv_pred_walk ()</code>(histogram_cl.cpp:3020)가 히스토그램 존재를 보지 않는 구조 검사이고, <code>do_get_prepared_statement_info ()</code> 는 그 표시가 있으면 XASL_ID 를 무조건 비운다 (db_vdb.c:3735). <code>do_recompile_and_execute_prepared_statement ()</code> 의 판정은 가격 매길 술어가 없어(<code>histogram_get_total_rows ()</code> 실패 → <code>bind_term_vector ()</code> 0개) <code>BIND_WATCH_STOP</code>(:293)이라 재플랜도 kept tree 등록도 없이 끝나고(:4403·:4418), 캐시의 마커 플랜은 표시를 그대로 지녀 다음 EXECUTE 도 같은 길을 탄다. 재컴파일은 trace·<code>optimization level 513</code> 덤프(서브세션 컴파일은 덤프 안 함)·<code>cubrid statdump</code>(카운터 미갱신)로는 안 보이고 strace 왕복 수로만 관측됐다(<code>projects/CBRD-27143/repro/g2_strace_count.md</code>). 고치는 안: <code>hv_pred_walk ()</code> 가 후보 컬럼의 히스토그램 존재를 함께 요구(열린 PR#8006 <code>1d5858374</code>, develop 미반영). — 정소희(.50) 2026-10-28</li>
 <li><strong>한 줄 형태의 kept-tree 경로에서 <code>plan_cache_bind_sensitivity</code> OFF 인데도 두 번째 EXECUTE 가 한 번 더 재플랜되고(값에 맞춰 플랜이 바뀜) 세 번째부터 유지된다 — EQ 술어</strong> — <strong>미수정(재확인 못 함)</strong> (develop <code>2d925cb86</code> 정적: 추정 경로는 남아 있으나 <code>620ceaf6a</code> 가 이 경로를 크게 바꿔 동적 재확인 필요) (.52, <code>c76ac823d</code>, 2026-09-22): 재현 <code>projects/CBRD-27143/repro/oneline_off.sql</code>. 추정 원인: prepared 정보의 마커 XASL 이 <code>HV_PRED_PLAN_UNPEEKED</code> 를 계속 지녀 <code>do_get_prepared_statement_info()</code> 가 xasl_id 를 비우고(db_vdb.c:3735) <code>do_recompile</code> → <code>do_reexecute_prepared_statement_from_kept_tree(force_replan=true)</code>(:2727, :4188). "OFF = 첫값 플랜 고정" 계약과 어긋남. CBRD-27231 과 함께 볼 것. — 정소희(.50) 2026-10-28</li>
+<li><strong>[해소됨 — CBRD-27231, PR#8314 develop <code>226352283</code> 2026-11-03] #8213 뒤 kept tree 재실행이 2번째 EXECUTE 부터 매번 재플랜했다</strong> (.52, develop <code>1684945ed</code>~<code>ef2c78cda</code>, #8213 직전 <code>4ddf3b155</code>, 2026-11-03): #8213(<code>52193efa9</code>)이 kept tree 를 연결 범위(<code>db_Kept_trees</code>)로 옮긴 뒤, <code>db_execute_and_keep_statement_local ()</code> 의 kept 분기가 <code>force_replan = do_recompile &amp;&amp; !plan_at_execute</code> 로 넘겨 2번째 EXECUTE 부터 매번 <code>do_replan_statement_with_bind_peek (force_compile=1)</code> — <code>do_get_prepared_statement_info ()</code> 가 PREPARE 저장 헤더의 <code>HV_PRED_PLAN_UNPEEKED</code>·<code>BIND_WATCH_CANDIDATE</code> 로도 xasl id 를 비우기 때문(매 EXECUTE 참). LIKE·MRO/SORT-LIMIT 판정만 <code>bind_before_compile</code> 을 세운다.</li>
+<ul>
+<li>수정(#8314 <code>5eefba3d4</code>): force_replan = <code>bind_before_compile</code>. SA 판별(같은 핸들 4회): <code>=</code> PPPP → P---, 범위 PPPP → PP--, LIMIT 50→500 재컴파일 유지 — #8213 직전과 같음. — 정소희(.52) 2026-11-09</li>
+</ul>
 </ul>
 <ul>
-<li><strong>[미수정 — 수정 CBRD-27852 / PR#8343 <code>ec36a772f</code>(head <code>0c389b3f7</code>, 승인), 미머지] 같은 SQL EXECUTE 핸들을 되풀이하면 재컴파일 서브세션이 실행마다 쌓인다</strong> (.52, develop <code>604ab8b22</code>, 2026-10-30): §2 「do_recompile_and_execute_prepared_statement — 서브세션의 수명」. 수정은 이 함수 입구에서 바깥 세션(<code>!is_subsession_for_prepared</code>)의 <code>next</code> 를 닫는다. TC private-ex <code>cbrd_27852</code>(Case 4 = 매번 실패 INSERT, #8006 과 무관). 머지되면 이 항목을 해소로 바꾼다. — 정소희(.52) 2026-11-03</li>
+<li><strong>[해소됨 — <code>80b84317d</code>(CBRD-27852 / PR#8343 머지 2026-11-03), .51] 같은 SQL EXECUTE 핸들을 되풀이하면 재컴파일 서브세션이 실행마다 쌓인다</strong> (.52, develop <code>604ab8b22</code>, 2026-10-30): §2 「do_recompile_and_execute_prepared_statement — 서브세션의 수명」. 수정은 이 함수 입구에서 바깥 세션(<code>!is_subsession_for_prepared</code>)의 <code>next</code> 를 닫는다. TC private-ex <code>cbrd_27852</code>(Case 4 = 매번 실패 INSERT, #8006 과 무관). 머지되면 이 항목을 해소로 바꾼다. — 정소희(.52) 2026-11-03</li>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>

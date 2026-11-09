@@ -57,7 +57,11 @@ query 모듈에 있지만 이 모듈의 타입·스트림 유틸이 그 경계�
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
 
-- (현재 등록된 예비 이슈 없음)
+- **[미수정 — CBRD-27955, 수정 PR#8425 `0ad0ba8bf` 미머지] `xasl_dump_with_id ()`(xasl_iteration.cpp:84)가 덤프 문자열을 `_er_log_debug ()` 의 서식 자리에 넘긴다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`): 덤프에 맨 위 XASL 의 `query_alias`(질의 문장)가 들어가므로 리터럴로 남은 `%n`·`%s` 를 vfprintf 가 해석한다. 부르는 곳은 `make_parallel_query_executor_recursively ()`(px_query_executor.cpp:307, `#if !defined(NDEBUG)`) 하나라 debug 서버만 해당.
+  - 실측: develop debug 에서 `... LIKE '%n%n%n%n' UNION ALL ... NOT LIKE '%n%n%n%n'` 한 번에 서버 죽음(CTP sql cbrd_27955 Case 1 뒤 -677).
+  - 같은 꼴(비리터럴 서식)의 다른 호출(resource_tracker.cpp:79, log_recovery_redo_perf.hpp:218, thread_worker_pool_impl.hpp:902, vacuum.c:7379, btree.c:23974)은 코드가 만든 문자열이다.
+  - `er_log_debug` 매개변수(PRM_ID_ER_LOG_DEBUG)는 debug 빌드 기본값이 켜짐(system_parameter.c:1072).
+  - 수정 PR#8425 `0ad0ba8bf`(미머지): `"%s"` 의 인자로. — 정소희(.52) 2026-11-09
 
 ## 4. 진행중인 작업
 

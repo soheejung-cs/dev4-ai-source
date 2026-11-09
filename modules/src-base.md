@@ -124,6 +124,8 @@
   정상 동작하고 성능도 동일하다"만 근거로 달려 있으면 불충분하다고 지적하고 디버그 빌드 CTP 결과를
   요구할 것.
 
+- **debug(SERVER_MODE, `!NDEBUG` — CI 의 optdebug 포함) 서버는 요청마다 `db_private_alloc` 을 추적하고, 요청 끝에 남은 할당을 덤프한 뒤 abort 한다 — release 는 요청의 private heap 을 비워 요청 안의 누수가 요청을 넘지 않는다** (.51, develop `226352283`, 2026-11-03): 요청 끝 `net_server_request ()` → `pop_resource_tracks ()`(thread_entry.cpp:443)가 남은 할당을 서버 에러 로그에 덤프(`tracked res_ptr=… first_caller=<파일:줄>`)한 뒤 `restrack_assert (false)`(resource_tracker.hpp:426·455)로 abort 한다. 억제는 기본 꺼짐. release 는 그 뒤 `db_clear_private_heap ()`(network_sr.c:949)이 요청의 private heap 을 비운다. abort 스택은 서버 `abort_handler` 가 `$CUBRID/log/coredump/cub_server_<시각>.coredump` 에 남긴다(src-executables §2 「abort_handler」). 실측: 분할 부모 2개 표 INSERT 1행 → 덤프 `xasl_stream.cpp:85·244·254`·`heap_file.c:10611`(파티션 캐시 미적중이면 `heap_get_class_partitions` 쪽 할당까지 15건) — CBRD-27845(src-transaction §3). — 정소희(.52) 2026-11-09
+
 ### mht_get_hash_number (memory_hash.c) — DB_VALUE 해시의 문자열 처리
 
 > 아래 세 항목의 줄 번호는 `89722cf4e` 기준이다. develop `2d925cb86` 에서 language_support.c·object_primitive.c 는 그대로이고

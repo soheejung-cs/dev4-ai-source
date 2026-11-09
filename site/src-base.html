@@ -19,14 +19,14 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html" class="cur"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠39</span></span></a></li>
-<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
-<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠34</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠38</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
@@ -111,6 +111,9 @@
 <li>귀결: 릴리스 빌드에서 돌린 벤치마크는 페이지 fix 누락이나 <code>db_private_alloc</code> 해제 누락을 원리상 한 건도 검출하지 못한다. 실제로 PR#7658은 릴리스 TPC-H에서 22/22 질의 결과 바이트가 동일했는데도 디버그 CI에서 abort가 쏟아졌다. 이 계열 버그의 재현·검증은 반드시 디버그 빌드 + CTP로 해야 하며, 릴리스 성능·정합성 수치는 반증이 되지 않는다.</li>
 <li>디버그 빌드의 resource tracker는 <code>push_track()</code>/<code>pop_track()</code> 쌍으로 페이지 fix/락 불균형을 pop 시점에 검출한다.</li>
 <li class="ck"><span class="cklab">리뷰 체크포인트</span>자원(페이지 fix, private 메모리) 획득/해제 경로를 건드린 변경에 "릴리스에서 정상 동작하고 성능도 동일하다"만 근거로 달려 있으면 불충분하다고 지적하고 디버그 빌드 CTP 결과를 요구할 것.</li>
+</ul>
+<ul>
+<li><strong>debug(SERVER_MODE, <code>!NDEBUG</code> — CI 의 optdebug 포함) 서버는 요청마다 <code>db_private_alloc</code> 을 추적하고, 요청 끝에 남은 할당을 덤프한 뒤 abort 한다 — release 는 요청의 private heap 을 비워 요청 안의 누수가 요청을 넘지 않는다</strong> (.51, develop <code>226352283</code>, 2026-11-03): 요청 끝 <code>net_server_request ()</code> → <code>pop_resource_tracks ()</code>(thread_entry.cpp:443)가 남은 할당을 서버 에러 로그에 덤프(<code>tracked res_ptr=… first_caller=&lt;파일:줄&gt;</code>)한 뒤 <code>restrack_assert (false)</code>(resource_tracker.hpp:426·455)로 abort 한다. 억제는 기본 꺼짐. release 는 그 뒤 <code>db_clear_private_heap ()</code>(network_sr.c:949)이 요청의 private heap 을 비운다. abort 스택은 서버 <code>abort_handler</code> 가 <code>$CUBRID/log/coredump/cub_server_&lt;시각&gt;.coredump</code> 에 남긴다(src-executables §2 「abort_handler」). 실측: 분할 부모 2개 표 INSERT 1행 → 덤프 <code>xasl_stream.cpp:85·244·254</code>·<code>heap_file.c:10611</code>(파티션 캐시 미적중이면 <code>heap_get_class_partitions</code> 쪽 할당까지 15건) — CBRD-27845(src-transaction §3). — 정소희(.52) 2026-11-09</li>
 </ul>
 <h4>mht_get_hash_number (memory_hash.c) — DB_VALUE 해시의 문자열 처리</h4>
 <blockquote>아래 세 항목의 줄 번호는 <code>89722cf4e</code> 기준이다. develop <code>2d925cb86</code> 에서 language_support.c·object_primitive.c 는 그대로이고</blockquote>

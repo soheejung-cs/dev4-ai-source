@@ -60,6 +60,10 @@
 - `db_value_free()`는 `pr_free_ext_value()`로 **컨테이너 자체까지 해제** — 스택 DB_VALUE에 쓰면 안 됨.
 - ✅ **리뷰 체크포인트**: non-trivial 값의 모든 경로(에러 포함)에서 `db_value_clear()`가 호출되는가?
 
+### db_value_domain_init — 문자열·비트 정밀도 상한 (db_macro.c)
+
+- **문자열·비트 DB_VALUE 를 만드는 함수는 최대를 넘는 정밀도를 거부한다(ER_INVALID_PRECISION) — 캐스트는 그 값을 대상 도메인 정밀도로 저장한다** (.50, ef2c78cda, 2026-11-03, 단위 실측): `db_value_domain_init`(db_macro.c:197·223·246)이 VARCHAR·BIT·VARBIT 정밀도 > 최대면 -649. `mr_setval_string (copy=false)` 가 원천 정밀도로 `db_make_varchar` 를 부르므로, 선언 정밀도가 최대를 넘는 값을 "최대" 로 정규화(tp_domain_resolve_value 식)해 빌려 넣으면 오류가 난다(PR#8378 U3, 91465a14a 에서 캐스트로 보냄). 그런 값을 만드는 생산자는 찾지 못했다. 부동 정밀도 -1 을 최대로 바꾸는 쪽은 src-query §2 「db_string_concatenate / GROUP_CONCAT」. — 정소희(.52) 2026-11-09
+
 ### db_open_buffer / db_compile_statement / db_execute_statement (db_vdb.c)
 
 - 클라이언트 문장 처리 3단: `db_open_buffer`(파싱, 내부 `parser_parse_string_with_escapes` L477) →
@@ -97,8 +101,9 @@
   `a = ?` 대조군; develop `2d925cb86` 정적 재확인): kept tree 는 소유 DB_SESSION 의 `kept_trees` 목록에 매달려 세션이 닫히면 함께 풀리고
   (등록부 주석 db_vdb.c:746-760, `db_prepared_tree_register ()` :861, 첫 실행 뒤 등록 :4418), 나중 EXECUTE 는 `db_prepared_tree_lookup ()`
   (:2715) → `do_reexecute_prepared_statement_from_kept_tree ()`(:4188)에서만 검사한다(`db_execute_and_keep_statement_local ()` 의 같은 검사는
-  `set_host_var` 로 막혀 kept tree 에선 안 돈다 — :4226-4230 주석). kept tree 범위 확대는 CBRD-27231(develop 미반영). CTP(JDBC 문장별 실행)
+  `set_host_var` 로 막혀 kept tree 에선 안 돈다 — :4226-4230 주석). kept tree 범위 확대는 CBRD-27231(develop 미반영) → **갱신(2026-11-09 .52)**: 연결 범위(`db_Kept_trees`)로 옮긴 것은 #8213(`52193efa9`)이다 — 아래 항목, 그 뒤 회귀와 CBRD-27231 해소는 §3. CTP(JDBC 문장별 실행)
   에서도 관측 불가 — CBRD-26959·27143 TC 가 첫 peek 만 검증하는 이유. — 정소희(.50) 2026-10-28
+- **kept tree 는 첫 실행 컴파일 뒤에만 등록되고 등록 전에 `hv_pred_plan_unpeeked = 0`** (.52, develop `1684945ed`~`ef2c78cda`, 2026-11-03): db_vdb.c `do_recompile_and_execute_prepared_statement`. #8213(`52193efa9`) 이후 kept tree 는 연결 범위(`db_Kept_trees`)에 있다 — 그 뒤 force_replan 회귀와 해소(CBRD-27231)는 §3. — 정소희(.52) 2026-11-09
 
 ### show trace 의 `Query Plan:` 블록 — plan_trace (query_planner.c, execute_statement.c)
 
@@ -108,6 +113,7 @@
   (execute_statement.c:21414)이 세션 trace 로 보낸다. 재플랜은 마커 컴파일이 쌓은 plan_trace 를 버리고 실제로 도는 플랜만 남긴다
   (`do_replan_statement_internal ()` db_vdb.c:4133-4159). TC 에서 "재플랜이 일어났나" 의 판정 신호로 쓸 수 있다. 한 줄 형태의 첫
   `show trace` 가 `TABLE SCAN (dual)`(`trace_stats()` 자신의 플랜)을 보이는 것은 표기 잡음. — 정소희(.50) 2026-10-28
+- **SA(`csql -S`)에서는 재계획 여부를 이 블록으로 가르지 못했다 — PREPARE 덤프가 한 번만 보였다(원인 미확인)** (.51, PR#8325 head `5cfef7f5b`, 2026-11-03): 서버 모드에서는 `show trace` 의 `Query Plan:` 출력 유무로 보인다(위 항목과 같음). — 정소희(.52) 2026-11-09
 
 ### values_list_to_values_array — `EXECUTE … USING` 의 세션 변수 (db_vdb.c)
 
@@ -120,6 +126,12 @@
 ### do_recompile_and_execute_prepared_statement — 서브세션의 수명 (db_vdb.c, CS/SA 클라이언트)
 - **EXECUTE 가 다시 컴파일한 서브세션은 바깥 세션 `next` 목록에 붙어 바깥 세션 close 때까지 남는다 — kept tree 로 등록되는 것만 빠진다** (.52, develop `604ab8b22`·`1684945ed`, 2026-10-30~11-03): 붙이는 곳은 이 함수 하나(db_vdb.c:5114-5123 @604ab8b22, 2014 `6522201dab`), 떼는 곳은 `db_prepared_tree_register ()`(:881 — 등록하며 목록에서 떼어 `db_Kept_trees` 로) 하나, 놓는 곳은 `db_close_session_local ()`(바깥 세션 close 가 `next` 를 차례로 닫음). 그래서 **다시 컴파일했는데 등록되지 않는 실행**만 쌓인다: ① PREPARE 가 XASL 을 남기지 않은 SELECT 중 등록 조건(`is_bind_candidate || signature_plan`)을 못 갖춘 것 — 히스토그램 없는 VARCHAR 열 `c = ?` 는 `HV_PRED_PLAN_UNPEEKED` 로 매 EXECUTE 재컴파일 + verdict STOP 이라 미등록(gdb: 50회 실행에 재컴파일 51), ② DML(언제나 재컴파일), ③ 오류로 끝난 실행(`err >= 0` 아님). CHAR·INT 열 SELECT 는 PREPARE 가 플랜을 안 만들어(`plan_at_execute`) 첫 실행 뒤 signature plan 으로 등록 → 쌓이지 않는다; `/*+ RECOMPILE */` 을 넣어 매번 재컴파일(51회)해도 등록돼 증가 0. 실측(release CS, 같은 핸들 반복): VARCHAR SELECT 약 160 KB/회, UPDATE 약 147 KB/회, 매번 PK 중복 실패 INSERT 약 145 KB/회(리뷰어 실측), CAS(CCI `cci_prepare` 한 번 + `cci_execute` 반복) 약 160 KB/회. csql `-i` 는 줄마다 바깥 세션을 새로 열고 닫아 쌓이지 않는다(재현 판정에 쓰면 오판 — 자가진화 #042).
   - ✅ 리뷰 체크포인트: 결과 기술자는 서브세션 메모리를 참조하지 않는다 — 목록 ID 는 `pt_new_query_result_descriptor ()` 의 `cursor_open` 이 복사, 열 정보 `db_cp_query_type ()`, DML 값 `db_get_db_value_query_result ()` 의 `db_value_copy`. 서브세션 close 는 서버 질의를 끝내지 않는다. 이 함수에 서브세션(kept tree·서명 플랜)이 `session` 으로 들어오면 그 `next` 는 다른 목록이므로 손대면 안 된다. — 정소희(.52) 2026-11-03
+
+### db_recompile_for_bind_signature — 바인드 서명마다 문장 텍스트로 다시 컴파일 (db_vdb.c:3069)
+
+- **`db_recompile_for_bind_signature ()`(db_vdb.c:3069)는 텍스트가 없으면 ER_QPROC_INVALID_XASLNODE(-452)** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`): CBRD-27583 이후 CAS 는 바인드 타입 서명마다 문장 텍스트로 다시 컴파일한다. csql PREPARE/EXECUTE 는 이 경로가 아니다.
+  - 실측(CTP JDBC 바인드): develop release 에서 접히는 갈래·남는 갈래 모두 -452. ORDER BY·LIMIT 으로 파생 테이블이 되는 꼴은 develop 도 정상. 두 갈래 모두 거짓(NULL 로 접힘)은 수정 전후 같은 오류(-21109).
+  - 텍스트를 잃는 원인(집합 연산 접기)과 수정 PR#8428(미머지)은 src-parser §3(CBRD-27961). — 정소희(.52) 2026-11-09
 
 ## 3. 예비 이슈 사항
 
@@ -140,6 +152,8 @@
   XASL 이 `HV_PRED_PLAN_UNPEEKED` 를 계속 지녀 `do_get_prepared_statement_info()` 가 xasl_id 를 비우고(db_vdb.c:3735) `do_recompile` →
   `do_reexecute_prepared_statement_from_kept_tree(force_replan=true)`(:2727, :4188). "OFF = 첫값 플랜 고정" 계약과 어긋남. CBRD-27231 과 함께
   볼 것. — 정소희(.50) 2026-10-28
+- **[해소됨 — CBRD-27231, PR#8314 develop `226352283` 2026-11-03] #8213 뒤 kept tree 재실행이 2번째 EXECUTE 부터 매번 재플랜했다** (.52, develop `1684945ed`~`ef2c78cda`, #8213 직전 `4ddf3b155`, 2026-11-03): #8213(`52193efa9`)이 kept tree 를 연결 범위(`db_Kept_trees`)로 옮긴 뒤, `db_execute_and_keep_statement_local ()` 의 kept 분기가 `force_replan = do_recompile && !plan_at_execute` 로 넘겨 2번째 EXECUTE 부터 매번 `do_replan_statement_with_bind_peek (force_compile=1)` — `do_get_prepared_statement_info ()` 가 PREPARE 저장 헤더의 `HV_PRED_PLAN_UNPEEKED`·`BIND_WATCH_CANDIDATE` 로도 xasl id 를 비우기 때문(매 EXECUTE 참). LIKE·MRO/SORT-LIMIT 판정만 `bind_before_compile` 을 세운다.
+  - 수정(#8314 `5eefba3d4`): force_replan = `bind_before_compile`. SA 판별(같은 핸들 4회): `=` PPPP → P---, 범위 PPPP → PP--, LIMIT 50→500 재컴파일 유지 — #8213 직전과 같음. — 정소희(.52) 2026-11-09
 
 - **[해소됨 — `80b84317d`(CBRD-27852 / PR#8343 머지 2026-11-03), .51] 같은 SQL EXECUTE 핸들을 되풀이하면 재컴파일 서브세션이 실행마다 쌓인다** (.52, develop `604ab8b22`, 2026-10-30): §2 「do_recompile_and_execute_prepared_statement — 서브세션의 수명」. 수정은 이 함수 입구에서 바깥 세션(`!is_subsession_for_prepared`)의 `next` 를 닫는다. TC private-ex `cbrd_27852`(Case 4 = 매번 실패 INSERT, #8006 과 무관). 머지되면 이 항목을 해소로 바꾼다. — 정소희(.52) 2026-11-03
 ## 4. 진행중인 작업

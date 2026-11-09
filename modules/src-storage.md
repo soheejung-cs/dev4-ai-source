@@ -154,6 +154,7 @@
   btree.c 내부뿐 — 같은 문제.
 - start_col 미초기화(위 첫 항목)는 develop `1802aa581` 에도 그대로다(btree.c:5308 선언, 2026-11-03 재확인). 수정 PR#8353(CBRD-27862, .51)이 0 으로 초기화한다 — 머지됨(develop `53d6bdfd2`, 2026-11-09). — 정소희(.50) 2026-11-03
 - **인덱스 스캔의 검색 키 경계(DOMAIN_KEY_BOUND, CBRD-27583)는 키가 있는 경계마다 항상 만들어진다** (.51, CBRD-27361 헤드 `0efc06bf1`, 2026-11-01): `xasl_generation.c` 의 경계 결정(14580~)이 같은 도메인 쌍(INT 열 = INT 값)에도 `DOMAIN_COMPARE_DIRECT`(cmp = 그 형의 pr_type, 변환 없음)를 담는다. 따라서 `btree_search_leaf_page`·`btree_search_nonleaf_page` 의 `bound` 는 질의의 인덱스 스캔에서 NULL 이 아니고, NULL 은 삽입·삭제·고유 검사 같은 자기 도메인 키 탐색이다. — 정소희(.50) 2026-11-03
+- **`btree_search_nonleaf_page ()` 에 page_bounds 를 넘기는 곳은 `btree_split_node_and_advance ()` 하나이고, insert list 의 `m_use_page_boundary_check` 가 켜질 때뿐이다** (.52, PR#8353 헤드 `6b0ca5566`, 2026-11-03 — 리뷰 질문 대응): 이 플래그는 `btree_insert_list::prepare_list ()`(온라인 인덱스 생성 `index_builder_loader_task::execute ()`, btree_load.c)만 켠다. 질의 스캔·일반 INSERT/DELETE·고유 검사는 NULL. 후속 Sub-task CBRD-27902(page_bounds). — 정소희(.52) 2026-11-09
 
 ### btree_compare_key (btree.c:20048)
 
@@ -189,6 +190,9 @@
   `btree_check_foreign_key ()` 가 `xbtree_find_unique (…, S_SELECT_WITH_LOCK, …)` 로 부모를 찾고(btree.c:26255), 바로 아래 `/* TODO: For read committed... Do we need
   to keep the lock? */`(:26276) 가 남아 있다. 그래서 부모의 키가 아닌 컬럼 UPDATE(행 X)와 자식 INSERT(부모 행 S)가 서로 막는다. **미수정** — CBRD-27463 PR#8198
   (부모 행 락 제거) 열림 → §3. — 정소희(.50) 2026-10-28
+- **FK 탐색(`xbtree_find_unique (…, S_SELECT_WITH_LOCK, …)`)이 기다리는 상대는 부모 키를 넣거나 지운 트랜잭션의 MVCCID 다 — 부모 행의 키가 아닌 열을 커밋하지 않고 UPDATE 해 둔 행 X 락은 FK 검사를 막지 않는다** (.51, develop `226352283`, 2026-11-03): `btree_key_wait_out_conflicting_writer ()`(btree_lock.cpp:56) → `btree_key_wait_for_tran_end ()`(btree_lock.cpp:100) → `logtb_wait_for_tran_end ()` → `lock_transaction_mvccid ()`. 실측: 6초 쥐고 있어도 자식 INSERT 즉시 성공. 락 타임아웃 재현은 부모 키를 커밋하지 않고 INSERT 해 둔 세션 + `set transaction lock timeout 1`.
+  - ⚠ **위 항목과 어긋난다** — 위 항목(.51, 2026-10-21~23)은 "부모의 키가 아닌 컬럼 UPDATE(행 X)와 자식 INSERT(부모 행 S)가 서로 막는다" 이고, 이 실측은 UPDATE 를 먼저 쥔 순서에서 자식 INSERT 가 막히지 않았다. 순서(자식 INSERT 먼저 → 부모 UPDATE)별로 다시 재기 전까지 "서로" 는 확정이 아니다. — 정소희(.52) 2026-11-09
+- **같은 로직의 키 1개 판 `btree_check_foreign_key ()`(btree.c:26704 — 외래 키를 더할 때 기존 행을 검사하는 `xlocator_check_fk_validity ()` locator_sr.c:11919 가 부른다)는 두 출구에서 다 놓아 CBRD-27845 의 표현 고정 누수에 해당 없다** (.51, develop `226352283`, 2026-11-03). — 정소희(.52) 2026-11-09
 
 ### btree 레코드의 키 위치 — btree_read_record_without_decompression (btree.c)
 
@@ -197,6 +201,7 @@
 - **leaf 레코드의 키 위치**: 첫 OID 8 → (고유 인덱스이고 첫 OID slotid 칸에 `BTREE_LEAF_RECORD_CLASS_OID` 면 클래스 OID 8) → (첫 OID volid 칸에 `BTREE_OID_HAS_MVCC_INSID` 면 8) → (`BTREE_OID_HAS_MVCC_DELID` 면 8) → 키. `BTREE_LEAF_RECORD_OVERFLOW_KEY` 면 키 자리에 overflow VPID. fence 레코드도 같은 배치로 읽힌다. 레코드 플래그는 첫 OID 의 slotid 칸, MVCC 플래그는 volid 칸(둘 다 `OR_GET_SHORT`). — 정소희(.50) 2026-11-03
 - **non-leaf 레코드의 키 위치**: 고정부(child pageid 4, volid 2, key_len 2 = `NON_LEAF_RECORD_SIZE` 8, 빅엔디언) 바로 뒤. key_len 음수면 overflow 키. non-leaf 키의 도메인은 `btid->nonleaf_key_type`(`btree_generate_prefix_domain` — BIT 만 VARBIT 로 바뀌고 나머지는 key_type 그대로). — 정소희(.50) 2026-11-03
 - 정수 키 이미지(원시 바이트)는 src-object §2 「mr_data_readval_int / mr_index_readval_int」.
+- **단일 컬럼 SHORT/INT/BIGINT 인덱스에서 같은 형 검색 키(경계 없음, 또는 DIRECT·같은 형 cmpval·변환 없음)면 두 이진 탐색이 레코드의 키 이미지를 직접 비교한다 — 그 밖은 기존 DB_VALUE 경로** (.51, CBRD-27361 헤드 `0efc06bf1` + CBRD-27862 로컬 커밋 `83db0659a`, 2026-11-01 — 머지본 PR#8353 squash `53d6bdfd2`(2026-11-09)에서 심볼·조건 재확인): `btree_integral_search_key_*`, `btree_leaf_record_key_image`, `btree_non_leaf_record_key_image`. 같은 PR 이 `btree_search_nonleaf_page` 의 `start_col` 을 0 으로 초기화했다(§3 해소). 후속 Sub-task: CBRD-27900(정수 교차 경계)·27901(MIDXKEY 측정 — src-object §2 「pr_midxkey_compare」)·27902(page_bounds). — 정소희(.52) 2026-11-09
 
 ### btree_locate_key — 비용 구성 (JOB 113 직렬)
 
@@ -271,6 +276,20 @@
   레코드를 가리킨다" 를 정정, `a7a1db84b` 에서도 같았다). **문자열 값의 수명 = 레코드(페이지 또는 페이지 사본)의 수명**. — 정소희(.50) 2026-10-28
   - ✅ **리뷰 체크포인트**: 스캔 셀을 행 밖으로 들고 나가는 코드(프로그램 셀 캐시, 리스트 지연 기록)는 여기서 깨진다 — 문자열 값은 다음 행·다음 페이지로 넘어가면 무효다.
 
+### heap_attrinfo_set_converted — 대입 값을 캐스트 없이 넣는 조건 (heap_file.c)
+
+- **`heap_attrinfo_set_converted ()` 는 develop `ff06fc639`(PR#8378, CBRD-27847) 부터 정밀도·코드셋·콜레이션까지 열과 정확히 맞는 비소유 문자열·비트 문자열도 캐스트 없이 빌려 넣는다 — 그 전(`1802aa581`)에는 매개변수 없는 고정 크기 타입만 캐스트 없이 넣고, 같은 문자열·비트 문자열도 행·열마다 캐스트로 사본을 만들었다** (.50, 1802aa581, 2026-11-03): 머지 전 지름길 조건이 `heap_attrinfo_is_fixed_copy_type ()`(heap_file.c:12855, 정수·실수·날짜·MONETARY)뿐이라 VARCHAR 등은 `tp_value_auto_cast_with_precision_check_converter ()`(heap_file.c:12921) → `tp_value_cast_internal ()` → `db_char_string_coerce ()` → `qstr_coerce ()`(string_opfunc.c:9986 `db_private_alloc`)로 갔다. gdb(SA, release): INSERT…SELECT·UPDATE 47개 대입이 모두 캐스트. CBRD-27583(52193efa9) 이전 `heap_attrinfo_set ()` 은 `tp_domain_check (…, TP_EXACT_MATCH)` 가 맞으면 `setval (copy=false)` 로 빌려 넣었다. **머지됨 — develop `ff06fc639`(PR#8378, 2026-11-09)**: 비소유 정확 일치 값을 빌리게 고침(같은 문장 캐스트 47 → 12, 문자열 열당 명령/행 1,738 → 824). 대입 값의 소유는 src-query §2 「UPDATE·INSERT…SELECT 의 대입 값」, CHAR 채움의 함정은 src-object §2 「pr_pad_char_to_precision / qstr_pad_string」.
+  - ✅ **리뷰 체크포인트**: 대입 값을 빌려 넣는 변경은 원본 DB_VALUE 의 소유(`DB_NEED_CLEAR`)를 본다 — 재평가 경로(src-transaction §2 「locator_mvcc_reev_cond_assigns」)가 소유 값을 대입 직후 지운다. — 정소희(.52) 2026-11-09
+
+### heap_classrepr_get — 클래스 표현 캐시 (heap_file.c)
+
+- **클래스 표현 캐시는 항목 1024개 고정이고 늘지 않는다 — 고정이 샌 항목은 무효화 때 해시·LRU 에서 떨어져 서버 수명 동안 한 칸을 잃는다** (.51, develop `226352283`, 2026-11-03): `HEAP_CLASSREPR_MAXCACHE`(:106). `heap_classrepr_entry_alloc ()` 의 expand_list 는 "not supported"(NULL), 그러면 `heap_classrepr_get ()` 은 캐시 밖 디스크 표현을 돌려준다. LRU 재사용은 fcnt == 0 만 고른다(:1916). 무효화 `heap_classrepr_decache_guessed_last ()`(:1449 — 루트 클래스 힙의 레코드 갱신 `HEAP_MAYNEED_DECACHE_GUESSED_LASTREPRS` :410, 트랜잭션 끝·롤백 `decache_heap_repr`)는 fcnt > 0 이면 해시·LRU 에서 떼고 force_decache 만 세운다. 고정이 새던 사례는 CBRD-27845(src-transaction §3). — 정소희(.52) 2026-11-09
+
+### heap_attrvalue_get_key (heap_file.c:14682) — 다중 열 키의 midxkey 버퍼
+
+- **`heap_attrvalue_get_key ()` 는 다중 열 인덱스 키의 midxkey 버퍼 크기를 행 레코드 전체 길이에서 잡는다 — 키가 아니라 행이 길면 다중 열 키는 할당 버퍼를 갖는다** (.51, develop `226352283`, 2026-11-03): 크기는 `recdes->length`(:14744 — 함수 인덱스 결과를 더함)이고 `DBVAL_BUFSIZE`(4096, btree.h:531)를 넘으면 `db_private_alloc` 한다(:14756) — 행이 길면(저장 길이, 즉 문자열 압축 뒤) 할당 버퍼다. `locator_check_foreign_key ()` 는 반복문 안의 출구에서만 그 값을 비우고 error 레이블(:4188)은 비우지 않아, 오류 출구에서 남았다(**머지됨 — PR#8394 두 번째 커밋, develop `5d4f780df`**). debug 서버는 요청 끝 `restrack_assert`, 덤프 `first_caller=heap_file.c:14756`. 결정론 재현: 부모 분할 식 `100 div a` 에 a = 0 인 키 → FK 가지치기(`partition_attrinfo_get_key ()` 의 분할 식 평가)가 -539 로 끝남 + 압축되지 않는 6,144자 행(SHA-512 16진 48개). `repeat ('x', 5000)` 은 압축돼 레코드가 짧아 재현이 안 된다(실측 recdes 길이 수십~수백 바이트).
+  - ✅ **리뷰 체크포인트**: 이 함수로 키를 얻는 호출자는 오류 출구까지 그 DB_VALUE 를 비운다 — 짧은(압축되는) 행으로 만든 TC 는 할당 경로를 타지 않는다. — 정소희(.52) 2026-11-09
+
 ### xstats_update_statistics (statistics_sr.c:91)
 
 - **파티션 테이블 부모 NDV를 자식 합산으로 만들면 과대추정** — 자식 간 값 중복이 무시된다.
@@ -290,6 +309,8 @@
   `heap_get_num_objects ()` 로 떨어진다(:376-383). NDV 가 아예 없으면 서버가 `xstats_collect_ndv_by_fullscan_reservoir` 로 직접 센다(:387-395). 정상 경로(히스토그램
   풀스캔)는 행 수를 같이 실어 보내므로 폴백에 들어오지 않는다 — 아래 「통계 카운트의 표현 폭」의 `heap_get_num_objects` 반환값 결함이 오래 안 드러난 이유이고,
   트랜잭션 안에서 `UPDATE STATISTICS` 를 부르는 경우처럼 폴백을 타야 노출된다(현재 계약). — 정소희(.50) 2026-10-28
+- **B-tree 샘플링은 리프 5,000장까지만 읽는다 — 그 이하 인덱스는 샘플링이어도 정확값** (.51, 69ffb9aaf, 2026-11-05): `STATS_SAMPLING_LEAFS_MAX 5000`(statistics.h:44). 실측 600K 행(리프 934)에서는 ALL CLASSES 도 (200000,600000) 으로 같았다. 통계 결함의 재현·TC 는 리프가 5,000장을 넘어야 한다.
+  - TC 크기 줄이기: 4K 페이지 DB(`--db-page-size=4K --log-page-size=4K`)에 정수 두 열 100만 행이면 리프 약 6,400장(80만 행이면 5,096장). 문자열 키는 리프 공통 접두 압축 때문에 리프가 크게 늘지 않는다(400바이트 키 4만 행이 리프 817장). — 정소희(.52) 2026-11-09
 
 ### stats_analyze_mcv_list (statistics_ndv.c:205)
 
@@ -521,6 +542,10 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   BTREE_STATS reserved) 를 먼저 확인하면 버전 마커 없이도 구 레코드 판별이 가능하다. 통계 관련 카운트를 새로 추가하면 위 7단계 중
   어느 하나만 int 로 두어도 다시 잘린다.
 
+### catalog_get_cardinality — `SHOW INDEX` Cardinality 와 `INDEX_CARDINALITY ()` (system_catalog.c)
+
+- **`SHOW INDEX` 의 Cardinality 와 `INDEX_CARDINALITY ()` 는 key_pos 와 무관하게 전체 키 수다** (.51, 69ffb9aaf, 2026-11-05): `catalog_get_cardinality ()`(system_catalog.c)는 key_pos 범위만 검사하고 `p_stat_info->keys` 를 돌려준다(분할 클래스는 분할마다 합). 2013-08 `c8eae691e`(CUBRIDSUS-12022 "fix show indexes Cardinality")에서 `pkeys[key_pos]` 를 버렸다. 실측: 인덱스 `(a, b)` 의 seq 1·2 가 모두 4800000(pkeys 는 200000, 4800000). pkeys 를 SQL 로 볼 길이 없어 csql `;info stats` 로만 확인된다. 매뉴얼과 다르다 — §3. — 정소희(.52) 2026-11-09
+
 ### page_buffer.c 전역 분석서 — vimkim 들여옴 (imports/vimkim/pgbuf/, 기준 e6ed61e87)
 
 - `page_buffer.c` 17.5K 줄을 자료구조/fix-latch/LRU-victim/flush-WAL-데몬/ordered-fix-dealloc/관측성 6장으로 나눈 분석서가
@@ -577,8 +602,8 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
 
-- **[develop 미반영 UB 수정]** `btree_search_nonleaf_page` start_col 미초기화(btree.c:5242) —
-  develop 95b79e7ed에서 잔존 재확인. 수정 c44ccf767은 .52의 join-perf-analysis 브랜치에만 있음.
+- **[해소됨 — PR#8353(CBRD-27862) develop `53d6bdfd2` 2026-11-09]** `btree_search_nonleaf_page` start_col 미초기화(btree.c:5242) —
+  develop 95b79e7ed에서 잔존 재확인. 수정 c44ccf767은 .52의 join-perf-analysis 브랜치에만 있음. → PR#8353 이 0 으로 초기화했다(§2 「btree_search_nonleaf_page」). — 정소희(.52) 2026-11-09
 - **[구조적 한계 — 핫 인덱스 루트 BCB의 latch true sharing]** 상관 서브쿼리·NLJ 인덱스 프로브가 많은 질의에서
   루트 페이지 BCB 하나의 `atomic_latch` RMW가 전체 HITM의 30%+ (Q21 실측, §2 pgbuf 항목). BCB 레이아웃
   변경(CBRD-27284)으로는 해소 불가 — **64B 3분할은 128B 형제 결합으로 HITM +58% 역효과**(반증됨, PR#7844 close).
@@ -648,12 +673,13 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   `UINT16MAX`(:300) 미사용, `buf_LRU_list` 주석의 `num_garbage_LRU_list`(:749) 는 코드에 없음, `goto copy_unflushed_lsa`(:10745) 는 라벨(:10749)이 바로 다음. — vimkim 2026-09-30; .51 대조 develop 0d0809963
 - **[사용성 — `double_write_buffer_size` 는 크기 접미사를 못 받는다 (원문 D5)]** `PRM_ID_DWB_SIZE` 의 플래그가 `PRM_FOR_SERVER | PRM_USER_CHANGE` 뿐(:4348)이라 `PRM_SIZE_UNIT` 가 없다 — `data_buffer_size`(:1186, `PRM_SIZE_UNIT | PRM_DIFFER_UNIT`) 와 달리
   `=2M` 을 쓰면 ER -839 로 **서버 부팅 실패**(원문 실측; start 유틸은 그냥 기다려 조용히 죽는다). 바이트로 적어야 한다. — vimkim 2026-09-30; .51 대조 develop 0d0809963
-- **[미수정 — `UPDATE STATISTICS ON ALL CLASSES`(와 인자 없는 `optimizedb`)는 클래스마다 통계를 두 번 수집한다]** (.51, `bcd6c5936`, 2026-10-14 · develop
+- **[해소됨 — CBRD-27836 / PR#8413 develop `262a23219` 2026-11-09, 상세 src-object §3 — `UPDATE STATISTICS ON ALL CLASSES`(와 인자 없는 `optimizedb`)는 클래스마다 통계를 두 번 수집했다]** (.51, `bcd6c5936`, 2026-10-14 · develop
   `2d925cb86` 재확인 2026-10-28): `sm_update_all_statistics`(schema_manager.c:4364)가 서버 `stats_update_all_statistics` 로 전 클래스 통계를 갱신한 뒤(:4377)
   `update_histogram_for_all_classes`(network_interface_cl.c:6223)가 클래스마다 `update_or_drop_histogram_helper (DO_HISTOGRAM_CREATE)`(:6297)를 부르는데, 헬퍼는
   자기 스캔으로 클래스 통계를 다시 쓴다(execute_statement.c:5007 주석 "refreshes the class statistics itself"). 단일 클래스 경로(SQL `do_update_stats`, `optimizedb -n` 의
   `optimizedb_update_class_statistics`)는 헬퍼를 먼저 돌려 이걸 피한다. 예비 이슈 — 전체 경로도 히스토그램을 만들 클래스는 서버 단계를 건너뛸 수 있는지.
   `--no-histogram`(SQL `WITH NO HISTOGRAM`)이면 서버 단계 한 번뿐. — 정소희(.50) 2026-10-28
+  - 해소: PR#8413 이 ALL CLASSES 를 클래스당 한 번, 요청한 방식으로 처리한다 — 통계 전용 단계는 `WITH NO HISTOGRAM` 일 때만 돈다. 두 번째 단계가 늘 샘플링이던 것까지 src-object §3(CBRD-27836), 머지 뒤 동작은 src-object §2 「sm_update_all_statistics / update_histogram_for_all_classes」. — 정소희(.52) 2026-11-09
 - **[미수정 — 같은 초에 두 번 커밋된 통계를 클라이언트 캐시가 구분하지 못한다]** (.51, PR#7900 `a910e8e6e` 리뷰 2026-09-17 · develop `2d925cb86` 재확인 2026-10-28):
   `xstats_get_statistics_from_server`(statistics_sr.c:540)는 `time_stamp > 0 && time_stamp >= ci_time_stamp` 면 통계를 보내지 않는데(:602) `ci_time_stamp` 는
   `stats_get_time_stamp ()` = `time ()` **초 단위**다(:991). 클라이언트 `sm_get_class_with_statistics`(schema_manager.c:4038)는 이 갱신(`updated`)이 있을 때만
@@ -668,6 +694,7 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   객체계층 유니크 조회의 잠금」. — 정소희(.50) 2026-10-28
 - **[미수정 — FK 검사가 부모 행 S 락을 트랜잭션 끝까지 쥔다]** (.51, `33d134239`/`959314906`, 2026-10-23 · develop `2d925cb86` 재확인 2026-10-28): §2
   `btree_check_foreign_key` 항목. 부모의 비키 UPDATE 와 자식 INSERT 가 서로 막는다. CBRD-27463 PR#8198(부모 행 락 제거) 열림. — 정소희(.50) 2026-10-28
+  - ⚠ 부모 UPDATE 를 먼저 쥔 순서에서는 자식 INSERT 가 막히지 않았다는 실측이 있다(CBRD-27845, .51 develop `226352283`) — §2 같은 절. PR#8198 은 2026-11-09 에도 열려 있다. — 정소희(.52) 2026-11-09
 - **[미수정 — SA 기동 중 vacuum 이 삭제 파일 페이지에 붙인 TO_VACUUM 표시가 남아 `installdb` 에서 debug assert]** (.51, `959314906`, 2026-10-23 · develop
   `2d925cb86` 재확인 2026-10-28): `vacuum_find_dropped_file ()`(src/query/vacuum.c:6637)의 `pgbuf_notify_vacuum_follows ()`(:6677 → page_buffer.c:16288)가 BCB 에
   `PGBUF_BCB_TO_VACUUM_FLAG` 를 세우는데 SA 에서는 지워지지 않은 채 `installdb` → `xboot_soft_rename` → `logpb_rename_all_volumes_files` → `pgbuf_invalidate_all` →
@@ -687,9 +714,18 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 볼륨)은 `.50`이 demodb DDL까지 양방향 안전을 실측. **이 커밋을 걸치는 브랜치 전환·TC
 재실행 시 DB 재적재 여부를 먼저 판단할 것.** [출처 .52/.50 교차, 기준 develop 04620b2ce]
 
-- **[미수정 — 수정 CBRD-27851 / PR#8363 `570e44137`, 미머지] 내림차순 스캔이 첫 키 전에 재시작하면 시작을 끝없이 되풀이한다(질의 멈춤)** (.52, develop `1684945ed`, 2026-11-02): 시작 쪽에서 플래그를 내리는 곳이 없어 다음 시작이 왼쪽 리프를 정상으로 잡아도 남은 플래그로 다시 재시작(§2 「force_restart_from_root 계약」). 2015 `87587c68b3` 부터. 반복 경로에 인터럽트 검사 없음. gdb 주입(왼쪽 리프 조건부 래치 실패 + 재fix 에서 해제됨): develop 시작 7회 재진입 / 수정본 재시작 1회 뒤 0행. loose index scan 재시작도 같은 원인. 수정은 시작 입구에서 내림. 머지되면 해소로. — 정소희(.52) 2026-11-03
+- **[머지됨 — CBRD-27851, PR#8363 develop `51f3d13b7` 2026-11-04 · 그 전 develop 선재] 내림차순 스캔이 첫 키 전에 재시작하면 시작을 끝없이 되풀이한다(질의 멈춤)** (.52, develop `1684945ed`, 2026-11-02): 시작 쪽에서 플래그를 내리는 곳이 없어 다음 시작이 왼쪽 리프를 정상으로 잡아도 남은 플래그로 다시 재시작(§2 「force_restart_from_root 계약」). 2015 `87587c68b3` 부터. 반복 경로에 인터럽트 검사 없음. gdb 주입(왼쪽 리프 조건부 래치 실패 + 재fix 에서 해제됨): develop 시작 7회 재진입 / 수정본 재시작 1회 뒤 0행. loose index scan 재시작도 같은 원인. 수정은 시작 입구에서 내림. — 정소희(.52) 2026-11-03 (머지 표기 정소희(.52) 2026-11-09)
 - **[미수정 — CBRD-27848, #8213 회귀] 다른 타입 하한(merges 경계)의 내림차순 스캔이 왼쪽 리프 래치 실패의 특수 경우에서 시작 위치를 잘못 다시 찾는다** (.52, develop `cd341a6d6`, 2026-10-30): `btree_range_scan_descending_fix_prev_leaf ()` 특수 경우(29627-29637 @cd341a6d6)가 `search_key.bound` 만 세우고 `equal_as` 는 `DB_EQ` 그대로 — 배타 하한은 같은 키를 결과에 넣고(gdb 주입 0 → 192행), 포괄 하한은 하나를 잃고(100 → 99행), 두 번 실패하면 bound 없는 비교로 `ER_TP_CANT_COERCE`(-181). 재현 claude-workspace `projects/CBRD-27583/repro/d1_r19_02/`. — 정소희(.52) 2026-11-03
 - **[머지됨 — CBRD-27871, PR#8376 develop `5de1b9e1f` 2026-11-09 · 그 전 develop 선재] 내림차순 `SELECT_KEY_INFO` 조회가 리프 경계 경합의 재시작 요청을 처리하지 않아 키가 아닌 행을 낸다** (.52, develop `1684945ed`, 2026-11-02): `btree_get_next_key_info ()`(20857)는 start/resume 뒤 플래그를 보지 않고 `C_page` 의 현재 키를 읽는다(20931 `assert (C_page != NULL)`). gdb 주입(래치 실패 + 왼쪽 리프 해제)에서 3,000 → 3,001행, 끼어든 행 `837 0 1 NULL`(놓은 리프의 슬롯 0, key_first_oid NULL). 최소 표 `create table t (a int); create index i_t_a on t (a);` 3,000행 + `select /*+ select_key_info(i_t_a) use_desc_idx */ key_pageid, key_slotid, key_oid_count, key_first_oid from t`. debug 는 assert 자리(미실행). 재현 claude-workspace `projects/CBRD-27851/repro/key_info_27871/`. — 정소희(.52) 2026-11-03
+  - 수정(PR#8376 `5de1b9e1f`): `btree_get_next_key_info ()` 가 start/resume 뒤 `force_restart_from_root` 면 `btree_range_scan ()` 처럼 다시 위치(첫 키 전 start, 뒤 resume). 첫 키 전 경로는 PR#8363(CBRD-27851)의 start 입구 내림이 있어야 끝난다(머지 순서 #8363 → #8376). gdb 주입: 재개 경로 3,001 → 3,000행 (.52, develop `ef2c78cda`, 2026-11-03). — 정소희(.52) 2026-11-09
+- **[미수정, 낮음] case fall through 를 주석으로만 표시한 곳 3개 — 앞 문장이 `assert` 뿐이라 release(NDEBUG)는 무해, debug 빌드에서 주석을 지우고 컴파일하면 `-Werror=implicit-fallthrough`** (.52, develop `ef2c78cda`, 2026-11-03): btree.c:29606·29684(`btree_range_scan_descending_fix_prev_leaf`), 38108(`btree_delete_sysop_end`). dev4 static_lint `comment-fallthrough` 의 low. — 정소희(.52) 2026-11-09
+- **[해소됨 — CBRD-27963, PR#8426 develop `07e7223bc` 2026-11-09 · release/11.4 백포트 PR#8459 `f39ab8ca8`] `xbtree_add_index ()`(btree.c:5978-5983)가 스택 `BTREE_ROOT_HEADER` 의 `node.common_prefix` 만 채우지 않았다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`): 적재할 키가 없는 CREATE INDEX(빈 테이블·모든 키 NULL)가 이 함수로 빈 인덱스를 만든다. CBRD-25082(c1e7266a3)가 필드를 더할 때 빠졌다(11.4.0 부터).
+  - `btree_node_get_common_prefix ()`(btree.c:~17347)는 MIDXKEY·키 2개 이상·리프(node_level 1)에서만 머리 값을 읽고, debug 는 펜스 키로 `is_compressed` 를 대조해 assert 한다. 비리프는 읽지 않는다(node_level > 1 → 0).
+  - 다른 루트 생성 경로: 대량 적재 루트는 항상 비리프(btree_load.c node_level 2 부터, 루트 머리 common_prefix 도 안 채움 — 읽히지 않아 무해), `btree_merge_root ()` 는 자식이 비리프일 때만이라 루트가 리프로 돌아오지 않는다. 분할·적재가 새 리프에 0 을 넣는다(btree.c:17955·18805·18835, btree_load.c:3456·3625).
+  - 실측: develop debug 에서 모든 키 NULL 로 만든 2열 인덱스에 키 3개 INSERT → assert(CTP sql cbrd_27963 Case 1). 스택 값이라 실행마다 다를 수 있다.
+  - 수정: `common_prefix = 0`. **수정 전에 만든 인덱스는 루트 리프가 분할되거나 다시 만들 때까지 값이 남는다.** — 정소희(.52) 2026-11-09
+- **[미수정 — 문서 정정 후보] 매뉴얼(`information_fn.rst` INDEX_CARDINALITY)은 key_pos 가 부분 키의 고유값 수를 준다고 적지만, `catalog_get_cardinality ()` 는 key_pos 와 무관하게 전체 키 수를 준다** (.51, 69ffb9aaf, 2026-11-05): §2 「catalog_get_cardinality」. — 정소희(.52) 2026-11-09
+
 ## 4. 진행중인 작업
 
 > 각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.
@@ -705,7 +741,7 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 
 ### .52
 - join-perf-analysis 브랜치에 btree start_col UB 수정(c44ccf767) 보유 — develop 반영 경로 미정
-  (PR#7622 머지 후 별도 PR 또는 편승 판단 대기).
+  (PR#7622 머지 후 별도 PR 또는 편승 판단 대기). → **완료(다른 경로)**: PR#8353(CBRD-27862, .51)이 develop `53d6bdfd2` 에서 0 으로 초기화했다. — 정소희(.52) 2026-11-09
 - CBRD-27284(BCB 캐시라인 분리): **종결 — 유효성 없음** (2026-09-02, PR#7844 close, 보드 #76 close).
   perf c2c로 반증(§2 pgbuf 항목·§3). 후속 방향은 별건 발번 필요. [설계문서
   claude-workspace/projects/CBRD-27284/설계문서.md]

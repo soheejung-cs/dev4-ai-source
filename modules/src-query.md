@@ -71,6 +71,7 @@
 - ✅ **리뷰 체크포인트**: 재귀 평가 경로에 깊이 제한/스택 고려가 있는가?
 
 - **BUILDVALUE 의 출력 목록은 스캔이 닫힌 뒤 val_list 슬롯을 읽는다** (.51, develop `1684945ed`(#8196 머지 `309265e6d` 포함), 2026-11-02): `qexec_execute_mainblock_internal ()` 이 블록의 스캔을 모두 `qexec_end_scan ()`·`qexec_close_scan ()` 한 다음 `qexec_end_mainblock_iterations ()` → `qexec_end_buildvalueblock_iterations ()` 가 출력을 계산한다. 그래서 집계 옆 숨은 컬럼(ODKU 가 읽는 소스 컬럼 — src-parser §2 「pt_to_insert_xasl」)의 값은 행 루프가 마지막으로 필터를 통과한 행에서 읽어 둔 값이다(WHERE·GROUP BY 없음: 마지막 행, GROUP BY 가 있으면 그룹의 첫 행). 이 값을 채우지 않는 경로는 §3(CBRD-27870). — 정소희(.50) 2026-11-03
+- **BUILDVALUE 의 집계 빠른 길 둘은 행 루프를 건너뛴다(#8196 이전부터)** (.52, develop `ef2c78cda` · #8196 직전 `ad7a255c5`, 2026-11-03): `qexec_intprt_fnc ()`(query_executor.c, BUILDVALUE 갈래)는 `qexec_evaluate_aggregates_optimize ()` 가 MIN/MAX/COUNT(*) 를 통계·인덱스로 끝내면 `is_scan_needed = false` 로 스캔 전에 `return S_SUCCESS` 하고, COUNT(*) 하나 + 데이터 필터 없는 인덱스 스캔은 `need_count_only` 로 키를 돌지 않는다 — 어느 쪽이든 행 루프·`qexec_end_one_iteration ()` 이 불리지 않는다. 계층 질의(CONNECT BY)는 이미 둘 다 끈다. 그래서 비는 숨은 컬럼은 §3(CBRD-27870). — 정소희(.52) 2026-11-09
 
 ### qexec_execute_scan (query_executor.c:8483)
 
@@ -158,6 +159,7 @@
   뒤에 붙여(`do_append_bind_variant_key ()` :15279, 호출 :9956·:11354·:15379) 변형마다 별도 캐시 엔트리가 된다(insert·merge 는 붙이지 않음;
   지문·변형 규칙은 src-compat §2 「do_replan_statement_with_bind_peek …」). 짝: src-base §2 「sysprm_print_parameters_for_qry_string」 끝 줄
   (출력 플래그를 켜는 곳은 `do_prepare_select` :15376 하나). — 정소희(.50) 2026-10-28
+- **⚠ 측정 함정 — 서버 XASL 캐시 키는 클라이언트가 만든 문자열이라, 기본 파라미터면 다른 빌드의 클라이언트도 같은 캐시 엔트리를 쓴다** (.52, develop `ef2c78cda`, 2026-11-03): 빌드 간 플랜·trace 비교는 `/*+ RECOMPILE */` 로. — 정소희(.52) 2026-11-09
 
 ### XASL clone 보관·폐기와 clear 표시 규칙 — 플랜 캐시 세 모양·px 워커 트리·메모리 래퍼·trace·NULL 순서 (xasl_cache.c / query_executor.c / stream_to_xasl.c)
 
@@ -857,6 +859,16 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 - **배치 NUMERIC 산술은 표현 변환과 행마다 호출이 비용이다** — Q1(직렬 18.4초): 벡터는 부호 있는 `__int128`, `numeric_agg_expr_add/mul ()` 은 부호·크기 구조체라 행마다 `eb_num_get ()`·`eb_num_put ()` 변환(`expr_batch_run` 21.4% 안의 최대 줄 `out->coefficient = (uint128_t) ((c < 0) ? -c : c)` 20.9%) + out-of-line 호출 `numeric_agg_expr_add` 9.7%·`mul` 2.5%. 같은 질의 GROUP BY 키 경로 합 약 14%(`qexec_batch_gby_consume_chunk` 7.9%·`expr_batch_key_bytes` 3.6%·`qexec_batch_gby_flush` 2.7%), NUMERIC 디코드 `eb_extract` 13.6%. — 정소희(.50) 2026-11-03
 - **배치 비교 리프의 NUMERIC 경로는 스택 구조체 왕복에서 멈춘다** — F01 의 `eb_raw_kid ()` 29.3% 중 15.9% 가 `eb_cell_num ()` 이 `NUMERIC_AGG_EXPR_VAL` 에 쓴 직후 `an = nv.is_negative ? … : nv.coefficient` 의 16바이트 load(`movdqa -0x50(%rbp)`)에 몰린다(store-to-load forwarding 실패로 보임), `batch->sel[n++] = r` 의 `batch->sel` 재로드 7.7%. 레코드 바이트 load(NUMERIC 첫 바이트·오프셋 테이블) 약 10%p. — 정소희(.50) 2026-11-03
 
+### UPDATE·INSERT…SELECT 의 대입 값 — qexec_execute_update / fetch_peek_dbval_pos (query_executor.c, fetch.c)
+
+- **단일 표·조인 안쪽 대상 UPDATE 는 락 대기 뒤에도 MVCC 재평가 대입(`locator_mvcc_reev_cond_assigns`)을 타지 않는다 — 선택 단계가 대상 행을 잠그고(`instances_locked`, query_executor.c:22015·22041) 최신 버전을 읽어 리스트에 넣는다** (.50, c5a9c9d7b 서버 모드 + gdb, 2026-11-03): 세션 A 가 행을 바꾸고 4초 뒤 커밋, 세션 B `update r set c1 = c2 where id = 1`·`update /*+ ORDERED */ s, r set r.c1 = upper (r.c2) …` 가 3.3초 기다린 뒤 대입 — 모든 `heap_attrinfo_set_converted ()` 호출자가 `qexec_execute_update`, 값은 이미 새 버전. 재평가 경로를 재현하려면 선택 단계가 행을 잠그지 못하는 플랜(LOCATOR_LOCK_AT_FORCE)이 필요하다 — 그 플랜에서도 재평가는 XASL 생성에서 꺼져 있다(src-parser §2 「pt_to_update_xasl / pt_to_delete_xasl」). — 정소희(.52) 2026-11-09
+- **INSERT…SELECT·UPDATE 의 대입 값은 리스트 튜플을 가리키는 비소유 DB_VALUE 다 — 식 결과(`upper (c2)`)도 리스트를 거쳐 need_clear=0 으로 온다. 리스트에서 압축이 풀린 문자열(255바이트 이상)만 소유(need_clear=1·compressed_need_clear=1)** (.50, 1802aa581, gdb `heap_file.c:12900`, 2026-11-03): `fetch_peek_dbval_pos ()` 의 `qfile_slot_read_column_value (…, false /* Don't copy */)`(fetch.c:2306). 이 값을 속성 값이 빌리는 조건은 src-storage §2 「heap_attrinfo_set_converted」. — 정소희(.52) 2026-11-09
+
+### db_string_concatenate / GROUP_CONCAT — 문자열 이어 붙이기와 집계 경로 (string_opfunc.c, query_aggregate.cpp)
+
+- **`db_string_concatenate ()` 결과의 정밀도는 최대값으로 정해진다** (.52, develop `0661d2c12` 정적·단위, 2026-11-06): 결과를 `db_make_varchar`/`db_make_varbit` 로 만들 때 `db_value_domain_init ()` 이 부동 정밀도 -1 을 최대 정밀도로 바꾼다(db_macro.c — src-compat §2 「db_value_domain_init」). — 정소희(.52) 2026-11-09
+- **GROUP_CONCAT 은 해시 GROUP BY·병렬 GROUP BY 에 들어가지 않는다** (.52, 정적 — PR#8398 head `ea06eca48` 에서 읽음(줄 번호도), develop `0661d2c12` 도 같은 관문, 2026-11-06): xasl_generation.c:3986, query_aggregate.cpp:1802 assert, 병렬 GROUP BY 리더(query_executor.c:7083-7088)·skip(px_scan_checker.cpp:164-189·208-211, query_executor.c:27942). — 정소희(.52) 2026-11-09
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
@@ -900,7 +912,7 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
   `_delete`/`_insert_internal`/`_merge` 의 SHA1 은 `PT_PRINT_DIFFERENT_SYSTEM_PARAMETERS` 없이 계산되므로, `PRM_FOR_QRY_STRING` 파라미터
   (`cost_*`·`max_hash_list_scan_size`·`memoize_memory_limit` 등)를 바꾼 세션도 DML 서버측 플랜은 같은 캐시 엔트리(바인드 변형이면 같은 변형 엔트리 — develop `620ceaf6a`)를 쓴다(근거 §2 「xcache 계열」).
   (.50, `87b25579e`, 2026-09-22; develop `2d925cb86` 재확인 2026-10-28) — 정소희(.50) 2026-10-28
-- **[미수정 버그]** `update_or_drop_histogram_helper ()`(execute_schema.c:4399)의 에러 경로가 `error = dump_histogram (…, error, stdout)` 로
+- **[해소됨 — CBRD-27836, PR#8413 develop `262a23219` 2026-11-09]** `update_or_drop_histogram_helper ()`(execute_schema.c:4399)의 에러 경로가 `error = dump_histogram (…, error, stdout)` 로
   **에러를 덮어써** 세이브포인트 롤백 뒤에도 문장이 `Statistics updated successfully` 로 끝난다 — `dump_histogram ()`
   (optimizer/histogram/histogram_cl.cpp:3905)은 `error != NO_ERROR` 면 메시지만 찍고 `NO_ERROR` 를 돌려준다(:3922-3933). (.50, static + 동적,
   2026-09-18: 동시 첫 수집의 패자 79/1600 이 아무것도 저장하지 않고 성공 보고 — 요청한 `7 BUCKETS` 대신 상대의 283버킷이 남음.)
@@ -909,6 +921,8 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
   `UPDATE STATISTICS` 가 타는 전 컬럼 경로(`target_columns == NULL`, `quiet=true`)는 :4549-4555 에서 `quiet` 와 무관하게 덮어쓰고, 컬럼 지정
   경로는 `!quiet` 일 때만 덮어쓴다(:4718-4729). 그 밖의 `sm_add_histogram ()` 실패(락 타임아웃 등)는 지금도 성공으로 보고된다(정적 판독).
   — 정소희(.50) 2026-10-28
+  - 보강 — 실측 (.51, develop release 2362424f2, 2026-11-05 동적): 다른 트랜잭션이 t3 의 첫 `UPDATE STATISTICS ON t3` 를 커밋하지 않고 잡고 있을 때, lock timeout 3초로 `UPDATE STATISTICS ON t3` 와 `ON ALL CLASSES` 를 돌리면 둘 다 `| ERROR: Failed to dump histogram column: a |` 를 찍고 `Statistics updated successfully` 로 끝난다(히스토그램 없음). 이때 develop ALL CLASSES 의 통계 전용 1단계는 t3 에서 막히지 않았다 — 다른 트랜잭션의 미커밋 통계 갱신이 같은 클래스의 통계 갱신을 lock timeout 시키지 않는다(관찰 — 카탈로그 접근 락의 보유 기간은 코드로 확인하지 않음).
+  - 수정(PR#8413 머지 `262a23219`): helper 가 원래 오류를 돌려준다(quiet 면 안내 줄 생략, 호출자는 모두 quiet). 테이블 단위·optimizedb·ALL CLASSES 가 그 오류로 실패한다. — 정소희(.52) 2026-11-09
 
 - **[미수정 — CBRD-27796, 2026-11-03 Open]** list 가지치기의 `PO_NOT_IN` 은 값 목록과 교집합이 빈 파티션만 남기고, `<> SOME {집합}`(ALSM F_SOME + R_NE)이 `PO_NOT_IN` 으로 매핑되어 조건에 맞는 행이 든 파티션이 빠진다 (.52, develop d6ca98121, 2026-10-28): partition.c `partition_match_pred_expr` 2056-2064, `partition_prune_list` 1144-. `k <> some {1, 9}` 0행(비분할 4행). NOT IN 은 이 경로로 오지 않아 정답. — 정소희(.50) 2026-11-03
 - **[미수정 — CBRD-27703(LIST), 2026-11-03 Analysis]** list 가지치기 `PO_EQ` 는 값이 든 첫 파티션에서 멈춘다("partition values are disjoint") — 비교가 손실 변환(BIGINT 키 대 DOUBLE 값, 2^53 근처)이면 여러 파티션의 값이 같다고 나와 행이 빠진다; range 의 "the only partition" 판정도 같다(RANGE 는 그 이슈에 없음) (.52, develop d6ca98121 partition.c 1185·1196·1459, 2026-10-28). — 정소희(.50) 2026-11-03
@@ -916,6 +930,38 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 - **[미수정 — 수정 CBRD-27870 / PR#8364 `756c19e28`(첫 헤드 `ac9d895db`), 미머지]** 집계 옆 숨은 컬럼(BUILDVALUE 출력이 스캔 뒤 읽는 val_list 슬롯 — §2 「qexec_execute_mainblock」; 숨은 컬럼을 만드는 재작성은 ODKU 와 SELECT 목록 상관 서브쿼리 둘 — src-parser §2)을 채우지 않는 경로 셋 (.51, develop `1684945ed`, 비교 `ad7a255c5`(#8196 직전), 2026-11-02): ① 페이지 배치(`qexec_batch_eligible ()` → `eb_build_aggs ()`): 집계 피연산자만 벡터로 디코드하고 val_list 를 안 채운다 → NULL(#8196 회귀). ② 병렬 `gather: buildvalue`(ACCESS_SPEC_FLAG_BUILDVALUE_OPT): 워커 클론이 집계만 누적하고 리더 val_list 는 비어 있다 → NULL(#8196 전부터, 소스 ≥ parallel_scan_page_threshold). ③ 병렬 `gather: row by row`(XASL_SNAPSHOT): 리더가 워커 리스트를 `qfile_scan_list_next (…, PEEK)` + `qfile_tuple_walk_read_value (…, copy=false)` 로 읽어 슬롯이 리스트 페이지·튜플 버퍼를 가리킨다 → 스캔이 닫히면 해제된 메모리(실측: STDDEV 마무리 할당이 덮어 VARCHAR 'g2' 가 길이만 남은 `'  '`). 재현 `INSERT INTO t (id) SELECT MAX(s.g) + 1 FROM s s WHERE s.g = 2 ON DUPLICATE KEY UPDATE c = s.c` — 중복 키 행의 c 가 `ad7a255c5` 'g2', develop NULL. 제보 개발 3팀(CBRD-27336 shell TC `cbrd_27336_forms` 칸 13). 수정 PR 은 배치 제외·병렬 끔·스캔 닫기 전 값 복제(`qexec_own_scan_values ()`)이고, `pt_to_buildvalue_proc ()` 이 세우는 `XASL_OUTPUT_READS_SCAN`(비트 29)을 배치 자격과 검사기의 CANNOT_PARALLEL_SCAN 이 읽는다(TC cubrid-testcases#3985). — 정소희(.50) 2026-11-03
 - **[미수정 — develop 선재, 수정 CBRD-27870 / PR#8364 `756c19e28` 의 `qexec_keep_last_row ()`, 미머지] 힙 스캔의 val_list 슬롯 값은 그 행이 스캔의 현재 행일 때만 유효하다** (.51, develop `1684945ed`, 2026-11-03): 슬롯은 속성 캐시의 값을 공유한다(need_clear=0). 압축 없는 문자열은 페이지 안을 가리키고(`is_peeking = scan_id->fixed`, 스캔이 다음 페이지로 가며 unfix), 압축 문자열은 속성 캐시가 풀어 둔 버퍼와 압축본(SA·SERVER 의 string readval 이 둘 다 할당, compressed_need_clear=1)을 가리키는데, 필터가 다음 행을 읽을 때 `eval_data_filter () → heap_attrinfo_read_dbvalues_lazy () → heap_attrinfo_read_dbvalues () → heap_attrvalue_read () → heap_attrvalue_transform_to_dbvalue () → pr_clear_value ()` 가 그 둘을 해제한다. 그래서 BUILDVALUE 출력이 스캔 뒤 읽는 숨은 컬럼은 해제된 버퍼를 읽는다(develop 도 같음 — 덮이기 전이면 맞게 나온다). 실측(debug SA, gdb `break db_private_free_debug if ptr == …` + `break qexec_own_scan_values`): CHAR(1200) 숨은 컬럼(압축 26바이트)의 두 버퍼가 다음 행(전부 NULL)의 필터 읽기에서 해제된 뒤 PR 첫 헤드의 스캔 뒤 복제가 읽어 -897 "Decompression failed"(CI run 41425787959 debug, `function_based_index_select_basic_subquery_001`). CTP(CS) 단건으로는 재현 못 했고 독립 실행(SA)에서 바로 재현. `756c19e28`(행을 집계할 때 `qexec_keep_last_row ()`)은 `1, 10, 1`. (이전 항목 「[잠재 — 재현 안 됨] fixed 힙 스캔의 val_list 값은 페이지 프레임을 가리킨다」를 대체) — 정소희(.51) 2026-11-03, 환류 정소희(.52) 2026-11-03
 - **[구조적 한계]** release 빌드(RelWithDebInfo)는 `-O2` 라 GCC 8.5 가 자동 벡터화·루프 unswitch 를 하지 않는다 — 배치 커널의 행 루프 안 루프 불변 분기·switch(`eb_raw_kid`·`eb_extract`·`eb_run_steps` 의 mask)는 매 행 그대로 실행된다. 손으로 특수화하지 않으면 "배열 위 연산" 이 스칼라 루프로 남는다 (.51, PR#8196 헤드 `46fd2be49` 프로파일, 2026-10-31 — §2 「페이지 배치 실행(expr_batch) 프로파일」). — 정소희(.50) 2026-11-03
+- **[미수정 — develop 선재, 수정 CBRD-25984 / PR#6466(미머지)] 압축 리프의 키 필터가 함수 열 뒤 열을 공통 접두(펜스) 키에서 읽는다** (.51, 4e389935d, 2026-11-04 — 실측 debug SA):
+  - `eval_key_filter ()` 는 읽을 키를 속성 순번 j 로 고르고(`(j < prefix_size) ? prefix_midxkey : midxkey`), 원소 위치는 함수 열을 건너뛴 `j + 1` 로 고른다(query_evaluator.c:3550-3551). 함수 열 뒤 열에서 `j + 1 == prefix_size` 면 공통 접두 밖 원소를 prefix 키에서 읽는다.
+  - 실측: `(a, sqrt(d), c)` 인덱스를 먼저 만들고 3000행을 넣은 표(리프 압축)에서 `a = 1 and mod(c, 300) = 0` 의 커버드 키 필터가 3행이다(정답 10). `c <> 1500` 은 3000(정답 2999), `between`·`in` 은 0행이다.
+  - 접두가 짧거나, 접두 안쪽 열이거나, 함수 열 앞 열이거나, 일반 인덱스거나, 벌크 로드(펜스 키 0)면 맞다.
+  - release/11.4 에도 같은 식이 있다(query_evaluator.c:2905-2906, 정적).
+  - **미수정**(develop). PR#6466 이 midxkey 위치(`midx_pos`)로 고르게 고친다(미머지) — 재현 claude-workspace `projects/CBRD-25984/repro/G3-01`. — 정소희(.52) 2026-11-09
+- **[미수정 — develop 선재, 수정 CBRD-25984 / PR#6466 `d7ce3af72`(미머지)] MRO 커버드 출력이 함수 열 위치를 -1 로 넘긴다** (.51, 4e389935d, 2026-11-04 — 실측 debug SA):
+  - `scan_next_index_scan ()` 의 MRO 분기(scan_manager.c:6282, `multi_range_opt.use` 일 때만)가 부르는 `scan_dump_key_into_tuple ()` 는 `btree_attrinfo_read_dbvalues ()` 에 `func_index_col_id = -1` 을 넘긴다(scan_manager.c:8864-8865). 함수 열이 다른 키 열 앞에 있으면 그 뒤 열을 함수 결과 칸에서 읽는다.
+  - 실측: `(i, j, sqrt(d), k)` 에 `where i in (1, 2) … order by j limit 5` 가 `(covers) (multi_range_opt)` 로 가면, k 가 DOUBLE 일 때 k 자리에 sqrt(d) 값이 나온다(조용한 오답). k 가 INT 면 debug abort 다(`qdata_check_output_column`, query_opfunc.c:529).
+  - 비 MRO 커버드 경로(`btree_read_curr_key_values`)는 `filter->func_idx_col_id` 를 넘겨 맞다. 함수 열이 맨 뒤면 -1 이어도 맞다.
+  - release/11.4 도 같은 `-1` 이다(scan_manager.c:7788-7789, 정적).
+  - **미수정**(develop). PR#6466 `d7ce3af72` 가 `iscan_id->indx_cov.func_index_col_id`(develop 에도 있는 필드, 커버링이면 함수 열 위치)를 넘겨 고친다(미머지, 11-05 재실행 정답) — 재현 claude-workspace `projects/CBRD-25984/repro/MRO-c`. — 정소희(.52) 2026-11-09
+- **[미수정 — #8196 회귀(CBRD-27361), 동료 수정 중] SET 열로 GROUP BY 하면 해시 병합이 모든 행을 첫 그룹으로 접는다** (.51, ef2c78cda, 2026-11-03): SET 출력은 행별 해시 집계를 건너뛰어(`QPROC_TPLDESCR_RETRY_SET_TYPE`, query_executor.c:1448) 모든 행이 unsorted list 에 남고, #8196 뒤 `qexec_groupby` 가 그것을 `qexec_gby_hash_merge`(query_executor.c:8626) → `qexec_gby_merge_rows` 로 끝낸다. 새 키는 `qexec_gby_mtable_add`(query_executor.c:6229)가 `DB_NEED_CLEAR` 아니면 얕게 복사해(query_executor.c:6317) SET 키가 읽은 쪽 SETREF 를 같이 가리키고, 그 SETREF 가 다음 행 읽기에서 놓이고 다시 만들어져 모든 키가 같은 SET 이 된다(SETREF 계약은 src-object §2 「mr_data_readval_set」). `select s, count (*) from t group by s` 5행 → `{1,2}` 5(정답 3그룹), `group by i, s` 는 i 가 겹치면 행이 빠진다. ad7a255c5(#8196 직전) 맞음 — 그때 해시 경로는 `qdata_copy_agg_hkey` 가 키를 늘 `pr_copy_value` 로 깊게 복사했다(ad7a255c5 query_aggregate.cpp:3266). 병합 테이블 rewind 는 키 값을 조건 없이 `pr_clear_value` 한다(query_executor.c:6147). 우회 `/*+ NO_HASH_AGGREGATE */`. **미수정** — 동료가 수정 중(권한 방향: SET 계열도 `pr_clone_value`). — 정소희(.52) 2026-11-09
+- **[계약 — develop 선재 위험, 미확인] `eval_pred ()` 는 오른쪽 선형 PRED_EXPR 트리를 전제한다** (.52, develop `99fa309ca` 정적 + PR#8375 head `8831911fb` 동적, 2026-11-06):
+  - rhs 를 따라 반복하고 lhs 로는 재귀한다(query_evaluator.c:2050 부근). 왼쪽으로 깊은 OR 가 중첩 한도 400 을 넘으면 "maximum allowed nesting level(400)" 로 질의가 거절된다.
+  - 판정 단계의 정적 분석: develop 의 100절 초과(COMPACT) 경로도 AND 묶음 분기가 400 을 넘으면 같은 모양이 된다 — 실행으로 확인하지 않았다. OR-of-AND 를 CNF 에서 통째로 두는 변경(CBRD-27855 PR#8375 리뷰)이 이 전제에 걸린다. — 정소희(.52) 2026-11-09
+- **[계약 — CNF·재작성을 바꾸는 변경의 함정] UPDATE·DELETE·MERGE 안의 부질의는 재작성이 두 번 돈다** (.52, develop `99fa309ca` 정적 + PR#8375 head `8831911fb` 동적, 2026-11-06):
+  - 1차 mq_translate, 2차 XASL 생성용 사본(xasl_generation.c:25273·24667). 원본 인자에서 파생 절을 뽑는 재작성은 두 벌을 만든다.
+  - 2차 재작성의 `qo_apply_range_intersection ()`(query_rewrite_term.c:4424·4482·4485)에서 파생 노드가 같은 열의 사용자 범위를 흡수하면, 인덱스가 그 항을 안 쓸 때 `make_pred_from_plan ()`(plan_generation.c:1990)이 파생 절과 함께 사용자 조건을 버린다 — 자동 파라미터화 끔 문맥(src-optimizer §2 「자동 파라미터화가 꺼지는 조건」)에서 CBRD-27855 PR#8375 리뷰로 드러났다. — 정소희(.52) 2026-11-09
+- **[미수정 — develop 선재(#8196 이전부터), 수정 CBRD-27870 / PR#8364 미머지] 집계 빠른 길 둘에서 숨은 소스 컬럼이 NULL** (.52, PR#8364 헤드 `756c19e28` · develop `ef2c78cda` · #8196 직전 `ad7a255c5`, 2026-11-03): 재작성이 출력에 붙인 숨은 소스 컬럼(ODKU 대입 `pt_append_assignment_references ()`, 상관 select-list `mq_rewrite_aggregate_as_derived ()`)이 WHERE 없는 MAX ODKU·키 범위만 있는 COUNT(*) 에서 소스 행이 있어도 NULL(세 리비전 모두) — 빠른 길이 행 루프를 건너뛰기 때문(§2 「qexec_execute_mainblock」). 위 「경로 셋」 항목과 같은 결함 계열. — 정소희(.52) 2026-11-09
+- **[미수정 — CBRD-27926 PR#8398 리뷰에서 발견] VARBIT GROUP_CONCAT 이 group_concat_max_len 에서 N 바이트가 아니라 N 비트를 남긴다** (.52, 0661d2c12, 단위 동적, 2026-11-06): 100 바이트 VARBIT 11 개를 `group_concat_max_len=1024` 로 모으면 결과가 1003 바이트다(단위 D1 — dev4-review-workspace `unit/query/f_string_opfunc.string_append`). 잘림 함수 `db_string_limit_size_string ()` 이 비트열 길이를 바이트 한도와 같은 단위로 본다. **미수정**. — 정소희(.52) 2026-11-09
+- **[미수정(잠재, 정적만) — CBRD-27926 PR#8398 리뷰에서 발견] 병렬 GROUP_CONCAT 의 두 번째 병합에서 value2 의 힙이 어긋날 수 있다** (.52, develop `0661d2c12` 정적만, 2026-11-06): `oracle_style_empty_string=yes` 와 `SEPARATOR ''`, 또는 BIT 인자라 value2 가 NULL 일 때 `qdata_group_concat_value ()`(query_aggregate.cpp:4224-4233)가 `orig.value2` 를 heap 0 에 만들고, 실행 끝 `qexec_clear_agg_list ()`(query_executor.c:2482)가 코디네이터의 lea 힙으로 푼다. 재현은 돌리지 않았다. **미수정**. — 정소희(.52) 2026-11-09
+- **[미수정(잠재, 정적만) — develop, 수정 CBRD-27926 / PR#8398 미머지] develop 의 GROUP_CONCAT 잠재 메모리 오류 두 가지** (.52, develop `0661d2c12` 정적만 — PR#8398 이 없앤다, 2026-11-06):
+  - spare_bytes 경로가 결과를 정확한 크기 블록 위에 size+spare 로 다시 만들어 뒤이은 clone 이 블록 밖을 읽는다(base query_opfunc.c:2781, query_aggregate.cpp:4241).
+  - 덜 채운 CHAR 값이 오면 `qstr_concatenate ()` 가 패딩 문자를 결과 블록 밖에 쓴다. 둘 다 재현하지 않았다. **미수정**(develop). — 정소희(.52) 2026-11-09
+- **[미수정 — CBRD-27959, 수정 PR#8436 `482608da0` 미머지] 행마다 리스트 정리가 다음 집합 연산 갈래까지 지워 병렬 실행에서 이중 해제가 난다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`):
+  - **`qexec_clear_all_lists ()`(query_executor.c:3755)는 넘겨받은 블록부터 `xasl->next` 를 따라 형제까지 정리했다**: 부르는 곳은 `qexec_intprt_fnc ()` 의 행마다 정리(:15051) 하나. 집합 연산 갈래는 부모 aptr 목록에서 형제라, 첫 갈래의 행마다 다음 갈래의 dptr(상관 부질의) 리스트를 지웠다. 직렬에서는 다음 갈래가 시작 전이라 무해.
+  - **병렬 부질의 실행은 UNION 의 aptr 갈래를 작업으로 동시에 돌린다**(px_query_executor.cpp executor_iter, 루트 스레드도 작업을 실행). 갈래별 XASL·list_id 는 따로지만 질의 항목의 임시 파일 목록(tran_entry mutex)과 전역 반납 목록을 함께 쓴다 → 다른 스레드가 쓰는 리스트의 임시 파일이 반납되어 다른 리스트가 같은 구조체를 받는다(계측: 같은 tf 두 번 해제, found=0).
+  - 증상 자리들: `qmgr_free_list_temp_file ()` 의 잠금 없는 `if (query_p->temp_vfid)` 뒤 NULL->next(:3479), `qmgr_get_page_type ()` assert, `qfile_initialize_sort_key_info ()`·`qdata_generate_tuple_desc_for_valptr_list ()` assert. 잠금 없는 확인은 질의 목록에 없는 임시 파일을 해제할 때만 NULL 을 읽으므로 증상이다.
+  - 조건: 두 갈래 모두에 상관 IN 부질의(한 갈래만이면 안 죽음, 부질의가 달라도 죽음), NO_PARALLEL_SUBQUERY 면 안 죽음.
+  - `qexec_clear_xasl_for_parallel_aptr ()` 는 next 를 훑지 않는다("aptr next node will be cleared by other threads").
+  - 수정 PR#8436 `482608da0`(미머지): 넘겨받은 블록만 정리(bptr·fptr 원소마다, dptr·scan 은 같음). 계측 기록 `claude-workspace/projects/CBRD-27959/repro/`. — 정소희(.52) 2026-11-09
 
 ## 4. 진행중인 작업
 

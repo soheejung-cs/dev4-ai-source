@@ -118,6 +118,11 @@ optimizer(QO_PLAN) → parser/xasl_generation.c(XASL_NODE).
 **혼합 OR 조건은 join term 으로만 분류되어 단일 릴레이션 sarg 가 0개가 된다** — TPC-H q19 의 큰 OR 는 각 분기 안에 part 컬럼과 lineitem 컬럼이 섞여 있어 CUBRID 의 term 분류가 OR 전체를 join term 으로만 취급한다. 그 결과 part 에 sarg 가 0개가 되어 part 를 줄이는 인덱스 프로브 자체가 성립하지 않는다. 각 분기의 part 조건 OR 를 WHERE 에 수동 중복 추가하면 결과값 동일(30104438.0911)하면서 5.6s → 0.618s 로 개선됨을 실증했고(cubrid-tpch/exp/q19_orext.sql, develop b572177a1), `l_partkey` 선두 인덱스는 CUBRID 에도 이미 있어 추출을 못 해서 못 쓰는 것이 핵심이었다. → 현재 develop 은 rewriter 의 `qo_extract_or_restrictions()` 로 이를 해소(해당 절 참조).
 - ✅ **리뷰 체크포인트**: 인덱스가 있는데 안 쓰이는 사례는 term 분류 결과(sarg 개수)를 먼저 의심할 것.
 
+### get_term_rank (QO_TERM_RANK) / make_pred_from_bitset — AND 술어의 평가 순서 (query_graph.c:3678, plan_generation.c:1814)
+
+- **`QO_TERM_RANK`(get_term_rank, query_graph.c:3678)는 연산자와 바로 아래 피연산자의 등급 합이다 — 비교 1(RANK_EXPR_LIGHT)·함수 2·LIKE/RLIKE 3·집계 4·부질의당 8(query_graph.c:71-78)** (.52, develop `ef2c78cda`, 2026-11-03): **OR 목록은 따라가지 않고**, LIKE 패턴 모양·IN 크기를 구분하지 않는다. 쓰임은 AND 순서의 동점 깨기. — 정소희(.52) 2026-11-09
+- **XASL 의 AND 술어 순서는 `make_pred_from_bitset ()`(plan_generation.c:1814)이 (pred_order, 선택도, rank) 비교로 정한다 — 플래닝 때 결정적** (.52, develop `ef2c78cda`, 2026-11-03). 술어 평가 비용을 순서·비용에 넣는 안은 CBRD-27127 PR#8392(draft, 다음 버전으로 보류). — 정소희(.52) 2026-11-09
+
 ### qo_expr_selectivity (query_planner.c:10126)
 
 **PT_EXPR 가 아닌 노드가 들어올 수 있다** (상수 접힘 결과 등) — 가드 없으면 코어. 처리할 땐 `total_selectivity = 1.0` 같은 값 강제가 아니라 **`continue`(중립)** 가 맞다. AND 결합에서 미지항이 전체를 1.0으로 덮어쓰면 다른 항의 선택도가 소거된다. (2026-08 hotfix 에서 확정, 사용자 검증 완료)
@@ -144,6 +149,7 @@ attr=attr 은 `histogram_get_join_selectivity`(:10602) 우선, 실패 시 `qo_in
 
 **IN 리스트 선택도 — 원소별 MCV 프로브가 없다** — IN 리스트 선택도는 원소 개수 × 등호 선택도로만 계산하고(`list_card = pt_length_of_list(...)` develop :11486/:11490, 서브쿼리는 XASL cardinality :11497, 실패 시 legacy 1000), 원소별로 MCV/히스토그램을 프로브하지 않는다. 따라서 선택적인 IN 리스트(희소값)에서 선택도가 크게 과대평가된다. develop 은 하드 상한 0.5 를 그대로 유지한다(`in_selectivity > 0.5 ? 0.5 : in_selectivity`, :11507-11508 "compute selectivity--cap at 0.5"); 상한을 `MIN(in_selectivity, 1.0)` 으로 바꾸고 "the former hard cap of 0.5 had no distributional basis" 주석을 단 것은 CBRD-27094 브랜치다(develop 에 없음 — CBRD-27094/PR#7622 계열).
 - ✅ **리뷰 체크포인트**: IN 조건 질의의 플랜이 이상하면 `list_card * equal_selectivity` 근사를 먼저 확인하고, 개선 시 원소별 MCV 프로브 후 중복 보정을 포함해 합산할 것.
+- **양의 IN 상수 목록은 `=` 원소들의 `PT_RANGE` 로 도착한다(`;plan detail`: `range (1 = or 2 = …)`) — NOT IN 은 IS_NOT_IN 그대로** (.52, develop `ef2c78cda`, 2026-11-03). — 정소희(.52) 2026-11-09
 
 ### 세션 변수 술어 — `qo_classify` 의 PC_OTHER (query_graph.c)
 
@@ -170,6 +176,9 @@ attr=attr 은 `histogram_get_join_selectivity`(:10602) 우선, 실패 시 `qo_in
 ### qo_sscan_cost (query_planner.c:1742)
 
 시동 비용이 없다: `fixed_cpu_cost = 0.0`, `fixed_io_cost = 0.0`, `variable_cpu_cost = NCARD * QO_CPU_WEIGHT`, `variable_io_cost = TCARD`(develop :1747-1758). NCARD==0(통계 미수집)이면 `1.0 * QO_CPU_WEIGHT` = 0.0025 를 주는 분기가 있다(:1749-1752). iscan 에만 상수항을 더하는 변경이 소형 테이블 동률을 뒤집는 이유가 이 '대응항 없음'이다(descent_cpu 계열 참조).
+
+- **스캔 비용에 술어 평가 항이 없다** (.52, develop `ef2c78cda`, 2026-11-03): `qo_sscan_cost` variable_cpu = NCARD × QO_CPU_WEIGHT(query_planner.c:2116), `qo_iscan_cost` = (leaf_access + heap_access) × QO_CPU_WEIGHT(:2971). — 정소희(.52) 2026-11-09
+- **술어 평가 단가 실측(lineitem 59,986,052행 직렬 풀스캔, 정수 비교 1회 = 1, 11.2ns; 행당 기준 56.2ns)**: BETWEEN 1.73, IN 10 22.5·IN 100 151.8, LIKE 11.75~12.71(anchored·wildcard 같음), REGEXP 35.5, SUBSTRING 20.2, UPPER 32.3 (.52, develop `ef2c78cda`, 2026-11-03). — 정소희(.52) 2026-11-09
 
 ### qo_iscan_cost (query_planner.c:2249)
 
@@ -349,6 +358,7 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
 **LIKE 항은 `LIKE 'abc'` → 등가, `LIKE 'abc%'`·`'abc %'` → 범위 항 + 잔여 LIKE 항으로 재작성되고, 잔여 LIKE 항의 sel 은 like 추정 / 범위 추정(상한 1)이다** (.50, 6497720ec 실측, 2026-09-17): 파생 범위는 `PT_EXPR_INFO_LIKE_DERIVED_RANGE`, 원 LIKE 는 `PT_EXPR_INFO_LIKE_HAS_DERIVED_RANGE` 로 짝지어지고, `qo_derived_term_compensate ()`(query_graph.c, CBRD-27306 `a64ba7ab9`)가 원 술어에 조건부 몫 `sel (origin) / sel (derived)` 만 남긴다(1 로 상한; like 추정이 범위 추정보다 크면 범위 쪽을 like 추정까지 올리고 LIKE 는 1 — develop `2d925cb86` :9026-9144; 인덱스 비용 쪽 상쇄는 qo_iscan_cost 절 「LIKE prefix 파생 범위와의 중복 상쇄」). `set optimization level 513` 출력의 term 은 sel 순 정렬이라 `term[0]` 만 보면 LIKE 추정을 오독한다 — REGEXP 항(재작성 없음)으로 확인하는 게 정확하다. — 정소희(.50) 2026-10-28
 
 **host variable 패턴 `col LIKE ?` 도 컴파일 시 generic 파생 range 를 얻는다** (.52, c0e06bef9, 2026-09-22): `qo_rewrite_like_terms ()` 가 `pt_is_pseudo_const (pattern)` 분기에서 `qo_rewrite_like_for_index_scan ()` 을 불러 `col RANGE (like_match_lower_bound(?) ge_lt like_match_upper_bound(?))` 를 붙이고 `PT_EXPR_INFO_LIKE_DERIVED_RANGE` 를 세운다 — PREPARE 플랜 덤프 `term[0]: s range (like_match_lower_bound(?:0) ge_lt like_match_upper_bound(?:0)) (sel 0.1)` 로 확인. 경계가 식이라 그 항은 히스토그램 범위 추정을 못 받고 기본값에 머문다(→ §3). ✅ "`LIKE ?` 는 리라이트가 비대칭이라 bounded index scan 을 못 탄다" 는 전제(CBRD-27143 초기 서술)는 성립하지 않는다. develop `2d925cb86` 재확인: 분기 query_rewrite_term.c:2639-2656, 플래그 :2446. — 정소희(.50) 2026-10-28
+- **재확인 — `pt_is_pseudo_const` 패턴(host variable 포함)의 `like_match_lower_bound (?)` 범위 형제항은 OR 목록 밖일 때 생기고, PREPARE 플랜에서 그 범위항은 기본 sel 0.1, LIKE 항은 sel 1** (.52, develop `ef2c78cda`, 2026-11-03): `qo_rewrite_like_terms`(query_rewrite_term.c:2643). — 정소희(.52) 2026-11-09
 
 **상수 접두어 LIKE 는 파생 경계가 접혀 자동 파라미터화되므로 같은 문장 텍스트의 모든 접두어 패턴이 XASL 캐시 엔트리 하나를 공유하고, 플랜은 첫 패턴의 값으로 고른다** (.52, c0e06bef9, 2026-09-22): `select count(pad) from t where s like 'abc%'`(sscan, sel 0.8999) 뒤 `'xyz%'` 는 플랜 덤프 없이 캐시 히트로 같은 sscan. 결과는 정확하고 플랜만 첫값 고정 — bind peek 의 OFF 계약(develop `620ceaf6a` 이전)과 같은 성질(설계 사실). `620ceaf6a`(CBRD-27490, 2026-10-21)는 `histogram_bind_fingerprint ()` 를 UINT64 양자화 해시(EQ sel×1e12·범위 sel×100)에서 술어별 예상 행 수 벡터 + 밴드 비교(`BIND_WATCH_BAND` 1.5배·힌트 1.1배·`BIND_WATCH_ROW_FLOOR` 1,000행, histogram_cl.hpp:181-189)로 바꾸고 플랜 변형(`plan_cache_bind_variants`, 기본 5)을 들였다 — 정리는 src-compat §2 「do_replan_statement_with_bind_peek / do_replan_statement_internal」. 그 지문은 사용자 호스트 변수만 세고 자동 파라미터(index ≥ `host_var_count`)는 뺀다(`histogram_is_user_host_var ()` histogram_cl.cpp:2884, 주석 :2878-2882) — 그래서 이 성질은 develop `2d925cb86` 에도 남는다(코드 판독, 실측 안 함). — 정소희(.50) 2026-10-28
 
@@ -415,6 +425,24 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
   (`SIZEOF_ATTR_CUM_STATS_PKEYS` 가 `sizeof (INT64)`). 선택도 산식은 전부 `(double)` 로 나누므로 정밀도 변화 없음.
 - `qo_get_col_product_ndv()`(:12074) 는 GROUP BY 컬럼들의 NDV 곱을 `total_ndv *=` 로 누적한다 — INT64 라도 컬럼 수가 많으면 넘칠 수 있고
   상한 clamp 가 없다(기존 int 시절부터). 미수정 관찰.
+
+### qo_estimate_ngroups / qo_having_selectivity — GROUP BY 행 추정과 HAVING (query_planner.c)
+
+- **HAVING 선택도는 `qo_estimate_ngroups ()` 가 GROUP BY 정렬에서 그룹 수 × `qo_having_selectivity ()`(최소 1)로 곱한다 — 못 매기는 집계 술어는 `QO_HAVING_DEFAULT_SELECTIVITY` 0.5** (.51, PR#8325 head `5cfef7f5b`, 2026-11-03 — 머지본 `e98bdd885`(CBRD-27811, 2026-11-05)에서 재확인 2026-11-09). NDV 를 모를 때의 `group_rows` 는 이 머지부터 낮출 때만 갱신한다(§3 「NDV 를 모르는 DISTINCT」 해소). — 정소희(.52) 2026-11-09
+
+### 파생 테이블 노드의 card — pt_get_query_limit_from_query (query_graph.c:1360, parser_support.c:10570)
+
+- **파생 테이블 card 의 상한은 LIMIT 뿐** (.51, ef2c78cda, 2026-11-03): 파생 테이블 노드의 card 는 하위 XASL 의 `xasl->cardinality` 이고, `pt_get_query_limit_from_query ()` 로 LIMIT 상한만 건다(query_graph.c:1360-1369 → parser_support.c:10570-10590, `info.query.limit`·`orderby_for` 만 읽음). `GROUP BY … LIMIT n` 은 파서가 HAVING 의 `GROUPBY_NUM () <= n` 으로 바꾸면서 `info.query.limit` 을 남기고 `rewrite_limit` 만 0 으로 한다(type_checking.c:7616-7660). 그래서 그 꼴에는 상한이 걸리고, HAVING 에 직접 쓴 `GROUPBY_NUM ()` 에는 걸리지 않는다. — 정소희(.52) 2026-11-09
+
+### qo_convert_to_range — 비교를 RANGE 로 바꾸는 조건 (rewriter/query_rewrite_term.c:3765)
+
+- **HAVING 에는 집계를 왼쪽에 둔 PT_RANGE 가 생기지 않는다** (.51, ef2c78cda, 2026-11-03): HAVING 도 `qo_rewrite_terms` 를 거치지만(query_rewrite.c:486), 비교·BETWEEN·IN 을 RANGE 로 바꾸는 `qo_convert_to_range` 는 왼쪽이 `pt_is_attr`·함수 인덱스 식(PT_EXPR 플래그, parser_support.c:1586-1599)·instnum 일 때만 바꾼다(query_rewrite_term.c:3765-3770). auto-parameterize 도 같은 조건이다(query_rewrite_auto_parameterize.c:67-75). op 에 PT_RANGE 를 대입하는 곳은 query_rewrite_term.c:2965 하나뿐이다. 집계(PT_FUNCTION)는 왼쪽이 될 수 없어 집계 BETWEEN 은 PT_BETWEEN 으로 남는다. — 정소희(.52) 2026-11-09
+
+### 자동 파라미터화가 꺼지는 조건 (rewriter/query_rewrite.c:504-506)
+
+- **자동 파라미터화가 꺼지는 조건** (.52, develop `99fa309ca` 정적, query_rewrite.c:504-506, 2026-11-06):
+  - `hostvar_late_binding=yes`, `max_plan_cache_entries` ≤ 0, `cannot_prepare`, PL/CSQL 정적 SQL(`is_parsing_static_sql`), `is_skip_auto_parameterize`. conf 키는 `max_plan_cache_entries`(매크로 `PRM_ID_XASL_CACHE_MAX_ENTRIES` — 이름이 다르다).
+  - 이 문맥에서는 상수가 호스트 변수로 바뀌지 않아 범위 병합·교집합이 상수로 일어난다 — 재작성기 변경은 이 판으로도 돌려야 한다(자가진화 #095). — 정소희(.52) 2026-11-09
 
 ### 비용 모델 실측 캘리브레이션과 세 가지 함정 (.51, 기준 PR#7622 `0721d8da0`, 2026-09-02 release 실측)
 
@@ -495,6 +523,14 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
 - **CHAR↔VARCHAR 조인의 `mcv_join_parts_str` 은 한쪽 스트립·한쪽 원본 MCV 를 비교하지만, 런타임은 패딩된 CHAR 와 원본 VARCHAR 바이트를 비교한다 — 정합 여부 미검증** (.50, 2026-09-17). **미수정**(별건 후보; develop `2d925cb86` 재확인 2026-10-28 — histogram_cl.cpp:1614 는 저장 MCV 끼리 `string_values_equal_under_collation` 으로 비교하고 재패딩하지 않는다). — 정소희(.50) 2026-10-28
 
 - **UPDATE / DELETE 의 `col LIKE ?` 는 LIKE 파생 범위 항(`like_match_lower_bound(?) ge_lt like_match_upper_bound(?)`)이 두 번 붙는다 — SELECT 는 한 번** — **미수정(develop 선재) — 수정 PR#8006(미머지, 2026-11-03 열림)** (.52, develop `d7378784f`·PR#8006 `2364bcc7a` release CS 실측, 2026-10-28): `set optimization level 513` 의 PREPARE 덤프에서 `update t set pad = pad where s like ?` 는 같은 범위 항이 term[0](sel 0.01)·term[2](sel 10) 두 개로 나오고 인덱스 term[2] + 필터 term[0] AND term[1](LIKE), 같은 조건의 `select count(pad) from t where s like ?` 는 범위 항 하나(sel 0.1). trace 의 플랜 문자열도 UPDATE/DELETE 에서 `key filter: (s>= like_match_lower_bound(?) and s< …)` 가 key range 와 중복된다. 영향: PR#8006 의 첫 실행 peek 가 UPDATE 에도 걸리지만(trace `Query Plan:` 블록) 다수 접두어 `'abc%'`(90%)에서도 INDEX SCAN 이 남는다 — 상수 `'abc%'` UPDATE 와 바인드 SELECT 는 TABLE SCAN, 바인드 등호 UPDATE(`g = ?` 90% 값)는 develop 에서도 peek 뒤 TABLE SCAN. 결과 행 수는 같다(계획만 비관). 원인 미규명 — UPDATE/DELETE 의 내부 SELECT 생성 경로가 LIKE 리라이트를 한 번 더 거치는 것으로 추정(`qo_rewrite_like_terms ()` 호출 경로 확인 필요). 재현 `claude-workspace/projects/CBRD-27143/repro/dml_trace.sql`·`dml_dump.sql`·`dml_eq.sql`. — 정소희(.50) 2026-11-03
+- **[해소됨 — CBRD-27811, PR#8325 develop `e98bdd885` 2026-11-05] NDV 를 모르는 DISTINCT 가 GROUP BY 의 추정을 입력 행 수로 되돌린다** (.51, ef2c78cda, 2026-11-03): `qo_estimate_ngroups ()` 의 NDV 미상 경로가 `plan->info->group_rows = expected_nrows` 를 무조건 대입한다(query_planner.c:815). GROUP BY 정렬과 그 위의 DISTINCT 정렬은 같은 info 를 쓰고(`qo_sort_new ()` 의 `plan->info = subplan->info`), select list 에 열이 없으면 DISTINCT 의 `qo_get_group_ndv ()` 가 -1 이다. 실측(SA·level 513): 2,000 그룹(그룹 1~7행)에서 `(select distinct count (*) from t group by g)` 파생 테이블 d = 8,005(입력 행 수), 실제 7. 결과 행은 맞다. 수정: PR#8325 가 '낮출 때만 갱신' 으로 바꾼다(PR head 실측 d = 2,000; 머지본 `e98bdd885` 에서 조건 대입 재확인 2026-11-09). — 정소희(.52) 2026-11-09
+- **[미수정 — develop, 별도 이슈 후보] 키 필터 아래 GROUP BY 의 그룹 수 과대** (.51, ef2c78cda, 2026-11-03): `qo_estimate_ndv ()` 가 GROUP BY 열 자체를 거른 질의에서 그룹 수를 크게 과대로 잡는다 — 2,000 값 × 100행 표에 `where g <= 100 group by g` 면 d = 1,987, 실제 100(SA·level 513). **미수정**(develop). — 정소희(.52) 2026-11-09
+- **[해소됨 — CBRD-27836, PR#8413 develop `262a23219` 2026-11-09] `db_histogram.scan_type` 은 처음 만든 방식으로 남았다** (.51, 69ffb9aaf, 2026-11-05): `with_fullscan` 은 행을 만들 때(`smt_add_histogram ()`, schema_template.c:2120)만 쓰이고, 다시 수집할 때 쓰는 `store_one_histogram ()`(histogram_cl.cpp:230)은 `null_frequency`·`histogram_values` 만 고친다. 실측: 샘플링으로 다시 수집해도 'FULL SCAN' 그대로. `histogram_values` 를 쓰는 곳은 이 함수 하나다. 수정(PR#8413): 다시 수집할 때 `with_fullscan` 도 고친다(src-object §2 「_db_histogram」 스키마 항목에도 표기). — 정소희(.52) 2026-11-09
+- **[미수정 — develop(CBRD-27855 PR#8375 리뷰에서 발견)] 외부 조인 뒤 명시적 INNER JOIN 의 ON 에 널 공급 쪽을 섞은 OR-of-AND 가 분배되면 오답** (.52, 99fa309ca, 2026-11-06 — 실측 debug SA):
+  - `o left join i on … inner join j on (i.x is null and j.y = 1) or (i.x = 2 and j.y = 2)`(분배 후 4절)에서 i 의 파생 제약이 외부 조인 아래 i 스캔으로 내려가, i 행(x=5)을 걸러 NULL 확장행을 만들고 ON 이 참이 된다 — 정답 0행, develop 1행 `(1, NULL, 1)`.
+  - 분배 후 절이 100 을 넘으면(COMPACT 경로) develop 은 추출하지 않아 0행이다.
+  - **미수정**(develop) — 재현 claude-workspace `projects/CBRD-27855/repro/g12-04_07` 1번. — 정소희(.52) 2026-11-09
+- **[구조적 한계 — 미수정] FK 조인 과소추정: 작은 차원 표의 상수 필터 뒤 FK 조인을 균등 1/NDV 로 본다** (.52, develop `ef2c78cda`, 2026-11-03): 작은 차원 표의 상수 필터(`it.info = 'release dates'`, info_type 113행) 뒤 `it.id = mi.info_type_id` 를 균등 1/NDV(1/113)로 본다 — 실제 'release dates' 는 movie_info 1,484만 중 304만(20%), (it⋈mi) 131,290 추정은 23배 과소(JOB 19d). 9d·15c·15d·13b 도 같은 꼴. 같은 뿌리는 아래 「조인 선택도 `1/NDV` 균등 가정」(JOB 계약 `AK-par4`). — 정소희(.52) 2026-11-09
 
 **JOB 실측 예비 이슈** — 측정 계약 `AK-par4`(JOB 113질의, `parallelism=4`·`data_buffer_size=16G`·`taskset -c 0-15`, 21테이블 `WITH FULLSCAN, 300 BUCKETS` 후 재기동, warmup 1패스, 기준 develop `07480dfd1` release; 카디널리티는 `qref` 레인) — §2 「JOB 실측」 절 첫 줄과 같다.
 - **같은 질의 안에서 비용 순서가 실제 시간 순서와 역전된다 — 34개 중 어긋남 32 / 일치 0 / 동률 2** (.52, `07480dfd1`, 2026-09-18): 수치는 §2 모듈 일반 「비용 추정값이 실제 실행시간과 비단조」 보강. 탐색 실패가 아니라 비용 함수가 틀린 것이다. **미수정**(재확인 못 함 — 측정 기반, develop `2d925cb86` 에서 재측정 안 함). — 정소희(.50) 2026-10-28

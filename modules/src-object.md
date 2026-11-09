@@ -68,6 +68,10 @@ primitive 타입 연산, 디스크↔메모리 변환. 접두사: `sm_`(schema),
 - compat `db_value_clear()`가 이 함수를 그대로 호출한다(db_macro.c:1484). `db_value_free()`는
   `pr_free_ext_value()`로 컨테이너까지 해제 — 별개 함수.
 
+### mr_data_readval_set — SET 의 PEEK 읽기와 SETREF (object_primitive.c:7158)
+
+- **SET 의 PEEK 읽기는 별도 SETREF 를 만들고 need_clear 를 세우지 않는다** (.51, ef2c78cda, 2026-11-03): `mr_data_readval_set`(object_primitive.c:7158)의 copy = false 분기는 `set_make_reference ()`(object_primitive.c:7242, Set_Ref_Area)로 SETREF 를 만들어 디스크 비트를 가리키게 하고 `db_make_set` 으로 싣는다 — `DB_NEED_CLEAR`(dbtype.h:81)는 need_clear·압축 문자열만 보므로 '해제할 것 없음' 으로 보인다. 그러나 `pr_clear_value` 는 SET 이면 need_clear 와 상관없이 `set_free`(참조 수 감소)를 부른다(object_primitive.c:1939). 그래서 PEEK 한 SET DB_VALUE 를 얕게 복사해 오래 쓰면 읽은 쪽이 놓은 SETREF 를 가리키게 된다. 이 계약에 걸린 결함은 src-query §3(SET 열 GROUP BY 의 해시 병합). — 정소희(.52) 2026-11-09
+
 ### mr_data_readval_int / mr_index_readval_int (object_primitive.c)
 
 - static 함수(선언 L372/L375), `tp_Integer` 등 PR_TYPE 인스턴스의 함수 포인터로만 호출된다.
@@ -75,6 +79,23 @@ primitive 타입 연산, 디스크↔메모리 변환. 접두사: `sm_`(schema),
   disksize/함수포인터 상수폴딩 불가. `mr_index_readval_int` 39명령어 + memcpy@plt(4바이트!) vs
   `mr_data_readval_int` 21명령어. 실측 1.02% vs 0.29%. 개선안: constexpr화 또는 `OR_*_SIZE` 리터럴 사용.
 - **SHORT·INTEGER·BIGINT 의 인덱스 키 이미지는 원시(native) 바이트다** (.51, CBRD-27361 헤드 `0efc06bf1`, 2026-11-01): `mr_index_writeval_int` 는 `or_put_data (buf, &i, tp_Integer.disksize)` 로 4바이트를 그대로 쓰고 `mr_index_readval_int` 는 `or_get_data` 로 그대로 읽는다(object_primitive.c:2434·2444; short :2605, bigint :2776 도 같다). 힙(데이터) 표현의 `OR_GET_INT`(빅엔디언)와 다르다. 인덱스 키 비교 `mr_index_cmpdisk_int` 도 `COPYMEM` 으로 원시 값을 비교한다. DATE·TIME·OID 키의 인덱스 이미지가 원시인지는 **미확인**(`mr_index_writeval_date` 등은 보지 않았다). `MR_CMP` 는 object_primitive.c 안의 지역 매크로다(헤더에 없음) — btree.c 에서 쓰려면 직접 비교식을 쓴다. — 정소희(.50) 2026-11-03
+
+### pr_midxkey_compare / pr_midxkey_compare_element — MIDXKEY 비교 (object_primitive.c)
+
+- **MIDXKEY 비교: 같은 도메인 열이면 `pr_midxkey_compare ()` 가 열마다 `index_cmpdisk` 로 디스크 이미지끼리 비교한다 — 다른 도메인이면 `pr_midxkey_compare_element ()` 가 DB_VALUE 로 읽는다** (.52, PR#8353 헤드 `6b0ca5566`, 2026-11-03 — 리뷰 질문 대응): object_primitive.c:7919 @6b0ca5566. MIDXKEY 측정은 후속 Sub-task CBRD-27901(CBRD-27862 의 1단계 뒤). — 정소희(.52) 2026-11-09
+
+### mr_index_cmpdisk_datetimetz — DATETIMETZ 인덱스 비교는 tz_id 를 보지 않는다 (object_primitive.c:4387)
+
+- **DATETIMETZ 인덱스 비교는 tz_id 를 보지 않는다** (.51, 4e389935d, 2026-11-04):
+  - `mr_index_cmpdisk_datetimetz ()` 는 `mr_index_cmpdisk_datetime ()` 을 그대로 부른다(object_primitive.c:4387-4391, 주석 "tz_id is ignored"). release/11.4 도 같다(4447·4455).
+  - B-tree 는 비교가 같은 키를 찾으면 새 OID 를 그 키에 덧붙인다(`btree_key_insert_new_object ()`, btree.c:32329). 그래서 같은 순간을 다른 시간대로 적은 두 값은 키 하나가 되고, 키에서 읽으면 키에 남은 한 값으로 나온다(실측에서는 먼저 넣은 `+09:00`).
+  - 커버링 관문 `qo_check_type_index_covering ()`(query_graph.c:10458)·`qo_check_coll_optimization ()`(query_graph.c:10410)이 이런 타입과 대소문자 무시 콜레이션의 키를 커버링에서 빼는 이유가 이것이다.
+  - ✅ **리뷰 체크포인트**: 키에서 값을 읽는 경로를 넓히는 변경(함수 결과 커버링 등)은 이 두 관문을 새 경로에도 거는지 본다 — CBRD-25984 PR#6466 리뷰 G1-01. — 정소희(.52) 2026-11-09
+
+### pr_pad_char_to_precision / qstr_pad_string — CHAR 를 정밀도까지 채우는 두 방식 (object_primitive.c:12615, query/string_opfunc.c:10076)
+
+- **CHAR 를 정밀도까지 채우는 방식이 캐스트와 레코드 쓰기에서 다르다 — 캐스트는 대상 코드셋의 pad 문자, 쓰기는 늘 공백** (.50, ef2c78cda, 2026-11-03, 단위 실측): 캐스트 `qstr_coerce` → `qstr_pad_string (…, dest_codeset)`(string_opfunc.c:10076)가 `intl_pad_char`(intl_support.c:1461 — RAW_BYTES 0x00, KSC5601_EUC 0xA1A1, UTF8·ISO·ASCII 0x20)로 채우고, 쓰기·길이 계산의 `pr_pad_char_to_precision`(object_primitive.c:12615)은 `memset (' ')` 하나다. 그래서 정밀도보다 짧은 CHAR 를 캐스트 없이 쓰면 EUC-KR 은 10 대 17바이트, binary 는 되읽은 값이 다르게 비교(DB_GT)된다(PR#8378 단위 suite `unit/storage/heap_file.share_string` U1·U2). 리스트 튜플·레코드·플랜 상수에서 읽은 CHAR 는 이미 채워져 있고 `medium.length = precision` 을 캐시한다(object_primitive.c:12302·12328·12339).
+  - ✅ **리뷰 체크포인트**: CHAR 값을 캐스트 없이 저장하거나 복사하는 지름길은 "꽉 찬 값(길이 = 정밀도)" 으로 한정한다 — 짧은 값의 채움은 코드셋에 따라 경로마다 다르다. — 정소희(.52) 2026-11-09
 
 ### smt_edit_class_mop / sm_update_class (schema_template.c / schema_manager.c)
 
@@ -114,6 +135,7 @@ primitive 타입 연산, 디스크↔메모리 변환. 접두사: `sm_`(schema),
   schema_system_catalog_install.cpp:1280-1292): 기존 행 재빌드(`store_one_histogram`, histogram_cl.cpp:231)는 `null_frequency`·
   `histogram_values` 만 갱신하고 **`with_fullscan` 은 안 바꾼다**(`sm_add_histogram` 이 `ER_LC_CLASSNAME_EXIST` 로 건너뜀,
   schema_manager.c:15587) — 재빌드 여부 신호로 `with_fullscan` 을 쓰면 오판. 신호는 행 chn 또는 `null_frequency`. — 정소희(.50) 2026-10-28
+  - **바뀜 — PR#8413(CBRD-27836) develop `262a23219`(2026-11-09)**: 다시 수집할 때 `store_one_histogram ()` 이 `with_fullscan` 도 고친다. 그 전 동작이 남긴 `db_histogram.scan_type` 어긋남은 src-optimizer §3. — 정소희(.52) 2026-11-09
 - **`_db_histogram` 의 제약은 `UNIQUE (class_of, key_attr)` 하나뿐이다** (.50, static, `2d5a35d24`, 2026-09-18; develop `2d925cb86`
   재확인 — `system_catalog_initializer::get_histogram ()` schema_system_catalog_install.cpp:1295): `_db_histogram` 삽입의
   `ER_BTREE_UNIQUE_FAILED` 는 그 키로만 발생한다는 뜻이다. `sm_add_histogram ()`(schema_manager.c:15617-15634)이 이것을 근거로 동시 첫
@@ -123,6 +145,14 @@ primitive 타입 연산, 디스크↔메모리 변환. 접두사: `sm_`(schema),
   `2d925cb86` 재확인): `db_class` 는 `CASE [c].[statistics_strategy] WHEN 0 THEN 'SAMPLING' WHEN 1 THEN 'FULLSCAN' ELSE NULL END`
   (schema_system_catalog_install_query_spec.cpp:75-79), information_schema 는 `DECODE (…, 0, 'SAMPLING', 1, 'FULLSCAN')`
   (schema_information_schema_install_query_spec.cpp:997). — 정소희(.50) 2026-10-28
+
+### sm_update_all_statistics / update_histogram_for_all_classes — `UPDATE STATISTICS ON ALL CLASSES` (schema_manager.c:4374, communication/network_interface_cl.c:6327)
+
+> PR#8413(CBRD-27836) 머지본 `262a23219`(2026-11-09) 기준. 측정 (.51, 2026-11-05): 재현 빌드 develop release `2362424f2`(통계 파일은 `69ffb9aaf` 와 같음), SA(`csql -S`)·`MALLOC_CHECK_=3 MALLOC_PERTURB_=165`, 4.8M 행 `t27836 (a int, b int)` 인덱스 `(a, b)` 리프 9,540장(a 고유 200,000). 그 전 develop 의 두 단계 동작과 결함은 §3 「ALL CLASSES 는 통계를 두 번 쓰고…」.
+
+- **`update_histogram_for_all_classes (with_fullscan, random_seed, skip_mops, n_skip, run_start_msec)` 가 클래스당 한 번, 요청한 방식으로 처리한다** (.51, PR#8413 head `bb3732625`, 2026-11-05 — 머지본 `262a23219` 에서 재확인 2026-11-09): 클래스마다 `statistics` 진행 이벤트 한 쌍(서버 이벤트 로그 UPDATE_STATISTICS), 제외 클래스와 `ER_OBJ_INVALID_ARGUMENTS` 클래스는 `sm_update_statistics ()`. 이벤트 로그의 `histogram` 단계(#8194, CBRD-27663)는 히스토그램을 만드는 실행에서 더 나오지 않는다. 통계 전용 단계는 `WITH NO HISTOGRAM` 일 때만 돈다. — 정소희(.52) 2026-11-09
+- **`sm_update_all_statistics ()`: 상주 클래스 통계 캐시 재설정은 단계가 끝난 뒤 한 번** (.51, PR#8413 head `bb3732625`, 2026-11-05). — 정소희(.52) 2026-11-09
+- **시간(SA 4.8M 행, 교대 3회 중앙값)**: ALL CLASSES WITH FULLSCAN 3.20→2.03초, ALL CLASSES 2.52→1.36초(게이트 켬 2.61→2.08, 1.96→0.86), 통계 전용 대조 경로는 같음 (.51, PR#8413 head `bb3732625`, 2026-11-05). — 정소희(.52) 2026-11-09
 
 ### CNT_CATCLS_OBJECTS / class_truncate_context — TRUNCATE 의 참조 판정 (schema_system_catalog_constants.h:134, schema_class_truncator.cpp)
 
@@ -231,6 +261,15 @@ primitive 타입 연산, 디스크↔메모리 변환. 접두사: `sm_`(schema),
   (`tp_value_convert_integer_to_time` 등)가 음수 나머지를 내고 `DB_TIME` 은 `unsigned int`(dbtype_def.h:835)라 0xFFFFFFFF →
   `db_time_decode` 가 24 이상의 시 → `db_time_encode_core`(db_date.c)가 값을 쓰지 않고 `ER_TIME_CONVERSION` 을 돌려주는데 변환기가 반환값
   (`tp_make_time_conversion ()` :769)을 버리고 `DOMAIN_COMPATIBLE`. 스펙(오류 vs 하루 안으로 감기) 결정 필요. — 정소희(.50) 2026-10-28
+- **[해소됨 — CBRD-27836, PR#8413 develop `262a23219` 2026-11-09] `UPDATE STATISTICS ON ALL CLASSES` 는 통계를 두 번 쓰고, 두 번째가 언제나 샘플링이었다** (.51, 69ffb9aaf, 2026-11-05 — 측정 조건은 §2 「sm_update_all_statistics / update_histogram_for_all_classes」 머리):
+  - `sm_update_all_statistics ()`(schema_manager.c:4374)가 `stats_update_all_statistics (with_fullscan, …)` 로 모든 클래스의 통계를 쓴 뒤, `update_histogram_for_all_classes (random_seed, …)`(network_interface_cl.c:6327)로 히스토그램을 만든다.
+  - 두 번째 단계는 `histogram_info.with_fullscan = false` 고정이다. 그리고 `update_or_drop_histogram_helper ()` 의 전 컬럼 경로(execute_schema.c:4597)가 히스토그램 스캔 뒤 `sm_update_statistics (obj, with_fullscan, &ndv_info)` 로 클래스 통계를 다시 쓴다.
+  - 서버 `stats_update_statistics_internal ()` 은 넘겨받은 NDV 를 쓰면서도 B-tree 통계는 `btree_get_stats (…, with_fullscan)`(statistics_sr.c:418)로 다시 재고, `catcls_update_class_stats (…, with_fullscan)`(:467)로 `_db_class.statistics_strategy` 를 쓴다.
+  - 그래서 `WITH FULLSCAN` 이 남기는 것은 샘플링 값이다. 실측 pkeys[0]: 테이블 단위 FULLSCAN 200000, ALL CLASSES WITH FULLSCAN 86585 → 81328(실행마다 다름), `statistics_strategy` SAMPLING.
+  - 게이트(`statistics_sampling_threshold_pages=1000`, `statistics_sample_pages=2000`)를 켜면 NDV(b 4739751→4795260)와 행 수(4800000→4795260)도 표본 외삽값이 된다.
+  - 히스토그램 대상 클래스에서 첫 단계의 결과는 언제나 두 번째 단계에 덮였다(스캔 한 번이 통째로 버려짐).
+  - 테이블 단위(`do_update_stats ()`, execute_statement.c)는 사용자 플래그를 넘기고, 헬퍼 한 번으로 끝낸다(헬퍼가 `ER_OBJ_INVALID_ARGUMENTS` 면 `sm_update_statistics ()` 로 대체).
+  - **수정됨 — PR#8413(머지됨 `262a23219`)**: ALL CLASSES 를 클래스당 한 번, 요청한 방식으로 처리한다. 통계 전용 단계는 `WITH NO HISTOGRAM` 일 때만 돈다(§2). 클래스당 이중 수집을 먼저 적은 항목은 src-storage §3. — 정소희(.52) 2026-11-09
 
 ## 4. 진행중인 작업
 

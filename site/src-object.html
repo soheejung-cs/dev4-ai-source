@@ -19,14 +19,14 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠39</span></span></a></li>
-<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
-<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-object.html" class="cur"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠34</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠38</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
+<li><a href="src-object.html" class="cur"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/object</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 9건</p>
+<h1>src/object</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 10건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>스키마 관리, 시스템 카탈로그, 권한, 트리거, information_schema, 클라이언트 객체 캐시(workspace), primitive 타입 연산, 디스크↔메모리 변환. 접두사: <code>sm_</code>(schema), <code>au_</code>(auth), <code>tr_</code>(trigger), <code>ws_</code>(workspace), <code>pr_</code>/<code>mr_</code>(primitive), <code>tp_</code>(type/domain), <code>tf_</code>(transform), <code>classobj_</code>.</p>
@@ -82,11 +82,36 @@
 <li><strong>주의</strong>: <code>DB_NEED_CLEAR</code>만으로는 대체 불가 — SET 계열은 <code>set_free</code>, OBJECT는 <code>op=NULL</code>, ENUM 등 need_clear=false여도 구조 작업이 있다.</li>
 <li>compat <code>db_value_clear()</code>가 이 함수를 그대로 호출한다(db_macro.c:1484). <code>db_value_free()</code>는 <code>pr_free_ext_value()</code>로 컨테이너까지 해제 — 별개 함수.</li>
 </ul>
+<h4>mr_data_readval_set — SET 의 PEEK 읽기와 SETREF (object_primitive.c:7158)</h4>
+<ul>
+<li><strong>SET 의 PEEK 읽기는 별도 SETREF 를 만들고 need_clear 를 세우지 않는다</strong> (.51, ef2c78cda, 2026-11-03): <code>mr_data_readval_set</code>(object_primitive.c:7158)의 copy = false 분기는 <code>set_make_reference ()</code>(object_primitive.c:7242, Set_Ref_Area)로 SETREF 를 만들어 디스크 비트를 가리키게 하고 <code>db_make_set</code> 으로 싣는다 — <code>DB_NEED_CLEAR</code>(dbtype.h:81)는 need_clear·압축 문자열만 보므로 '해제할 것 없음' 으로 보인다. 그러나 <code>pr_clear_value</code> 는 SET 이면 need_clear 와 상관없이 <code>set_free</code>(참조 수 감소)를 부른다(object_primitive.c:1939). 그래서 PEEK 한 SET DB_VALUE 를 얕게 복사해 오래 쓰면 읽은 쪽이 놓은 SETREF 를 가리키게 된다. 이 계약에 걸린 결함은 src-query §3(SET 열 GROUP BY 의 해시 병합). — 정소희(.52) 2026-11-09</li>
+</ul>
 <h4>mr_data_readval_int / mr_index_readval_int (object_primitive.c)</h4>
 <ul>
 <li>static 함수(선언 L372/L375), <code>tp_Integer</code> 등 PR_TYPE 인스턴스의 함수 포인터로만 호출된다.</li>
 <li>PR_TYPE이 .bss 동적 초기화(<code>pr_type</code> 생성자가 non-constexpr, object_primitive.h:114~) → disksize/함수포인터 상수폴딩 불가. <code>mr_index_readval_int</code> 39명령어 + memcpy@plt(4바이트!) vs <code>mr_data_readval_int</code> 21명령어. 실측 1.02% vs 0.29%. 개선안: constexpr화 또는 <code>OR_*_SIZE</code> 리터럴 사용.</li>
 <li><strong>SHORT·INTEGER·BIGINT 의 인덱스 키 이미지는 원시(native) 바이트다</strong> (.51, CBRD-27361 헤드 <code>0efc06bf1</code>, 2026-11-01): <code>mr_index_writeval_int</code> 는 <code>or_put_data (buf, &amp;i, tp_Integer.disksize)</code> 로 4바이트를 그대로 쓰고 <code>mr_index_readval_int</code> 는 <code>or_get_data</code> 로 그대로 읽는다(object_primitive.c:2434·2444; short :2605, bigint :2776 도 같다). 힙(데이터) 표현의 <code>OR_GET_INT</code>(빅엔디언)와 다르다. 인덱스 키 비교 <code>mr_index_cmpdisk_int</code> 도 <code>COPYMEM</code> 으로 원시 값을 비교한다. DATE·TIME·OID 키의 인덱스 이미지가 원시인지는 <strong>미확인</strong>(<code>mr_index_writeval_date</code> 등은 보지 않았다). <code>MR_CMP</code> 는 object_primitive.c 안의 지역 매크로다(헤더에 없음) — btree.c 에서 쓰려면 직접 비교식을 쓴다. — 정소희(.50) 2026-11-03</li>
+</ul>
+<h4>pr_midxkey_compare / pr_midxkey_compare_element — MIDXKEY 비교 (object_primitive.c)</h4>
+<ul>
+<li><strong>MIDXKEY 비교: 같은 도메인 열이면 <code>pr_midxkey_compare ()</code> 가 열마다 <code>index_cmpdisk</code> 로 디스크 이미지끼리 비교한다 — 다른 도메인이면 <code>pr_midxkey_compare_element ()</code> 가 DB_VALUE 로 읽는다</strong> (.52, PR#8353 헤드 <code>6b0ca5566</code>, 2026-11-03 — 리뷰 질문 대응): object_primitive.c:7919 @6b0ca5566. MIDXKEY 측정은 후속 Sub-task CBRD-27901(CBRD-27862 의 1단계 뒤). — 정소희(.52) 2026-11-09</li>
+</ul>
+<h4>mr_index_cmpdisk_datetimetz — DATETIMETZ 인덱스 비교는 tz_id 를 보지 않는다 (object_primitive.c:4387)</h4>
+<ul>
+<li><strong>DATETIMETZ 인덱스 비교는 tz_id 를 보지 않는다</strong> (.51, 4e389935d, 2026-11-04):</li>
+<ul>
+<li><code>mr_index_cmpdisk_datetimetz ()</code> 는 <code>mr_index_cmpdisk_datetime ()</code> 을 그대로 부른다(object_primitive.c:4387-4391, 주석 "tz_id is ignored"). release/11.4 도 같다(4447·4455).</li>
+<li>B-tree 는 비교가 같은 키를 찾으면 새 OID 를 그 키에 덧붙인다(<code>btree_key_insert_new_object ()</code>, btree.c:32329). 그래서 같은 순간을 다른 시간대로 적은 두 값은 키 하나가 되고, 키에서 읽으면 키에 남은 한 값으로 나온다(실측에서는 먼저 넣은 <code>+09:00</code>).</li>
+<li>커버링 관문 <code>qo_check_type_index_covering ()</code>(query_graph.c:10458)·<code>qo_check_coll_optimization ()</code>(query_graph.c:10410)이 이런 타입과 대소문자 무시 콜레이션의 키를 커버링에서 빼는 이유가 이것이다.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>키에서 값을 읽는 경로를 넓히는 변경(함수 결과 커버링 등)은 이 두 관문을 새 경로에도 거는지 본다 — CBRD-25984 PR#6466 리뷰 G1-01. — 정소희(.52) 2026-11-09</li>
+</ul>
+</ul>
+<h4>pr_pad_char_to_precision / qstr_pad_string — CHAR 를 정밀도까지 채우는 두 방식 (object_primitive.c:12615, query/string_opfunc.c:10076)</h4>
+<ul>
+<li><strong>CHAR 를 정밀도까지 채우는 방식이 캐스트와 레코드 쓰기에서 다르다 — 캐스트는 대상 코드셋의 pad 문자, 쓰기는 늘 공백</strong> (.50, ef2c78cda, 2026-11-03, 단위 실측): 캐스트 <code>qstr_coerce</code> → <code>qstr_pad_string (…, dest_codeset)</code>(string_opfunc.c:10076)가 <code>intl_pad_char</code>(intl_support.c:1461 — RAW_BYTES 0x00, KSC5601_EUC 0xA1A1, UTF8·ISO·ASCII 0x20)로 채우고, 쓰기·길이 계산의 <code>pr_pad_char_to_precision</code>(object_primitive.c:12615)은 <code>memset (' ')</code> 하나다. 그래서 정밀도보다 짧은 CHAR 를 캐스트 없이 쓰면 EUC-KR 은 10 대 17바이트, binary 는 되읽은 값이 다르게 비교(DB_GT)된다(PR#8378 단위 suite <code>unit/storage/heap_file.share_string</code> U1·U2). 리스트 튜플·레코드·플랜 상수에서 읽은 CHAR 는 이미 채워져 있고 <code>medium.length = precision</code> 을 캐시한다(object_primitive.c:12302·12328·12339).</li>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>CHAR 값을 캐스트 없이 저장하거나 복사하는 지름길은 "꽉 찬 값(길이 = 정밀도)" 으로 한정한다 — 짧은 값의 채움은 코드셋에 따라 경로마다 다르다. — 정소희(.52) 2026-11-09</li>
+</ul>
 </ul>
 <h4>smt_edit_class_mop / sm_update_class (schema_template.c / schema_manager.c)</h4>
 <ul>
@@ -104,8 +129,18 @@
 <li><strong><code>_db_histogram.class_of</code> 는 <code>_db_class</code> 행이 아니라 클래스 MOP 자체다</strong> (.50, 6497720ec, 2026-09-17; develop <code>2d925cb86</code> 재확인): <code>smt_add_histogram</code>(schema_template.c:2072, :2100)·<code>get_histogram_for_write</code>(histogram_cl.cpp:189, :206)·<code>db_get_histogram</code> (histogram_cl.cpp:2469, :2486)가 <code>db_make_object (&amp;value, classop)</code> 으로 키를 만든다. 그래서 뷰에서 이름을 얻으려면 <code>db_index</code> 식 경로식(<code>[i].[class_of].[class_name]</code>)이 아니라 <code>_db_class [c]</code> 조인 <code>[h].[class_of] = [c].[class_of]</code> 이 필요하고, <code>_db_auth.object_of</code> 와는 바로 비교된다(db_attribute 스펙의 <code>{[c].[class_of]}</code> 자리에 <code>[h].[class_of]</code>). develop 의 <code>sm_define_view_histogram_spec ()</code> (schema_system_catalog_install_query_spec.cpp:1720-1790)이 이 조인과 db_index 와 같은 권한 필터를 쓴다(수정됨: <code>880a17338</code> CBRD-27043). — 정소희(.50) 2026-10-28</li>
 <li><strong>시스템 뷰의 컬럼 도메인(<code>get_view_&lt;name&gt;</code> 의 columns)이 query spec 의 결과 타입을 덮어쓴다</strong> (.50, 6497720ec, 2026-09-17; develop <code>2d925cb86</code> 재확인): <code>db_histogram</code> 스펙이 <code>CAST (… AS NUMERIC(18, 12))</code> 를 해도 도메인이 <code>double</code> 이면 <code>0.000000000000000e+00</code> 로 나오고, <code>{"class_name", "object"}</code> 면 문자열 비교가 <code>'=' operator is not defined on types object and char</code> 가 된다(재현 <code>projects/CBRD-27043/repro/repro_27043.out</code>). 스펙과 도메인은 1:1 로 맞춰야 한다. develop 의 <code>get_view_db_histogram ()</code> (schema_system_catalog_install.cpp:2262)은 도메인을 <code>format_varchar (255)</code>·<code>format_numeric (18, 12)</code> 로 맞추고 이 규칙을 주석(:2269-2270) 으로 남겼다(수정됨: <code>880a17338</code> CBRD-27043). — 정소희(.50) 2026-10-28</li>
 <li><strong><code>_db_histogram</code> 스키마 = class_of/key_attr/with_fullscan/null_frequency/histogram_values, 타임스탬프 없음</strong> (.51, PR#7900 <code>f79eda483</code>~<code>66bfd071d</code>, 2026-09-09~17; develop <code>2d925cb86</code> 재확인 — <code>system_catalog_initializer::get_histogram ()</code> schema_system_catalog_install.cpp:1280-1292): 기존 행 재빌드(<code>store_one_histogram</code>, histogram_cl.cpp:231)는 <code>null_frequency</code>· <code>histogram_values</code> 만 갱신하고 <strong><code>with_fullscan</code> 은 안 바꾼다</strong>(<code>sm_add_histogram</code> 이 <code>ER_LC_CLASSNAME_EXIST</code> 로 건너뜀, schema_manager.c:15587) — 재빌드 여부 신호로 <code>with_fullscan</code> 을 쓰면 오판. 신호는 행 chn 또는 <code>null_frequency</code>. — 정소희(.50) 2026-10-28</li>
+<ul>
+<li><strong>바뀜 — PR#8413(CBRD-27836) develop <code>262a23219</code>(2026-11-09)</strong>: 다시 수집할 때 <code>store_one_histogram ()</code> 이 <code>with_fullscan</code> 도 고친다. 그 전 동작이 남긴 <code>db_histogram.scan_type</code> 어긋남은 src-optimizer §3. — 정소희(.52) 2026-11-09</li>
+</ul>
 <li><strong><code>_db_histogram</code> 의 제약은 <code>UNIQUE (class_of, key_attr)</code> 하나뿐이다</strong> (.50, static, <code>2d5a35d24</code>, 2026-09-18; develop <code>2d925cb86</code> 재확인 — <code>system_catalog_initializer::get_histogram ()</code> schema_system_catalog_install.cpp:1295): <code>_db_histogram</code> 삽입의 <code>ER_BTREE_UNIQUE_FAILED</code> 는 그 키로만 발생한다는 뜻이다. <code>sm_add_histogram ()</code>(schema_manager.c:15617-15634)이 이것을 근거로 동시 첫 수집의 유니크 위반을 "이미 있음"(<code>ER_LC_CLASSNAME_EXIST</code>)으로 번역한다(<code>0d0809963</code> CBRD-27369). — 정소희(.50) 2026-10-28</li>
 <li><strong><code>_db_class.statistics_strategy</code> 는 <code>db_class</code>/information_schema 뷰에서 0·1 만 이름으로 바꿔 노출한다 — 비트를 더 실으면 뷰가 NULL 을 낸다(뷰 정의를 함께 바꿔야 하고, 기존 DB 반영은 §3 「시스템 뷰 정의 변경」의 제약을 받는다)</strong> (.51, PR#7900, 2026-09-09~17; develop <code>2d925cb86</code> 재확인): <code>db_class</code> 는 <code>CASE [c].[statistics_strategy] WHEN 0 THEN 'SAMPLING' WHEN 1 THEN 'FULLSCAN' ELSE NULL END</code> (schema_system_catalog_install_query_spec.cpp:75-79), information_schema 는 <code>DECODE (…, 0, 'SAMPLING', 1, 'FULLSCAN')</code> (schema_information_schema_install_query_spec.cpp:997). — 정소희(.50) 2026-10-28</li>
+</ul>
+<h4>sm_update_all_statistics / update_histogram_for_all_classes — <code>UPDATE STATISTICS ON ALL CLASSES</code> (schema_manager.c:4374, communication/network_interface_cl.c:6327)</h4>
+<blockquote>PR#8413(CBRD-27836) 머지본 <code>262a23219</code>(2026-11-09) 기준. 측정 (.51, 2026-11-05): 재현 빌드 develop release <code>2362424f2</code>(통계 파일은 <code>69ffb9aaf</code> 와 같음), SA(<code>csql -S</code>)·<code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>, 4.8M 행 <code>t27836 (a int, b int)</code> 인덱스 <code>(a, b)</code> 리프 9,540장(a 고유 200,000). 그 전 develop 의 두 단계 동작과 결함은 §3 「ALL CLASSES 는 통계를 두 번 쓰고…」.</blockquote>
+<ul>
+<li><strong><code>update_histogram_for_all_classes (with_fullscan, random_seed, skip_mops, n_skip, run_start_msec)</code> 가 클래스당 한 번, 요청한 방식으로 처리한다</strong> (.51, PR#8413 head <code>bb3732625</code>, 2026-11-05 — 머지본 <code>262a23219</code> 에서 재확인 2026-11-09): 클래스마다 <code>statistics</code> 진행 이벤트 한 쌍(서버 이벤트 로그 UPDATE_STATISTICS), 제외 클래스와 <code>ER_OBJ_INVALID_ARGUMENTS</code> 클래스는 <code>sm_update_statistics ()</code>. 이벤트 로그의 <code>histogram</code> 단계(#8194, CBRD-27663)는 히스토그램을 만드는 실행에서 더 나오지 않는다. 통계 전용 단계는 <code>WITH NO HISTOGRAM</code> 일 때만 돈다. — 정소희(.52) 2026-11-09</li>
+<li><strong><code>sm_update_all_statistics ()</code>: 상주 클래스 통계 캐시 재설정은 단계가 끝난 뒤 한 번</strong> (.51, PR#8413 head <code>bb3732625</code>, 2026-11-05). — 정소희(.52) 2026-11-09</li>
+<li><strong>시간(SA 4.8M 행, 교대 3회 중앙값)</strong>: ALL CLASSES WITH FULLSCAN 3.20→2.03초, ALL CLASSES 2.52→1.36초(게이트 켬 2.61→2.08, 1.96→0.86), 통계 전용 대조 경로는 같음 (.51, PR#8413 head <code>bb3732625</code>, 2026-11-05). — 정소희(.52) 2026-11-09</li>
 </ul>
 <h4>CNT_CATCLS_OBJECTS / class_truncate_context — TRUNCATE 의 참조 판정 (schema_system_catalog_constants.h:134, schema_class_truncator.cpp)</h4>
 <ul>
@@ -137,6 +172,17 @@
 <li><strong>[구조적 한계] 시스템 뷰 정의 변경은 같은 메타데이터 버전의 기존 DB 에 반영되지 않는다</strong> — <strong>미수정</strong>(설계상 한계, develop <code>2d925cb86</code> 재확인 2026-10-28, 부분 변화 있음) (.50, 2026-09-17): 뷰 정의는 createdb 의 <code>catcls_init</code>(schema_system_catalog_install.cpp:266)/ <code>install_system_metadata</code>(boot_cl.c:219) 경로에서 <code>_db_class</code> 에 저장된다. #7791(CBRD-27258 뷰 스펙 개편)·#7976(db_histogram)도 같은 조건이라 그 전에 만든 DB 는 옛 정의를 유지했다. <strong>바뀐 점</strong>: <code>9ee8bac8b</code>(CBRD-26459, 2026-09-22)의 <code>cubrid upgradedb</code> 가 버전 스크립트를 돌린 뒤 카탈로그 vclass 를 실행 바이너리의 정의로 다시 만든다(<code>upgradedb_rebuild_catalog_vclasses ()</code> util_sa.c:5468 → <code>catcls_rebuild_vclasses ()</code>· <code>info_schema_rebuild_vclasses ()</code>). 다만 이 경로는 디스크의 메타데이터 버전이 <code>SYSTEM_METADATA_VERSION</code>(system_metadata_version.h, 지금 1, 릴리스 때 올림)과 다를 때만 돈다 — 같으면 부팅도 통과하고 upgradedb 도 바로 끝난다(util_sa.c:5877). 그래서 버전을 올리지 않은 개발 중 뷰 정의 변경은 여전히 기존 DB 에 닿지 않는다. — 정소희(.50) 2026-10-28</li>
 <li><strong><code>ROUND (x)</code> = <code>x + .5</code> 가 정확하지 않아 정수 좁힘이 1 어긋난다 — CBRD-27769</strong> — <strong>미수정</strong> (develop <code>2d925cb86</code> 재확인 2026-10-28 — object_domain_convert.cpp:73 그대로) (.50, <code>eb88ab4ea</code>·11.4 동일, 2026-10-23 SA 실측): [2^52, 2^53) 의 홀수에 0.5 를 더하면 짝수로 반올림돼 DOUBLE·MONETARY → BIGINT 가 1 크고(<code>CAST(4503599627370497e0 AS BIGINT)</code> = 4503599627370498, BIGINT 열 대입도), 0.49999999999999994 + 0.5 = 1.0 이라 <code>CAST(0.49999999999999994e0 AS INT)</code> = 1. 문자열·NUMERIC 원천은 정확. 안: C 표준 <code>round ()</code>. — 정소희(.50) 2026-10-28</li>
 <li><strong>음수 → TIME 이 깨진 TIME(<code>12:00:0/ AM</code>)이 된다 — CBRD-27770</strong> — <strong>미수정</strong> (develop <code>2d925cb86</code> 재확인 2026-10-28 — <code>tp_value_convert_integer_to_time ()</code> object_domain_convert.cpp:2093 그대로) (.50, develop 동치 빌드·PR#8253 <code>30d7e7c27</code>·11.4 같음, 2026-10-23 SA 실측 + 정적): INT·SMALLINT·BIGINT·FLOAT·DOUBLE·MONETARY 의 -1, -86401 모두. <code>v_time = db_get_int (src) % SECONDS_IN_A_DAY</code> (<code>tp_value_convert_integer_to_time</code> 등)가 음수 나머지를 내고 <code>DB_TIME</code> 은 <code>unsigned int</code>(dbtype_def.h:835)라 0xFFFFFFFF → <code>db_time_decode</code> 가 24 이상의 시 → <code>db_time_encode_core</code>(db_date.c)가 값을 쓰지 않고 <code>ER_TIME_CONVERSION</code> 을 돌려주는데 변환기가 반환값 (<code>tp_make_time_conversion ()</code> :769)을 버리고 <code>DOMAIN_COMPATIBLE</code>. 스펙(오류 vs 하루 안으로 감기) 결정 필요. — 정소희(.50) 2026-10-28</li>
+<li><strong>[해소됨 — CBRD-27836, PR#8413 develop <code>262a23219</code> 2026-11-09] <code>UPDATE STATISTICS ON ALL CLASSES</code> 는 통계를 두 번 쓰고, 두 번째가 언제나 샘플링이었다</strong> (.51, 69ffb9aaf, 2026-11-05 — 측정 조건은 §2 「sm_update_all_statistics / update_histogram_for_all_classes」 머리):</li>
+<ul>
+<li><code>sm_update_all_statistics ()</code>(schema_manager.c:4374)가 <code>stats_update_all_statistics (with_fullscan, …)</code> 로 모든 클래스의 통계를 쓴 뒤, <code>update_histogram_for_all_classes (random_seed, …)</code>(network_interface_cl.c:6327)로 히스토그램을 만든다.</li>
+<li>두 번째 단계는 <code>histogram_info.with_fullscan = false</code> 고정이다. 그리고 <code>update_or_drop_histogram_helper ()</code> 의 전 컬럼 경로(execute_schema.c:4597)가 히스토그램 스캔 뒤 <code>sm_update_statistics (obj, with_fullscan, &amp;ndv_info)</code> 로 클래스 통계를 다시 쓴다.</li>
+<li>서버 <code>stats_update_statistics_internal ()</code> 은 넘겨받은 NDV 를 쓰면서도 B-tree 통계는 <code>btree_get_stats (…, with_fullscan)</code>(statistics_sr.c:418)로 다시 재고, <code>catcls_update_class_stats (…, with_fullscan)</code>(:467)로 <code>_db_class.statistics_strategy</code> 를 쓴다.</li>
+<li>그래서 <code>WITH FULLSCAN</code> 이 남기는 것은 샘플링 값이다. 실측 pkeys[0]: 테이블 단위 FULLSCAN 200000, ALL CLASSES WITH FULLSCAN 86585 → 81328(실행마다 다름), <code>statistics_strategy</code> SAMPLING.</li>
+<li>게이트(<code>statistics_sampling_threshold_pages=1000</code>, <code>statistics_sample_pages=2000</code>)를 켜면 NDV(b 4739751→4795260)와 행 수(4800000→4795260)도 표본 외삽값이 된다.</li>
+<li>히스토그램 대상 클래스에서 첫 단계의 결과는 언제나 두 번째 단계에 덮였다(스캔 한 번이 통째로 버려짐).</li>
+<li>테이블 단위(<code>do_update_stats ()</code>, execute_statement.c)는 사용자 플래그를 넘기고, 헬퍼 한 번으로 끝낸다(헬퍼가 <code>ER_OBJ_INVALID_ARGUMENTS</code> 면 <code>sm_update_statistics ()</code> 로 대체).</li>
+<li><strong>수정됨 — PR#8413(머지됨 <code>262a23219</code>)</strong>: ALL CLASSES 를 클래스당 한 번, 요청한 방식으로 처리한다. 통계 전용 단계는 <code>WITH NO HISTOGRAM</code> 일 때만 돈다(§2). 클래스당 이중 수집을 먼저 적은 항목은 src-storage §3. — 정소희(.52) 2026-11-09</li>
+</ul>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>

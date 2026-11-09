@@ -113,6 +113,19 @@ SQL 텍스트 → `csql_lexer.l` → `csql_grammar.y`(646KB bison) → PT_NODE �
 - **ODKU 가 읽는 소스 컬럼은 SELECT 목록의 숨은 컬럼이 된다** (.51, develop `1684945ed`, 2026-11-02): `pt_to_insert_xasl ()` 이 aptr XASL 을 만들기 전에 `pt_append_assignment_references ()` 로 붙인다(trace rewritten query `select max(s.g)+1, s.c from … where s.g=?`). 사용자가 쓰면 "not single valued" 로 거절되는 "집계 옆 비집계 컬럼" 이 여기서만 생긴다. 실행기가 그 값을 어디서 읽는지는 src-query §2 「qexec_execute_mainblock」, 채우지 않는 경로는 src-query §3(CBRD-27870). — 정소희(.50) 2026-11-03
 - **집계 옆 숨은 컬럼을 만드는 두 번째 재작성: SELECT 목록 상관 서브쿼리** (.51, develop `1684945ed`, 비교 `ad7a255c5`, PR#8364 `756c19e28`, 2026-11-03): 집계 SELECT 의 SELECT 목록에 상관 서브쿼리가 있으면 `mq_translate_local ()` 이(`mq_has_class_methods_corr_subqueries ()`) `mq_rewrite_aggregate_as_derived ()` 로 집계 부분을 파생 테이블로 만들고, 서브쿼리가 읽는 소스 컬럼을 그 파생 테이블의 숨은 컬럼으로 싣는다(rewritten query `select a_?, ?, (select count(a_?) from dual dual) from (select count(...), t?.a from t? t? where ...) t? (a_?, a_?)`). 의미 검사를 통과하는 것은 외부 컬럼을 집계로 감싼 서브쿼리뿐이다(`(select max(s3.c))`, `(select count(a))`); `(select s3.c from db_root)` 와 분석 함수의 비집계 컬럼(`first_value(c) over ()`)은 "not single valued". 실측(release SA): `SELECT COUNT(*), (SELECT MAX(s3.c)) FROM s3 WHERE g = 2`(s3 = (1,'g1',1),(2,'g2',2),(1,'g1b',3))가 `ad7a255c5` 1·'g2', develop 1·NULL(페이지 배치), `756c19e28` 1·'g2'; `(SELECT COUNT(s3.c))` 는 1 / 0 / 1. — 정소희(.51) 2026-11-03, 환류 정소희(.52) 2026-11-03
 
+### pt_to_update_xasl / pt_to_delete_xasl — UPDATE·DELETE 의 MVCC 재평가는 꺼져 있다 (xasl_generation.c)
+
+- **UPDATE·DELETE 의 MVCC 재평가는 XASL 생성에서 무조건 꺼져 있다 — 재평가 경로의 PEEK(src-transaction §3)·락 대기 UPDATE 가 재평가 대입을 안 탐(src-query §2)의 이유, 그 경로는 지금 죽은 코드** (.52, 226352283 · PR#8378 head f3bac6bdc debug, 2026-11-05, 정적 + gdb): `pt_to_update_xasl ()`(xasl_generation.c ~26377)·`pt_to_delete_xasl ()`(~25624)가 "These two lines disable reevaluation on UPDATE. To activate it just remove them" 아래에서 `PT_SELECT_INFO_MVCC_LOCK_NEEDED` 를 켜고 `abort_reevaluation = true` — 모든 spec 의 `PT_SPEC_FLAG_MVCC_COND_REEV`·`PT_SPEC_FLAG_MVCC_ASSIGN_REEV` 를 지우고 갱신 대상 spec 에 FOR UPDATE 플래그를 붙여 select 단계에서 잠근다. MERGE 갱신 질의(`pt_to_merge_update_query ()`)도 `MVCC_LOCK_NEEDED` + GROUP BY. 두 클래스를 고쳐 잠금 정책이 `LOCATOR_LOCK_AT_FORCE` 인 `update t1, t3, t2 set t1.v = t2.w, t3.y = t2.w …` 와 한 클래스 `update t1, t2 set …` 를 세션 A 의 미커밋 갱신 뒤에 돌려도 `locator_mvcc_reev_cond_assigns`(:13820)·`locator_mvcc_reeval_scan_filters`(:13946) 입구 0회(gdb). PR#8378 의 codex 지적(빌린 문자열이 놓인 페이지를 가리킴)은 이 때문에 도달 불가 — 재평가를 다시 켜면 `locator_mvcc_reev_cond_assigns ()` 가 우변 문자열을 복사해 넘겨야 한다. **미수정**(현재 동작 기록). — 정소희(.52) 2026-11-09
+
+### pt_bind_names / pt_get_attr_list_of_derived_table — 파생 테이블 열의 형과 위치 (name_resolution.c)
+
+- **이름 해석은 파생 테이블을 접기 없이 형 검사하고 그 형으로 열을 정한다** (.51, develop `953e83256`, 2026-11-06): `pt_bind_names ()`(name_resolution.c:1358-1361)가 `sc_info->donot_fold = true` 로 `pt_semantic_type ()` → `pt_bind_spec_attrs ()` 가 as_attr_list 형을 선택 목록 형으로. 바깥 질의의 이름은 이 형에 묶인다. 뒤 의미 검사(접기 켬)가 항목 형을 바꿔도 맞추지 않는다. CTE 는 `pt_bind_names_in_cte ()` 가 접은 뒤 형으로, 뷰는 `mq_set_types ()`(view_transform.c:8739)가 열 형으로 CAST 해 어긋나지 않는다. 어긋나는 사례는 §3(CBRD-27962). — 정소희(.52) 2026-11-09
+- **파생 테이블 열은 부질의 선택 목록에 위치로 묶인다 — 숨은 항목 포함** (.51, develop `953e83256`, 2026-11-06): XASL 은 `spec.as_attr_list` 의 i 번째를 부질의 리스트 파일의 i 번째 열(숨은 열 포함)로 읽는다(`pt_to_position_regu_variable_list ()` xasl_generation.c:16075 계열). 사용자가 쓴 파생 테이블은 이름 해석(`pt_get_attr_list_of_derived_table ()` name_resolution.c:11702)이 숨은 항목이 붙기 전에 열을 만들고, ORDER BY 숨은 항목은 모두 끝에 덧붙으므로(semantic_check.c:15520, view_transform.c:2714·16626) 마지막 열 뒤로 빠진다. 반면 세션 변수 대입 + 선택 목록 밖 열의 ORDER BY 를 바꾸는 `mq_rewrite_order_dependent_query ()`(view_transform.c:15943)의 `dt_sort` 는 순서 무관 항목(숨은 정렬 항목 포함)마다 as_attr 를 만들고 뒤에 `sx` 항목을 덧붙여, **숨은 항목이 앞에 오고 그 항목에도 열이 있다**. 선택 목록과 as_attr_list 를 짝짓는 코드가 숨은 항목을 건너뛰면 이 꼴에서 짝이 밀린다(PR#8435 첫 커밋 — 첫 CI 의 `bug_bts_17424`·`cbrd_27510/03_session_variable_types` 가 `-181`, NUMERIC 은 조용히 반올림; `cfdef8ea8` 에서 고침). — 정소희(.52) 2026-11-09
+
+### stats_option_list — `UPDATE STATISTICS` 옵션 문법 (csql_grammar.y)
+
+- **UPDATE STATISTICS 의 옵션은 WITH 하나 뒤 쉼표 목록이다** (.51, develop `69ffb9aaf`, 2026-11-05): `with fullscan, no histogram`(csql_grammar.y `stats_option_list`). `with fullscan with no histogram` 은 문법 오류(-493). 같은 옵션 반복·`NO HISTOGRAM`+`DROP HISTOGRAM` 은 0x10 독 플래그로 거부. — 정소희(.52) 2026-11-09
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
@@ -128,6 +141,29 @@ SQL 텍스트 → `csql_lexer.l` → `csql_grammar.y`(646KB bison) → PT_NODE �
   `e7b1605f5` 이후 순서 의존 재작성 함수에 변경 없음, 그 커밋 설명도 범위 밖으로 명시) (.52, develop 07aec2c5c·58b49b39f, 2026-10-12): GROUP BY
   만 있으면 두 행 정답. 같은 순서 의존 재작성이 비분석 집계를 GROUP BY 위로 올리는 것으로 추정(미확인). 재현
   `claude-workspace/projects/CBRD-27503/repro/groupby_preexisting.sql`. — 정소희(.50) 2026-10-28
+- **[미수정 — develop 선재(CBRD-25984 PR#6466 리뷰에서 발견)] MRO + WHERE 에만 있는 함수식 + 비커버링이면 XASL 생성이 assert 한다** (.51, 4e389935d, 2026-11-04):
+  - `pt_ordbynum_to_key_limit_multiple_ranges ()`(xasl_generation.c:29248)의 `assert (0)`(29318)에서 debug 가 플랜 출력 전에 abort 한다.
+  - 실측(debug SA): `(i, j, sqrt(d), k)` 에 `select j, k from t where i in (1, 2) and sqrt(d) > 0 using index idx(+) order by j limit 5`. develop 은 힌트가 없어도, PR#6466 `d7ce3af72` 는 `NO_COVERING_IDX` 일 때 abort 한다. release 동작은 보지 않았다.
+  - **미수정** — 재현 claude-workspace `projects/CBRD-25984/repro/MRO-c` ④. — 정소희(.52) 2026-11-09
+- **[계약 — develop 은 지킴] `pt_split_join_preds ()` 는 WHERE 목록이 완전한 CNF 라고 가정한다** (.52, develop `99fa309ca` 정적 + PR#8375 head `8831911fb` 동적, 2026-11-06):
+  - parser_support.c:2918-2920 의 assert("It is either fully CNF or not at all"). `next` 를 가진 PT_OR 원소(통째로 둔 OR-of-AND 뒤에 다른 conjunct)가 계층 질의 경로로 들어오면 debug 가 abort 한다.
+  - develop 은 분배하므로 그런 원소가 없다. OR-of-AND 를 CNF 에서 통째로 두는 변경(CBRD-27855 PR#8375 리뷰)이 이 가정에 걸린다. — 정소희(.52) 2026-11-09
+- **[계약 — develop 은 지킴] (+) 표기의 ON 이동은 술어의 최상위 표시만 본다** (.52, develop `99fa309ca`·PR#8375 head `8831911fb` 동적, 2026-11-06):
+  - OR-of-AND 안의 `i.y(+) = 10` 이 통째 PT_OR 아래에 있으면 ON 으로 옮겨지지 않고 WHERE 에 남아 NULL 확장행이 빠진다. develop 은 분배된 절마다 표시가 있어 2행(정답) — CBRD-27855 PR#8375 리뷰, 재현 claude-workspace `projects/CBRD-27855/repro/g4` 2번. — 정소희(.52) 2026-11-09
+- **[미수정 — develop 선재(CBRD-27855 PR#8375 리뷰 G4-06)] 한 열 OR-of-AND 는 비결정 함수가 있어도 분배된다** (.52, 정적, develop `99fa309ca` 동일 — 리뷰 G4-06, 2026-11-06):
+  - DRAND·NEXT_VALUE·세션 변수·메서드 호출이 든 인자도 분배되어 복제 평가된다. 동적으로 확인하지 않았다. **미수정**. — 정소희(.52) 2026-11-09
+- **[미수정 — CBRD-27957, 수정 PR#8429 `6a9ed94cc` 미머지] 항상 거짓인 부질의 위 EXISTS 가 NULL 형으로 접힌다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`):
+  - **`pt_eval_expr_type ()` 의 PT_EXISTS(type_checking.c:10560)는 피연산자 타입이 NULL·NA 면 식 타입을 NULL 로 둔다**: `pt_to_false_subquery ()` 가 거짓 WHERE 부질의를 `is_false_where` NULL 값으로 바꾼 뒤라 EXISTS 가 NULL 형이 된다.
+  - **`pt_fold_const_expr ()` 끝(type_checking.c:~19460)은 접은 값이 NULL·NA 가 아니면 형을 식 형으로 덮는다** → 정수 0 이 NULL 형이 되어 `null` 로 출력되고, sql hash text 가 진짜 NULL 식(`c0 <= NULL`)과 같아져 XASL 캐시를 공유한다.
+  - **`pt_fold_union ()` 의 FOLD_AS_NULL 값에는 `is_false_where` 가 없다** → EXISTS 가 참으로 계산(`pt_evaluate_db_value_expr ()` PT_EXISTS 는 is_false_where 일 때만 거짓), NOT IN 은 NULL(PT_IS_NOT_IN 은 is_false_where 일 때만 참). 실측: 두 갈래가 모두 거짓인 UNION ALL 위 `WHERE NOT EXISTS`·`NOT IN` 이 3행 대신 0행.
+  - 수정 PR#8429 `6a9ed94cc`(미머지): EXISTS 형 LOGICAL(피연산자가 is_false_where 일 때), NULL 로 접힌 집합 연산에 is_false_where. — 정소희(.52) 2026-11-09
+- **[미수정 — CBRD-27961, 수정 PR#8428 `35b022896` 미머지] 집합 연산 접기가 문장 텍스트를 옮기지 않아 바인드 재컴파일이 실패한다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`):
+  - **문장 텍스트 길이는 맨 위 노드에만 있다**: `parser_new_node ()`(parse_tree_cl.c:2501)는 모든 노드에 `g_query_string` 과 그때의 `g_query_string_len`(직전 문장 길이)을 넣고, 문장 끝 액션(csql_grammar.y:1921)이 맨 위 노드에만 진짜 길이를 넣는다. `parser_reinit_node ()` 는 텍스트를 지킨다.
+  - **`pt_fold_union ()`(semantic_check.c:19106)은 접은 노드에 줄·칸·alias_print·next 만 옮겼다** → 문장이던 UNION 을 남은 갈래로 바꾸면 길이 0 인 문장이 된다. 그 결과(-452)는 src-compat §2 「db_recompile_for_bind_signature」.
+  - 수정 PR#8428 `35b022896`(미머지): 접은 노드에 sql_user_text·len 도 옮김. — 정소희(.52) 2026-11-09
+- **[미수정 — CBRD-27962, 수정 PR#8435 `73ae5c347`·`cfdef8ea8` 미머지] `COALESCE (정수, NULL)` 은 VARCHAR, `COALESCE (NULL, 정수)` 는 INTEGER** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`): 오버로드 `(number, ANY) → VARCHAR` 에서 ANY 가 NULL 과도 '같은 형'(`pt_are_equivalent_types ()` func_type.cpp:1344)이라 `(number, number)` 보다 많이 맞는다. NVL·IFNULL 도 같다. 파생 테이블 열 형은 접기 전에 정해지므로(§2 「pt_bind_names / pt_get_attr_list_of_derived_table」) 접기가 바꾼 항목 형과 어긋난다.
+  - 실측(JDBC): develop 의 파생 열이 825373492(문자열 '1234' 바이트), `a + 1` 1100836660, UNION ALL 파생은 형 통합이 DOUBLE 이 되어 1072693248·8.
+  - 수정 PR#8435 `73ae5c347`·`cfdef8ea8`(미머지): 바깥 SELECT 형 검사 끝에서 형 열거값이 바뀐 파생 열 항목에 열 형 CAST(항목과 열은 숨은 항목 포함 위치로 짝 — §2). 오버로드 규칙은 그대로(바꾸면 비파생 SELECT·CTAS 형까지 바뀜). — 정소희(.52) 2026-11-09
 
 ## 4. 진행중인 작업
 

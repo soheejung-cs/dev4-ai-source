@@ -55,6 +55,7 @@
   `auto_Restart_server = prm_get_bool_value (PRM_ID_AUTO_RESTART_SERVER)`(master.c:1521)를 그때 한 번 정한다. master 는 보통 인자 없이 뜨므로 `[common]` 값만 보이고
   DB 섹션(`[@db]`) 값은 무시된다. 관찰(.51 1회): 되살린 서버가 master 에 등록되기 전에 `cubrid server start` 를 겹쳐 부르면 되살린 서버가 등록하지 못해 −677 이
   2분쯤 이어졌다. — 정소희(.50) 2026-10-28
+- **서버가 abort 하면 cub_master 가 다시 띄운다(`auto_restart_server`, 기본 yes, system_parameter.c:2242) — 크래시 직후 다른 PID 가 볼륨을 잡아 재현 스크립트의 `deletedb` 가 "in use" 로 실패했다** (.51, develop `226352283`, 2026-11-03): 정리 단계는 `server stop` 을 재시도해야 한다. — 정소희(.52) 2026-11-09
 
 ### csql / start_csql (csql.c)
 
@@ -68,7 +69,7 @@
   `optimizedb_update_class_statistics ()`(:1493)가 `do_update_stats` 의 단일 클래스 분기를 따라 히스토그램 헬퍼(`update_or_drop_histogram_helper
   (DO_HISTOGRAM_CREATE)`, 클래스 통계도 자기 스캔으로 갱신)를 먼저 부르고 `ER_OBJ_INVALID_ARGUMENTS` 면 `sm_update_statistics` 로 폴백한다. `--no-histogram` 이면
   `sm_update_statistics` 만, 인자 없는 전체 실행은 `sm_update_all_statistics (STATS_WITH_SAMPLING, 0, no_histogram, …)`(:1701)에 `--no-histogram-classes` 제외 목록을
-  넘긴다. 전체 경로의 클래스당 이중 수집은 src-storage §3. — 정소희(.50) 2026-10-28
+  넘긴다. 전체 경로의 클래스당 이중 수집은 src-storage §3(해소 — CBRD-27836 PR#8413 `262a23219`, 2026-11-09). — 정소희(.50) 2026-10-28
   - ✅ **리뷰 체크포인트**: `do_update_stats` 의 단일 클래스 분기를 고치면 `optimizedb_update_class_statistics` 도 같이 고친다 — 함수 주석이 둘을 "keep the two in
     step" 으로 묶어 둔다.
 

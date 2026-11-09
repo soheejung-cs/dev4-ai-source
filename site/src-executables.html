@@ -19,14 +19,14 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠39</span></span></a></li>
-<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">20</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠24</span></span></a></li>
-<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">29</span><span class="iss">⚠33</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠5</span></span></a></li>
-<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">11</span><span class="iss">⚠6</span></span></a></li>
-<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">10</span><span class="iss">⚠9</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠34</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠38</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
+<li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
+<li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
 <li><a href="src-executables.html" class="cur"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
@@ -80,6 +80,7 @@
 <ul>
 <li><code>master.c</code>는 데이터베이스 서버가 아니라 서버 프로세스들의 관리자.</li>
 <li><strong><code>auto_restart_server</code> 는 master 가 기동할 때 한 번, DB 섹션 없이 읽는다</strong> (.51, <code>959314906</code>, 2026-10-21~23 · develop <code>2d925cb86</code> 재확인): <code>main</code> 이 <code>master_util_config_startup ((argc &gt; 1) ? argv[1] : NULL, …)</code> → <code>sysprm_load_and_init (db_name, …)</code>(master_util.c:42-44)로 파라미터를 읽고 <code>auto_Restart_server = prm_get_bool_value (PRM_ID_AUTO_RESTART_SERVER)</code>(master.c:1521)를 그때 한 번 정한다. master 는 보통 인자 없이 뜨므로 <code>[common]</code> 값만 보이고 DB 섹션(<code>[@db]</code>) 값은 무시된다. 관찰(.51 1회): 되살린 서버가 master 에 등록되기 전에 <code>cubrid server start</code> 를 겹쳐 부르면 되살린 서버가 등록하지 못해 −677 이 2분쯤 이어졌다. — 정소희(.50) 2026-10-28</li>
+<li><strong>서버가 abort 하면 cub_master 가 다시 띄운다(<code>auto_restart_server</code>, 기본 yes, system_parameter.c:2242) — 크래시 직후 다른 PID 가 볼륨을 잡아 재현 스크립트의 <code>deletedb</code> 가 "in use" 로 실패했다</strong> (.51, develop <code>226352283</code>, 2026-11-03): 정리 단계는 <code>server stop</code> 을 재시도해야 한다. — 정소희(.52) 2026-11-09</li>
 </ul>
 <h4>csql / start_csql (csql.c)</h4>
 <ul>
@@ -87,7 +88,7 @@
 </ul>
 <h4>optimizedb / optimizedb_update_class_statistics (util_sa.c:1534/:1493) — <code>-n</code> 과 히스토그램</h4>
 <ul>
-<li><strong><code>optimizedb -n &lt;class&gt;</code> 는 develop <code>bcd6c5936</code> 까지 히스토그램을 만들지 않았다 — <code>dce40879e</code>(CBRD-27249 PR#8166, 2026-10-19)부터 SQL 단일 클래스 경로와 같은 순서다</strong> (.51, 2026-10-14 · develop <code>2d925cb86</code> 재확인): 예전 <code>optimizedb ()</code> 는 <code>sm_update_statistics (class_mop, STATS_WITH_SAMPLING)</code> 만 불렀고 이 함수엔 히스토그램 경로가 없었다(히스토그램은 전체 경로 <code>sm_update_all_statistics</code> → <code>update_histogram_for_all_classes</code> 만 만들었다). 지금은 <code>optimizedb_update_class_statistics ()</code>(:1493)가 <code>do_update_stats</code> 의 단일 클래스 분기를 따라 히스토그램 헬퍼(<code>update_or_drop_histogram_helper (DO_HISTOGRAM_CREATE)</code>, 클래스 통계도 자기 스캔으로 갱신)를 먼저 부르고 <code>ER_OBJ_INVALID_ARGUMENTS</code> 면 <code>sm_update_statistics</code> 로 폴백한다. <code>--no-histogram</code> 이면 <code>sm_update_statistics</code> 만, 인자 없는 전체 실행은 <code>sm_update_all_statistics (STATS_WITH_SAMPLING, 0, no_histogram, …)</code>(:1701)에 <code>--no-histogram-classes</code> 제외 목록을 넘긴다. 전체 경로의 클래스당 이중 수집은 src-storage §3. — 정소희(.50) 2026-10-28</li>
+<li><strong><code>optimizedb -n &lt;class&gt;</code> 는 develop <code>bcd6c5936</code> 까지 히스토그램을 만들지 않았다 — <code>dce40879e</code>(CBRD-27249 PR#8166, 2026-10-19)부터 SQL 단일 클래스 경로와 같은 순서다</strong> (.51, 2026-10-14 · develop <code>2d925cb86</code> 재확인): 예전 <code>optimizedb ()</code> 는 <code>sm_update_statistics (class_mop, STATS_WITH_SAMPLING)</code> 만 불렀고 이 함수엔 히스토그램 경로가 없었다(히스토그램은 전체 경로 <code>sm_update_all_statistics</code> → <code>update_histogram_for_all_classes</code> 만 만들었다). 지금은 <code>optimizedb_update_class_statistics ()</code>(:1493)가 <code>do_update_stats</code> 의 단일 클래스 분기를 따라 히스토그램 헬퍼(<code>update_or_drop_histogram_helper (DO_HISTOGRAM_CREATE)</code>, 클래스 통계도 자기 스캔으로 갱신)를 먼저 부르고 <code>ER_OBJ_INVALID_ARGUMENTS</code> 면 <code>sm_update_statistics</code> 로 폴백한다. <code>--no-histogram</code> 이면 <code>sm_update_statistics</code> 만, 인자 없는 전체 실행은 <code>sm_update_all_statistics (STATS_WITH_SAMPLING, 0, no_histogram, …)</code>(:1701)에 <code>--no-histogram-classes</code> 제외 목록을 넘긴다. 전체 경로의 클래스당 이중 수집은 src-storage §3(해소 — CBRD-27836 PR#8413 <code>262a23219</code>, 2026-11-09). — 정소희(.50) 2026-10-28</li>
 <ul>
 <li class="ck"><span class="cklab">리뷰 체크포인트</span><code>do_update_stats</code> 의 단일 클래스 분기를 고치면 <code>optimizedb_update_class_statistics</code> 도 같이 고친다 — 함수 주석이 둘을 "keep the two in step" 으로 묶어 둔다.</li>
 </ul>

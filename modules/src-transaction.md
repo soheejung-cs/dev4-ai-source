@@ -198,6 +198,12 @@ MVCC, WAL, 락, 리커버리, 부트를 담당하는 서버 측 최대 모듈. �
   - ✅ **리뷰 체크포인트**: 클라이언트에서 커밋 버전 읽기를 fetch 버전으로 요청해도 그 MOP 에 락이 이미 있으면 DIRTY 로 바뀐다 — 같은 트랜잭션이 앞에서 그 객체를
     잠갔는지 먼저 본다.
 
+### locator_mvcc_reev_cond_assigns / locator_mvcc_reeval_scan_filters — UPDATE 의 MVCC 재평가 (locator_sr.c:13820/:13946)
+
+> 이 경로는 지금 XASL 생성에서 꺼져 있어 도달하지 않는다 — src-parser §2 「pt_to_update_xasl / pt_to_delete_xasl」.
+
+- **`locator_mvcc_reev_cond_assigns ()` 는 재평가가 다시 계산한 대입 값이 버퍼를 소유하면(`need_clear`) 대입 직후 `pr_clear_value (dbval)` 로 지운다** (.50, 1802aa581, 2026-11-03, 정적): locator_sr.c:13889. 그 값을 속성 값이 빌렸다면(copy=false) 레코드 변환(`locator_allocate_copy_area_by_attr_info ()`) 전에 버퍼가 해제된다 — CBRD-27583 이전 `heap_attrinfo_set ()` 은 정확 일치 값을 소유 여부와 관계없이 빌렸다(잠재 결함; `1802aa581` 의 develop 은 문자열을 늘 캐스트해 해당 없었고, PR#8378 머지본 `ff06fc639` 는 비소유 정확 일치 값만 빌린다 — src-storage §2 「heap_attrinfo_set_converted」). — 정소희(.52) 2026-11-09
+
 ### heap_get_visible_version_from_log — 구버전 읽기 경로 개선 제안 (미계측 초안)
 
 - 스냅샷보다 새 버전을 만나면 `prev_version_lsa` 를 따라 undo 로그에서 옛 버전을 읽는 경로의 비용 진단과 제안. **원문 스스로 "계측 선행 필요, 구현 착수 비권장"** 이라 적었다 —
@@ -240,6 +246,14 @@ MVCC, WAL, 락, 리커버리, 부트를 담당하는 서버 측 최대 모듈. �
   override 창 안에서 불리면 인자가 무시된다. 지금은 호출자(compactdb_sr.c:566·627, locator_sr.c:11986)가 모두 창 밖이라 도달 경로가 없고, debug 는
   `xlogtb_reset_wait_msecs` 의 override 부재 assert(log_tran_table.c:2566, `9699a883c`)가 잡는다 — release 에서는 조용히 가려진다. §2 「대기 시간 조회」.
   — 정소희(.50) 2026-10-28
+- **[해소됨 — CBRD-27845, PR#8394 develop `5d4f780df` 2026-11-04] 외래 키 검사가 키마다 잡은 클래스 표현·가지치기 문맥을 마지막 것만 놓았다** (.51, develop `226352283` · PR#8394 헤드 `1cc4cb1a7`, 2026-11-03): `locator_check_foreign_key ()`(locator_sr.c:4035, SERVER·SA)는 비-NULL 외래 키마다 참조 클래스 표현을 `heap_classrepr_get ()`(:4116)으로 고정하고 분할 부모면 `partition_load_pruning_context ()`(:4127)로 가지치기 문맥을 읽지만, 놓는 곳은 함수 끝 error 레이블(:4189·4195) 하나다 — 행마다 키 수 - 1 개의 고정이 남고, 분할 부모면 `partition_attrinfo_get_key ()` 가 시작한 루트 attr_info 고정과 술어 언팩까지 덮여 2개씩 남는다. INSERT(호출처 locator_sr.c:5176, `locator_insert_force ()` 안)와 UPDATE(호출처 locator_sr.c:5993, `locator_update_force ()` 안) 둘 다 — UPDATE 는 `qexec_execute_update` 가 `not_check_fk=false` 를 넘겨 바뀐 열과 상관없이 매 행 검사한다. 실측(debug, `csql -S` + gdb, 10행, get/free): FK 2개 INSERT 52/42, 같은 표의 비-FK 열 UPDATE 57/47, 분할 부모 2개 INSERT 132/112, FK 1개 42/42. 샌 고정의 영향은 src-storage §2 「heap_classrepr_get」, debug 서버의 요청 끝 abort 는 src-base §2 「restrack_assert」.
+  - 수정(PR#8394): 키마다 가지치기(`partition_prune_unique_btid ()`) 직후·부모 PK 탐색 전에 `partition_clear_pruning_context ()` + `heap_classrepr_free_and_init ()`(첫 커밋 `1cc4cb1a7`), error 레이블에서 `pr_clear_value (&dbvalue)`(두 번째 커밋 `196989e1a`, develop merge `b307f5819` — 오류 출구의 키 값 누수는 src-storage §2 「heap_attrvalue_get_key」). 수정 빌드에서 위 실측 모두 get = free, debug 서버 abort 없음(분할 부모 2개·오류 출구 둘 다). TC cubrid-testcases#4016(`sql/_13_issues/_26_2h/cbrd_27845`, Case 1~15, `e48bfd93a`). 키 1개 판 `btree_check_foreign_key ()` 는 해당 없음(src-storage §2). — 정소희(.52) 2026-11-09
+- **[미수정 — 별도 이슈 후보, 발번 여부 결정 대기(agent-todo #168)] 로그 적용기 모드에서 `locator_check_foreign_key ()` 의 앞 키 ER_FK_INVALID 가 NO_ERROR 로 덮일 수 있다** (.51, develop `226352283`, 2026-11-03 — PR 과 무관한 develop 관찰, 단위 suite K25·K26, 도달 경로 미확인): 로그 적용기 모드에서 앞 키의 ER_FK_INVALID 뒤 `continue` 하면, 뒤 키 부모가 분할 테이블일 때 `error_code =`(문맥 읽기·가지치기, :4126·4139)가 NO_ERROR 로 덮어 함수가 0 을 반환하고 오류 영역엔 ER_FK_INVALID 가 남는다. `heap_attrinfo_start_with_index ()` 가 ER_FAILED 를 돌려주면 `num_found <= 0` 분기(:4064)가 NO_ERROR 로 검사를 건너뛴다. — 정소희(.52) 2026-11-09
+- **[잠재 — 미수정, 재평가가 꺼져 있어 지금은 도달 불가] `locator_mvcc_reeval_scan_filters ()` 는 다른 클래스 행을 PEEK 로 읽고 스캔 캐시를 닫은 뒤(heap_scancache_end) 대입이 그 값을 읽는다** (.50, 1802aa581, 2026-11-03, **정적 판독 — 동적 미확인**): locator_sr.c:13967 `heap_get_visible_version (…, PEEK, …)` → `fetch_val_list (…, PEEK)` 로 `rest_regu_list` 를 그 페이지에 걸쳐 둔 채 :14010 `heap_scancache_end ()` — 이후 `locator_mvcc_reev_cond_assigns ()` 의 대입(캐스트든 빌림이든)이 고정이 풀린 프레임에서 바이트를 읽는다. 재현 시도는 못 했다(단순 락 대기 UPDATE 로는 이 경로에 닿지 않음 — src-query §2 「UPDATE·INSERT…SELECT 의 대입 값」). 재평가 자체가 XASL 생성에서 꺼져 있다(src-parser §2 「pt_to_update_xasl / pt_to_delete_xasl」). — 정소희(.52) 2026-11-09
+- **[미수정 — CBRD-27960, 수정 PR#8427 `488dcb882` 미머지] 세션 작업 스레드 깨우기에서 다른 스레드의 `conn_entry` 를 두 번 읽는다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`): `logtb_interrupt_session_sleeper_mapfunc ()`(log_tran_table.c:2851)와 `logtb_set_tran_index_interrupt ()`(:2990-2994)가 다른 스레드의 `conn_entry` 를 NULL 검사와 `->session_id` 에서 두 번 읽는다. 작업 스레드는 요청을 끝내며 `conn_entry` 를 `tran_index_lock` 없이 NULL 로 돌린다(`css_server_task::execute ()` server_support.c:2198, 병렬 작업들). tran_index_lock 은 conn_entry 를 지키지 않는다.
+  - 연결 항목은 `css_Conn_array`(connection_sr.c:455, 서버 시작 때 malloc, `css_free_conn` 은 반납)라 읽은 포인터는 해제 메모리가 아니다. loaddb 작업 스레드는 `TT_LOADDB` 라 매퍼가 건너뛴다.
+  - 실측: develop debug 에 오류 UNION ALL 3000번 × 4세션 + 짧은 질의 20000번 × 12세션 → :2851 SIGSEGV(코어로 확인). release 는 같은 부하로 재현 안 됨(한 번 읽는 코드로 컴파일된 것으로 보임).
+  - 수정 PR#8427 `488dcb882`(미머지): 두 곳 모두 지역 변수에 한 번 읽어 씀. — 정소희(.52) 2026-11-09
 
 ## 4. 진행중인 작업
 
