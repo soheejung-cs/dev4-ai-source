@@ -152,7 +152,7 @@
   index scan needs it"이라 하나 git grep상 btree.c 밖 호출자 없음. static이면 끝.
   `btree_reset_common_prefix_page_info`(btree.c:1769)도 non-static(헤더 선언 없음)인데 호출자는
   btree.c 내부뿐 — 같은 문제.
-- start_col 미초기화(위 첫 항목)는 develop `1802aa581` 에도 그대로다(btree.c:5308 선언, 2026-11-03 재확인). 수정 PR#8353(CBRD-27862, .51)이 0 으로 초기화한다 — 미머지. — 정소희(.50) 2026-11-03
+- start_col 미초기화(위 첫 항목)는 develop `1802aa581` 에도 그대로다(btree.c:5308 선언, 2026-11-03 재확인). 수정 PR#8353(CBRD-27862, .51)이 0 으로 초기화한다 — 머지됨(develop `53d6bdfd2`, 2026-11-09). — 정소희(.50) 2026-11-03
 - **인덱스 스캔의 검색 키 경계(DOMAIN_KEY_BOUND, CBRD-27583)는 키가 있는 경계마다 항상 만들어진다** (.51, CBRD-27361 헤드 `0efc06bf1`, 2026-11-01): `xasl_generation.c` 의 경계 결정(14580~)이 같은 도메인 쌍(INT 열 = INT 값)에도 `DOMAIN_COMPARE_DIRECT`(cmp = 그 형의 pr_type, 변환 없음)를 담는다. 따라서 `btree_search_leaf_page`·`btree_search_nonleaf_page` 의 `bound` 는 질의의 인덱스 스캔에서 NULL 이 아니고, NULL 은 삽입·삭제·고유 검사 같은 자기 도메인 키 탐색이다. — 정소희(.50) 2026-11-03
 
 ### btree_compare_key (btree.c:20048)
