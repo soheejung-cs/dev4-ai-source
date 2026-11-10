@@ -165,4 +165,4 @@
 ### .51
 - (해당 없음 또는 미기입)
 ### .52
-- (해당 없음 또는 미기입)
+- **다음 버전 예정 — CBRD-27143 / PR#8006(draft, 다음 버전으로 보류)**: SQL PREPARE/EXECUTE 경로에서 `LIKE ?` 에 비문자열(정수)을 바인딩하면 `do_cast_host_variables_to_expected_domain ()` 이 컬럼 문자열 도메인으로 캐스트해 지문·플래너가 문자열 패턴처럼 가격 매긴다(재플랜, 0행); NULL 은 `histogram_get_like_selectivity ()` 타입 검사에서 success=false 라 가격 불가 (.52, PR#8006 `c76ac823d` CTP 실측, 2026-09-22). PR 코드에 기대므로 머지되면 develop 에서 다시 확인해 §2 로. — 정소희(.52) 2026-11-10

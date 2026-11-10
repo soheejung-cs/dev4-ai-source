@@ -21,9 +21,9 @@
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠34</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠35</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠38</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠41</span></span></a></li>
 <li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
 <li><a href="src-object.html" class="cur"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
@@ -104,6 +104,7 @@
 <li>B-tree 는 비교가 같은 키를 찾으면 새 OID 를 그 키에 덧붙인다(<code>btree_key_insert_new_object ()</code>, btree.c:32329). 그래서 같은 순간을 다른 시간대로 적은 두 값은 키 하나가 되고, 키에서 읽으면 키에 남은 한 값으로 나온다(실측에서는 먼저 넣은 <code>+09:00</code>).</li>
 <li>커버링 관문 <code>qo_check_type_index_covering ()</code>(query_graph.c:10458)·<code>qo_check_coll_optimization ()</code>(query_graph.c:10410)이 이런 타입과 대소문자 무시 콜레이션의 키를 커버링에서 빼는 이유가 이것이다.</li>
 <li class="ck"><span class="cklab">리뷰 체크포인트</span>키에서 값을 읽는 경로를 넓히는 변경(함수 결과 커버링 등)은 이 두 관문을 새 경로에도 거는지 본다 — CBRD-25984 PR#6466 리뷰 G1-01. — 정소희(.52) 2026-11-09</li>
+<li>PR#6466 리뷰 헤드 <code>05b46aefe</code> 는 함수 결과(fi_domain)에 이 관문을 걸지 않아 <code>(i, to_datetime_tz(s))</code> 커버드 투영이 <code>+09:00</code> 두 번(develop <code>+09:00</code>·<code>+00:00</code>), <code>(n, s collate utf8_en_ci)</code> 류 ci 결과가 65,65(develop 65,97)였다(.51 실측 2026-11-04, claude-workspace <code>projects/CBRD-25984/repro/G1-01</code>). 머지본 <code>21b58704d</code>(2026-11-10)는 함수 결과에 같은 성격의 관문을 따로 건다 — <code>qo_is_func_index_key_result_exact ()</code>(query_graph.c:7709: <code>TP_TYPE_NOT_SUPPORT_COVERING</code>·콜레이션 <code>allow_index_opt</code>·-0), src-optimizer §2 「함수 인덱스의 결과를 키에서 읽기」. 머지본 실측은 하지 않았다. — 정소희(.52) 2026-11-10</li>
 </ul>
 </ul>
 <h4>pr_pad_char_to_precision / qstr_pad_string — CHAR 를 정밀도까지 채우는 두 방식 (object_primitive.c:12615, query/string_opfunc.c:10076)</h4>

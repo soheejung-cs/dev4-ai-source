@@ -21,9 +21,9 @@
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠34</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠35</span></span></a></li>
 <li><a href="src-xasl.html" class="cur"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠38</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠41</span></span></a></li>
 <li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
@@ -81,12 +81,12 @@
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
 <ul>
-<li><strong>[미수정 — CBRD-27955, 수정 PR#8425 <code>0ad0ba8bf</code> 미머지] <code>xasl_dump_with_id ()</code>(xasl_iteration.cpp:84)가 덤프 문자열을 <code>_er_log_debug ()</code> 의 서식 자리에 넘긴다</strong> (.51, develop <code>953e83256</code>, 2026-11-06 — 동적 확인 <code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>): 덤프에 맨 위 XASL 의 <code>query_alias</code>(질의 문장)가 들어가므로 리터럴로 남은 <code>%n</code>·<code>%s</code> 를 vfprintf 가 해석한다. 부르는 곳은 <code>make_parallel_query_executor_recursively ()</code>(px_query_executor.cpp:307, <code>#if !defined(NDEBUG)</code>) 하나라 debug 서버만 해당.</li>
+<li><strong>[해소됨 — CBRD-27955, PR#8425 develop <code>633bf1988</code> 2026-11-10] <code>xasl_dump_with_id ()</code>(xasl_iteration.cpp:84)가 덤프 문자열을 <code>_er_log_debug ()</code> 의 서식 자리에 넘긴다</strong> (.51, develop <code>953e83256</code>, 2026-11-06 — 동적 확인 <code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>): 덤프에 맨 위 XASL 의 <code>query_alias</code>(질의 문장)가 들어가므로 리터럴로 남은 <code>%n</code>·<code>%s</code> 를 vfprintf 가 해석한다. 부르는 곳은 <code>make_parallel_query_executor_recursively ()</code>(px_query_executor.cpp:307, <code>#if !defined(NDEBUG)</code>) 하나라 debug 서버만 해당.</li>
 <ul>
 <li>실측: develop debug 에서 <code>... LIKE '%n%n%n%n' UNION ALL ... NOT LIKE '%n%n%n%n'</code> 한 번에 서버 죽음(CTP sql cbrd_27955 Case 1 뒤 -677).</li>
 <li>같은 꼴(비리터럴 서식)의 다른 호출(resource_tracker.cpp:79, log_recovery_redo_perf.hpp:218, thread_worker_pool_impl.hpp:902, vacuum.c:7379, btree.c:23974)은 코드가 만든 문자열이다.</li>
 <li><code>er_log_debug</code> 매개변수(PRM_ID_ER_LOG_DEBUG)는 debug 빌드 기본값이 켜짐(system_parameter.c:1072).</li>
-<li>수정 PR#8425 <code>0ad0ba8bf</code>(미머지): <code>"%s"</code> 의 인자로. — 정소희(.52) 2026-11-09</li>
+<li><strong>수정됨 — PR#8425(머지됨 <code>633bf1988</code>)</strong>: <code>"%s"</code> 의 인자로. — 정소희(.52) 2026-11-09, 머지 표기 11-10</li>
 </ul>
 </ul>
 <h3>4. 진행중인 작업</h3>

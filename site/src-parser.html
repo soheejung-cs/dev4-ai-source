@@ -21,9 +21,9 @@
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠34</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠35</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠38</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠41</span></span></a></li>
 <li><a href="src-parser.html" class="cur"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
@@ -137,7 +137,7 @@
 <ul>
 <li><code>pt_ordbynum_to_key_limit_multiple_ranges ()</code>(xasl_generation.c:29248)의 <code>assert (0)</code>(29318)에서 debug 가 플랜 출력 전에 abort 한다.</li>
 <li>실측(debug SA): <code>(i, j, sqrt(d), k)</code> 에 <code>select j, k from t where i in (1, 2) and sqrt(d) &gt; 0 using index idx(+) order by j limit 5</code>. develop 은 힌트가 없어도, PR#6466 <code>d7ce3af72</code> 는 <code>NO_COVERING_IDX</code> 일 때 abort 한다. release 동작은 보지 않았다.</li>
-<li><strong>미수정</strong> — 재현 claude-workspace <code>projects/CBRD-25984/repro/MRO-c</code> ④. — 정소희(.52) 2026-11-09</li>
+<li><strong>미수정</strong>(develop 선재) — PR#6466 머지본 <code>21b58704d</code>(2026-11-10)에서의 동작은 미확인(리뷰 헤드 <code>d7ce3af72</code> 는 <code>NO_COVERING_IDX</code> 일 때만 abort). 재현 claude-workspace <code>projects/CBRD-25984/repro/MRO-c</code> ④. — 정소희(.52) 2026-11-09, 머지 반영 2026-11-10</li>
 </ul>
 <li><strong>[계약 — develop 은 지킴] <code>pt_split_join_preds ()</code> 는 WHERE 목록이 완전한 CNF 라고 가정한다</strong> (.52, develop <code>99fa309ca</code> 정적 + PR#8375 head <code>8831911fb</code> 동적, 2026-11-06):</li>
 <ul>
@@ -152,12 +152,12 @@
 <ul>
 <li>DRAND·NEXT_VALUE·세션 변수·메서드 호출이 든 인자도 분배되어 복제 평가된다. 동적으로 확인하지 않았다. <strong>미수정</strong>. — 정소희(.52) 2026-11-09</li>
 </ul>
-<li><strong>[미수정 — CBRD-27957, 수정 PR#8429 <code>6a9ed94cc</code> 미머지] 항상 거짓인 부질의 위 EXISTS 가 NULL 형으로 접힌다</strong> (.51, develop <code>953e83256</code>, 2026-11-06 — 동적 확인 <code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>):</li>
+<li><strong>[해소됨 — CBRD-27957, PR#8429 develop <code>867265344</code> 2026-11-10] 항상 거짓인 부질의 위 EXISTS 가 NULL 형으로 접힌다</strong> (.51, develop <code>953e83256</code>, 2026-11-06 — 동적 확인 <code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>):</li>
 <ul>
 <li><strong><code>pt_eval_expr_type ()</code> 의 PT_EXISTS(type_checking.c:10560)는 피연산자 타입이 NULL·NA 면 식 타입을 NULL 로 둔다</strong>: <code>pt_to_false_subquery ()</code> 가 거짓 WHERE 부질의를 <code>is_false_where</code> NULL 값으로 바꾼 뒤라 EXISTS 가 NULL 형이 된다.</li>
 <li><strong><code>pt_fold_const_expr ()</code> 끝(type_checking.c:~19460)은 접은 값이 NULL·NA 가 아니면 형을 식 형으로 덮는다</strong> → 정수 0 이 NULL 형이 되어 <code>null</code> 로 출력되고, sql hash text 가 진짜 NULL 식(<code>c0 &lt;= NULL</code>)과 같아져 XASL 캐시를 공유한다.</li>
 <li><strong><code>pt_fold_union ()</code> 의 FOLD_AS_NULL 값에는 <code>is_false_where</code> 가 없다</strong> → EXISTS 가 참으로 계산(<code>pt_evaluate_db_value_expr ()</code> PT_EXISTS 는 is_false_where 일 때만 거짓), NOT IN 은 NULL(PT_IS_NOT_IN 은 is_false_where 일 때만 참). 실측: 두 갈래가 모두 거짓인 UNION ALL 위 <code>WHERE NOT EXISTS</code>·<code>NOT IN</code> 이 3행 대신 0행.</li>
-<li>수정 PR#8429 <code>6a9ed94cc</code>(미머지): EXISTS 형 LOGICAL(피연산자가 is_false_where 일 때), NULL 로 접힌 집합 연산에 is_false_where. — 정소희(.52) 2026-11-09</li>
+<li><strong>수정됨 — PR#8429(머지됨 <code>867265344</code>)</strong>: EXISTS 형 LOGICAL(피연산자가 is_false_where 일 때), NULL 로 접힌 집합 연산에 is_false_where. — 정소희(.52) 2026-11-09, 머지 표기 11-10</li>
 </ul>
 <li><strong>[미수정 — CBRD-27961, 수정 PR#8428 <code>35b022896</code> 미머지] 집합 연산 접기가 문장 텍스트를 옮기지 않아 바인드 재컴파일이 실패한다</strong> (.51, develop <code>953e83256</code>, 2026-11-06 — 동적 확인 <code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>):</li>
 <ul>

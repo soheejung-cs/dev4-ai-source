@@ -429,6 +429,7 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
 ### qo_estimate_ngroups / qo_having_selectivity — GROUP BY 행 추정과 HAVING (query_planner.c)
 
 - **HAVING 선택도는 `qo_estimate_ngroups ()` 가 GROUP BY 정렬에서 그룹 수 × `qo_having_selectivity ()`(최소 1)로 곱한다 — 못 매기는 집계 술어는 `QO_HAVING_DEFAULT_SELECTIVITY` 0.5** (.51, PR#8325 head `5cfef7f5b`, 2026-11-03 — 머지본 `e98bdd885`(CBRD-27811, 2026-11-05)에서 재확인 2026-11-09). NDV 를 모를 때의 `group_rows` 는 이 머지부터 낮출 때만 갱신한다(§3 「NDV 를 모르는 DISTINCT」 해소). — 정소희(.52) 2026-11-09
+- **바인드 감시와 첫 실행 재계획이 HAVING 의 호스트 변수 술어를 다르게 다룬다** (.52, develop `e98bdd885`(PR#8325 머지) 정적, 2026-11-10 — 리뷰 헤드 `5cfef7f5b` 의 서술을 대체): `histogram_hv_operand_column ()`(histogram/histogram_cl.cpp:3097)는 열 자체나 AVG·MIN·MAX(열)만 그 열로 본다 — 플래너가 그 열을 값과 비교한 것으로 매기기 때문이다. SUM 은 '값 / 그룹 크기' 로 매겨 지문이 볼 수 없고 COUNT (*) 는 열이 없다. 그래서 `histogram_split_hv_predicate ()`(:3115)와 바인드 감시 `bind_term_walk ()`(:3525)는 SUM·COUNT(*) 를 보지 않고, `histogram_is_having_hv_predicate ()`(:3191 — 값으로 매기는 집계 대 사용자 호스트 변수의 `= <> > >= < <=`·BETWEEN)가 `hv_pred_walk ()`(:3228)에서 첫 실행 재계획만 건다. 걷기는 절이 아니라 문장 전체를 보므로 select 목록의 같은 비교도 재계획을 부른다(플랜은 그대로). 마지막 커밋 "Leave SUM = and SUM IN to the default". — 정소희(.52) 2026-11-10 (원 리뷰 정소희(.51) 2026-11-03)
 
 ### 파생 테이블 노드의 card — pt_get_query_limit_from_query (query_graph.c:1360, parser_support.c:10570)
 
@@ -443,6 +444,13 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
 - **자동 파라미터화가 꺼지는 조건** (.52, develop `99fa309ca` 정적, query_rewrite.c:504-506, 2026-11-06):
   - `hostvar_late_binding=yes`, `max_plan_cache_entries` ≤ 0, `cannot_prepare`, PL/CSQL 정적 SQL(`is_parsing_static_sql`), `is_skip_auto_parameterize`. conf 키는 `max_plan_cache_entries`(매크로 `PRM_ID_XASL_CACHE_MAX_ENTRIES` — 이름이 다르다).
   - 이 문맥에서는 상수가 호스트 변수로 바뀌지 않아 범위 병합·교집합이 상수로 일어난다 — 재작성기 변경은 이 판으로도 돌려야 한다(자가진화 #095). — 정소희(.52) 2026-11-09
+
+### 함수 인덱스의 결과를 키에서 읽기 — 커버링·키 필터 (query_graph.c, xasl_generation.c; PR#6466 머지 `21b58704d`)
+
+- **함수 결과는 예약 attr id `FUNC_INDEX_RESULT_ATTRID`(-2)의 의사 속성으로 키에서 읽는다** (.51 리뷰 → .52 머지본 재확인, develop `21b58704d`(CBRD-25984, 2026-11-10) 정적): storage_common.h:620-621(`IS_FUNC_INDEX_RESULT_ATTR_ID`), 의사 속성 기술자는 xasl_generation.c:12815. 클라이언트가 커버드 스캔의 출력·키 필터의 함수식을 그 속성으로 돌린다 — 출력은 `pt_collect_func_index_cover ()`(xasl_generation.c:10073)가 값 목록을 질의가 직접 읽는 스캔만 등록하고(머지·해시 조인 입력, 조인 아래 정렬, SORT-LIMIT 은 리스트 파일로 가므로 제외), GROUP BY·집계가 있으면 하지 않는다(:20354-20357 — 함수를 원 인자에서 계산).
+- **키에 남은 결과를 쓰는 관문** (.52, `21b58704d` 정적): `qo_is_func_index_routable ()`(query_graph.c:7681 — SELECT 만, 힙 재평가 스캔·click counter·CONNECT BY 는 아님)와 `qo_is_func_index_key_result_exact ()`(:7709 — 세션 의존 식이 아니고, 결과 도메인이 커버링을 지원하며(`TP_TYPE_NOT_SUPPORT_COVERING`) 콜레이션이 `allow_index_opt` 이고, FLOAT·DOUBLE·MONETARY 면 -0 을 낼 수 있는 식이 아닐 것)를 둘 다 통과해야 키 필터를 키에서 읽는다(`qo_is_func_index_key_filter_routable ()` :7747). 같다고 비교되는 키는 한 행의 값만 남기기 때문이다(src-object §2 「mr_index_cmpdisk_datetimetz」).
+- **리스트 파일을 거치는 스캔은 키에 없는 인자를 커버하면 XASL 생성 뒤 커버링을 끈다** (.52, `21b58704d` 정적): `pt_uncover_func_index_scans ()`(xasl_generation.c:10024). 비용은 `qo_plan_uncover_cost ()`(query_planner.c:3451, `qo_is_func_index_cover_routed ()` :3396)가 같은 자리에 힙 읽기를 매긴다 — 주석이 "the two must change together" 라 한다. 리뷰 헤드(`05b46aefe`)에 대해 적었던 "비용은 커버링 기준으로 이미 매겨진 뒤" 는 머지본에서 맞지 않다.
+- ✅ **리뷰 체크포인트**: 함수 인덱스 커버링을 넓히는 변경은 `pt_collect_func_index_cover ()`·`pt_uncover_func_index_scans ()`·`qo_plan_uncover_cost ()` 셋이 같은 플랜 자리를 보는지 본다. — 정소희(.52) 2026-11-10 (원 리뷰 정소희(.51) 2026-11-05)
 
 ### 비용 모델 실측 캘리브레이션과 세 가지 함정 (.51, 기준 PR#7622 `0721d8da0`, 2026-09-02 release 실측)
 
@@ -573,3 +581,6 @@ NO HISTOGRAM | DROP HISTOGRAM | <n> BUCKETS). **WITH 절을 생략하면 문법 
   Merge Gate 해제 → 머지. [기준: CBRD-27094 브랜치, 2026-08-26]
 - CBRD-27283(correlation/클러스터링 통계 — clustered↔uncorrelated 비용 보간): 착수 가능 상태.
   검증 대상 = PR#7622 잔여 회귀 4건(9c/5c/13c/7a). 설계 참고 = 이 모듈 §2·§3의 .50 축적분. [보드 #75]
+- **다음 버전 예정 — CBRD-27127 / PR#8392(draft, 다음 버전으로 보류)**: `QO_TERM.eval_cost` + `qo_expr_eval_cost`, 공용 `qo_compare_pred_eval_order`, `qo_scan_filter_cpu`(Σ c_i × Π s_j), 파라미터 `cost_cpu_operator`·`cost_filter_*` 6개. JOB 113 A/B +11.1%(19d·9d·15c·15d·13b 회귀 — §3 의 FK 조인 과소추정이 NL 로 넘김) (.52, develop `ef2c78cda` 기준, 2026-11-03). 머지되면 develop 에서 다시 확인해 §2 로. — 정소희(.52) 2026-11-10
+- **다음 버전 예정 — CBRD-27146 / PR#8390·CBRD-27659 / PR#8192(둘 다 draft)**: 다음 버전으로 보류(11-10) — 작업 워크트리·빌드는 지우고 브랜치만 남겼다. — 정소희(.52) 2026-11-10
+- **리뷰 중 — CBRD-27855 / PR#8375(shparkcubrid, OPEN)**: 리뷰 헤드 `8831911fb`(base `99fa309ca`, .52 debug SA 동적 2026-11-06)에서 develop 과 다른 동작 다섯 — 외부 조인 뒤 INNER JOIN ON 의 OR-of-AND 가 분배 후 100절 초과(COMPACT)에서도 추출돼 1행(develop 0행 — PR 회귀, g12-04) · `eval_pred ()` 의 오른쪽 선형 전제에 걸려 왼쪽 깊은 PT_OR 가 "maximum allowed nesting level(400)" 로 거절(develop 2행) · `pt_split_join_preds ()` 의 CNF 가정으로 START WITH … CONNECT BY 가 abort(release 미확인) · (+) 표기 `i.y(+) = 10` 이 PT_OR 아래 남아 1행(develop 2행) · UPDATE·DELETE·MERGE 부질의의 두 번 재작성에서 파생 절 두 벌(sel 250.375)·DELETE 가 남길 행을 지움(자동 파라미터화 끔 문맥). 지금 헤드 `0fd960a5d` 에서는 미확인. 상세·재현 claude-workspace `projects/CBRD-27855/리뷰보고서-PR8375.md`·`repro/`. 머지되거나 닫히면 정리. — 정소희(.52) 2026-11-10

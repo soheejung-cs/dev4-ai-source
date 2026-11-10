@@ -91,6 +91,7 @@ primitive 타입 연산, 디스크↔메모리 변환. 접두사: `sm_`(schema),
   - B-tree 는 비교가 같은 키를 찾으면 새 OID 를 그 키에 덧붙인다(`btree_key_insert_new_object ()`, btree.c:32329). 그래서 같은 순간을 다른 시간대로 적은 두 값은 키 하나가 되고, 키에서 읽으면 키에 남은 한 값으로 나온다(실측에서는 먼저 넣은 `+09:00`).
   - 커버링 관문 `qo_check_type_index_covering ()`(query_graph.c:10458)·`qo_check_coll_optimization ()`(query_graph.c:10410)이 이런 타입과 대소문자 무시 콜레이션의 키를 커버링에서 빼는 이유가 이것이다.
   - ✅ **리뷰 체크포인트**: 키에서 값을 읽는 경로를 넓히는 변경(함수 결과 커버링 등)은 이 두 관문을 새 경로에도 거는지 본다 — CBRD-25984 PR#6466 리뷰 G1-01. — 정소희(.52) 2026-11-09
+  - PR#6466 리뷰 헤드 `05b46aefe` 는 함수 결과(fi_domain)에 이 관문을 걸지 않아 `(i, to_datetime_tz(s))` 커버드 투영이 `+09:00` 두 번(develop `+09:00`·`+00:00`), `(n, s collate utf8_en_ci)` 류 ci 결과가 65,65(develop 65,97)였다(.51 실측 2026-11-04, claude-workspace `projects/CBRD-25984/repro/G1-01`). 머지본 `21b58704d`(2026-11-10)는 함수 결과에 같은 성격의 관문을 따로 건다 — `qo_is_func_index_key_result_exact ()`(query_graph.c:7709: `TP_TYPE_NOT_SUPPORT_COVERING`·콜레이션 `allow_index_opt`·-0), src-optimizer §2 「함수 인덱스의 결과를 키에서 읽기」. 머지본 실측은 하지 않았다. — 정소희(.52) 2026-11-10
 
 ### pr_pad_char_to_precision / qstr_pad_string — CHAR 를 정밀도까지 채우는 두 방식 (object_primitive.c:12615, query/string_opfunc.c:10076)
 

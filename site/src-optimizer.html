@@ -21,9 +21,9 @@
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠34</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠35</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-optimizer.html" class="cur"><span>src/optimizer</span><span class="bd"><span class="cnt">34</span><span class="iss">⚠38</span></span></a></li>
+<li><a href="src-optimizer.html" class="cur"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠41</span></span></a></li>
 <li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/optimizer</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 38건</p>
+<h1>src/optimizer</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 41건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>비용 기반 쿼리 플래닝, 클라이언트 측(<code>#if !defined(SERVER_MODE)</code>). <code>query_graph.c</code>(노드=테이블, 엣지=조인, 서버 통계 로드), <code>query_planner.c</code>(QO_ENV→QO_PLAN, 조인 순서 DP·비용 함수·선택도), <code>plan_generation.c</code>(QO_PLAN→XASL 술어 변환), <code>query_bitset.c</code>, <code>histogram/</code>(HST2 히스토그램 리더·선택도), <code>rewriter/</code>(최적화 전 쿼리 재작성). 파이프라인 위치: parser(PT_NODE) → optimizer(QO_PLAN) → parser/xasl_generation.c(XASL_NODE).</p>
@@ -443,6 +443,7 @@
 <h4>qo_estimate_ngroups / qo_having_selectivity — GROUP BY 행 추정과 HAVING (query_planner.c)</h4>
 <ul>
 <li><strong>HAVING 선택도는 <code>qo_estimate_ngroups ()</code> 가 GROUP BY 정렬에서 그룹 수 × <code>qo_having_selectivity ()</code>(최소 1)로 곱한다 — 못 매기는 집계 술어는 <code>QO_HAVING_DEFAULT_SELECTIVITY</code> 0.5</strong> (.51, PR#8325 head <code>5cfef7f5b</code>, 2026-11-03 — 머지본 <code>e98bdd885</code>(CBRD-27811, 2026-11-05)에서 재확인 2026-11-09). NDV 를 모를 때의 <code>group_rows</code> 는 이 머지부터 낮출 때만 갱신한다(§3 「NDV 를 모르는 DISTINCT」 해소). — 정소희(.52) 2026-11-09</li>
+<li><strong>바인드 감시와 첫 실행 재계획이 HAVING 의 호스트 변수 술어를 다르게 다룬다</strong> (.52, develop <code>e98bdd885</code>(PR#8325 머지) 정적, 2026-11-10 — 리뷰 헤드 <code>5cfef7f5b</code> 의 서술을 대체): <code>histogram_hv_operand_column ()</code>(histogram/histogram_cl.cpp:3097)는 열 자체나 AVG·MIN·MAX(열)만 그 열로 본다 — 플래너가 그 열을 값과 비교한 것으로 매기기 때문이다. SUM 은 '값 / 그룹 크기' 로 매겨 지문이 볼 수 없고 COUNT (*) 는 열이 없다. 그래서 <code>histogram_split_hv_predicate ()</code>(:3115)와 바인드 감시 <code>bind_term_walk ()</code>(:3525)는 SUM·COUNT(*) 를 보지 않고, <code>histogram_is_having_hv_predicate ()</code>(:3191 — 값으로 매기는 집계 대 사용자 호스트 변수의 <code>= &lt;&gt; &gt; &gt;= &lt; &lt;=</code>·BETWEEN)가 <code>hv_pred_walk ()</code>(:3228)에서 첫 실행 재계획만 건다. 걷기는 절이 아니라 문장 전체를 보므로 select 목록의 같은 비교도 재계획을 부른다(플랜은 그대로). 마지막 커밋 "Leave SUM = and SUM IN to the default". — 정소희(.52) 2026-11-10 (원 리뷰 정소희(.51) 2026-11-03)</li>
 </ul>
 <h4>파생 테이블 노드의 card — pt_get_query_limit_from_query (query_graph.c:1360, parser_support.c:10570)</h4>
 <ul>
@@ -459,6 +460,13 @@
 <li><code>hostvar_late_binding=yes</code>, <code>max_plan_cache_entries</code> ≤ 0, <code>cannot_prepare</code>, PL/CSQL 정적 SQL(<code>is_parsing_static_sql</code>), <code>is_skip_auto_parameterize</code>. conf 키는 <code>max_plan_cache_entries</code>(매크로 <code>PRM_ID_XASL_CACHE_MAX_ENTRIES</code> — 이름이 다르다).</li>
 <li>이 문맥에서는 상수가 호스트 변수로 바뀌지 않아 범위 병합·교집합이 상수로 일어난다 — 재작성기 변경은 이 판으로도 돌려야 한다(자가진화 #095). — 정소희(.52) 2026-11-09</li>
 </ul>
+</ul>
+<h4>함수 인덱스의 결과를 키에서 읽기 — 커버링·키 필터 (query_graph.c, xasl_generation.c; PR#6466 머지 <code>21b58704d</code>)</h4>
+<ul>
+<li><strong>함수 결과는 예약 attr id <code>FUNC_INDEX_RESULT_ATTRID</code>(-2)의 의사 속성으로 키에서 읽는다</strong> (.51 리뷰 → .52 머지본 재확인, develop <code>21b58704d</code>(CBRD-25984, 2026-11-10) 정적): storage_common.h:620-621(<code>IS_FUNC_INDEX_RESULT_ATTR_ID</code>), 의사 속성 기술자는 xasl_generation.c:12815. 클라이언트가 커버드 스캔의 출력·키 필터의 함수식을 그 속성으로 돌린다 — 출력은 <code>pt_collect_func_index_cover ()</code>(xasl_generation.c:10073)가 값 목록을 질의가 직접 읽는 스캔만 등록하고(머지·해시 조인 입력, 조인 아래 정렬, SORT-LIMIT 은 리스트 파일로 가므로 제외), GROUP BY·집계가 있으면 하지 않는다(:20354-20357 — 함수를 원 인자에서 계산).</li>
+<li><strong>키에 남은 결과를 쓰는 관문</strong> (.52, <code>21b58704d</code> 정적): <code>qo_is_func_index_routable ()</code>(query_graph.c:7681 — SELECT 만, 힙 재평가 스캔·click counter·CONNECT BY 는 아님)와 <code>qo_is_func_index_key_result_exact ()</code>(:7709 — 세션 의존 식이 아니고, 결과 도메인이 커버링을 지원하며(<code>TP_TYPE_NOT_SUPPORT_COVERING</code>) 콜레이션이 <code>allow_index_opt</code> 이고, FLOAT·DOUBLE·MONETARY 면 -0 을 낼 수 있는 식이 아닐 것)를 둘 다 통과해야 키 필터를 키에서 읽는다(<code>qo_is_func_index_key_filter_routable ()</code> :7747). 같다고 비교되는 키는 한 행의 값만 남기기 때문이다(src-object §2 「mr_index_cmpdisk_datetimetz」).</li>
+<li><strong>리스트 파일을 거치는 스캔은 키에 없는 인자를 커버하면 XASL 생성 뒤 커버링을 끈다</strong> (.52, <code>21b58704d</code> 정적): <code>pt_uncover_func_index_scans ()</code>(xasl_generation.c:10024). 비용은 <code>qo_plan_uncover_cost ()</code>(query_planner.c:3451, <code>qo_is_func_index_cover_routed ()</code> :3396)가 같은 자리에 힙 읽기를 매긴다 — 주석이 "the two must change together" 라 한다. 리뷰 헤드(<code>05b46aefe</code>)에 대해 적었던 "비용은 커버링 기준으로 이미 매겨진 뒤" 는 머지본에서 맞지 않다.</li>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>함수 인덱스 커버링을 넓히는 변경은 <code>pt_collect_func_index_cover ()</code>·<code>pt_uncover_func_index_scans ()</code>·<code>qo_plan_uncover_cost ()</code> 셋이 같은 플랜 자리를 보는지 본다. — 정소희(.52) 2026-11-10 (원 리뷰 정소희(.51) 2026-11-05)</li>
 </ul>
 <h4>비용 모델 실측 캘리브레이션과 세 가지 함정 (.51, 기준 PR#7622 <code>0721d8da0</code>, 2026-09-02 release 실측)</h4>
 <ul>
@@ -568,6 +576,9 @@
 <ul>
 <li>PR#7622(CBRD-27094, 비용 모델 — 반복 프로브 ML 보정·하강 CPU·비상관 힙 페치·리프 포화): 리뷰 완결(unresolved 0)·APPROVED·develop 머지(faf5a3b2a). 남은 것 = TC PR(tc/pr-7622) 정리 → Merge Gate 해제 → 머지. [기준: CBRD-27094 브랜치, 2026-08-26]</li>
 <li>CBRD-27283(correlation/클러스터링 통계 — clustered↔uncorrelated 비용 보간): 착수 가능 상태. 검증 대상 = PR#7622 잔여 회귀 4건(9c/5c/13c/7a). 설계 참고 = 이 모듈 §2·§3의 .50 축적분. [보드 #75]</li>
+<li><strong>다음 버전 예정 — CBRD-27127 / PR#8392(draft, 다음 버전으로 보류)</strong>: <code>QO_TERM.eval_cost</code> + <code>qo_expr_eval_cost</code>, 공용 <code>qo_compare_pred_eval_order</code>, <code>qo_scan_filter_cpu</code>(Σ c_i × Π s_j), 파라미터 <code>cost_cpu_operator</code>·<code>cost_filter_*</code> 6개. JOB 113 A/B +11.1%(19d·9d·15c·15d·13b 회귀 — §3 의 FK 조인 과소추정이 NL 로 넘김) (.52, develop <code>ef2c78cda</code> 기준, 2026-11-03). 머지되면 develop 에서 다시 확인해 §2 로. — 정소희(.52) 2026-11-10</li>
+<li><strong>다음 버전 예정 — CBRD-27146 / PR#8390·CBRD-27659 / PR#8192(둘 다 draft)</strong>: 다음 버전으로 보류(11-10) — 작업 워크트리·빌드는 지우고 브랜치만 남겼다. — 정소희(.52) 2026-11-10</li>
+<li><strong>리뷰 중 — CBRD-27855 / PR#8375(shparkcubrid, OPEN)</strong>: 리뷰 헤드 <code>8831911fb</code>(base <code>99fa309ca</code>, .52 debug SA 동적 2026-11-06)에서 develop 과 다른 동작 다섯 — 외부 조인 뒤 INNER JOIN ON 의 OR-of-AND 가 분배 후 100절 초과(COMPACT)에서도 추출돼 1행(develop 0행 — PR 회귀, g12-04) · <code>eval_pred ()</code> 의 오른쪽 선형 전제에 걸려 왼쪽 깊은 PT_OR 가 "maximum allowed nesting level(400)" 로 거절(develop 2행) · <code>pt_split_join_preds ()</code> 의 CNF 가정으로 START WITH … CONNECT BY 가 abort(release 미확인) · (+) 표기 <code>i.y(+) = 10</code> 이 PT_OR 아래 남아 1행(develop 2행) · UPDATE·DELETE·MERGE 부질의의 두 번 재작성에서 파생 절 두 벌(sel 250.375)·DELETE 가 남길 행을 지움(자동 파라미터화 끔 문맥). 지금 헤드 <code>0fd960a5d</code> 에서는 미확인. 상세·재현 claude-workspace <code>projects/CBRD-27855/리뷰보고서-PR8375.md</code>·<code>repro/</code>. 머지되거나 닫히면 정리. — 정소희(.52) 2026-11-10</li>
 </ul>
 </main></div></div>
 <script>

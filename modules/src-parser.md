@@ -144,7 +144,7 @@ SQL 텍스트 → `csql_lexer.l` → `csql_grammar.y`(646KB bison) → PT_NODE �
 - **[미수정 — develop 선재(CBRD-25984 PR#6466 리뷰에서 발견)] MRO + WHERE 에만 있는 함수식 + 비커버링이면 XASL 생성이 assert 한다** (.51, 4e389935d, 2026-11-04):
   - `pt_ordbynum_to_key_limit_multiple_ranges ()`(xasl_generation.c:29248)의 `assert (0)`(29318)에서 debug 가 플랜 출력 전에 abort 한다.
   - 실측(debug SA): `(i, j, sqrt(d), k)` 에 `select j, k from t where i in (1, 2) and sqrt(d) > 0 using index idx(+) order by j limit 5`. develop 은 힌트가 없어도, PR#6466 `d7ce3af72` 는 `NO_COVERING_IDX` 일 때 abort 한다. release 동작은 보지 않았다.
-  - **미수정** — 재현 claude-workspace `projects/CBRD-25984/repro/MRO-c` ④. — 정소희(.52) 2026-11-09
+  - **미수정**(develop 선재) — PR#6466 머지본 `21b58704d`(2026-11-10)에서의 동작은 미확인(리뷰 헤드 `d7ce3af72` 는 `NO_COVERING_IDX` 일 때만 abort). 재현 claude-workspace `projects/CBRD-25984/repro/MRO-c` ④. — 정소희(.52) 2026-11-09, 머지 반영 2026-11-10
 - **[계약 — develop 은 지킴] `pt_split_join_preds ()` 는 WHERE 목록이 완전한 CNF 라고 가정한다** (.52, develop `99fa309ca` 정적 + PR#8375 head `8831911fb` 동적, 2026-11-06):
   - parser_support.c:2918-2920 의 assert("It is either fully CNF or not at all"). `next` 를 가진 PT_OR 원소(통째로 둔 OR-of-AND 뒤에 다른 conjunct)가 계층 질의 경로로 들어오면 debug 가 abort 한다.
   - develop 은 분배하므로 그런 원소가 없다. OR-of-AND 를 CNF 에서 통째로 두는 변경(CBRD-27855 PR#8375 리뷰)이 이 가정에 걸린다. — 정소희(.52) 2026-11-09
