@@ -152,11 +152,11 @@ SQL 텍스트 → `csql_lexer.l` → `csql_grammar.y`(646KB bison) → PT_NODE �
   - OR-of-AND 안의 `i.y(+) = 10` 이 통째 PT_OR 아래에 있으면 ON 으로 옮겨지지 않고 WHERE 에 남아 NULL 확장행이 빠진다. develop 은 분배된 절마다 표시가 있어 2행(정답) — CBRD-27855 PR#8375 리뷰, 재현 claude-workspace `projects/CBRD-27855/repro/g4` 2번. — 정소희(.52) 2026-11-09
 - **[미수정 — develop 선재(CBRD-27855 PR#8375 리뷰 G4-06)] 한 열 OR-of-AND 는 비결정 함수가 있어도 분배된다** (.52, 정적, develop `99fa309ca` 동일 — 리뷰 G4-06, 2026-11-06):
   - DRAND·NEXT_VALUE·세션 변수·메서드 호출이 든 인자도 분배되어 복제 평가된다. 동적으로 확인하지 않았다. **미수정**. — 정소희(.52) 2026-11-09
-- **[미수정 — CBRD-27957, 수정 PR#8429 `6a9ed94cc` 미머지] 항상 거짓인 부질의 위 EXISTS 가 NULL 형으로 접힌다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`):
+- **[해소됨 — CBRD-27957, PR#8429 develop `867265344` 2026-11-10] 항상 거짓인 부질의 위 EXISTS 가 NULL 형으로 접힌다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`):
   - **`pt_eval_expr_type ()` 의 PT_EXISTS(type_checking.c:10560)는 피연산자 타입이 NULL·NA 면 식 타입을 NULL 로 둔다**: `pt_to_false_subquery ()` 가 거짓 WHERE 부질의를 `is_false_where` NULL 값으로 바꾼 뒤라 EXISTS 가 NULL 형이 된다.
   - **`pt_fold_const_expr ()` 끝(type_checking.c:~19460)은 접은 값이 NULL·NA 가 아니면 형을 식 형으로 덮는다** → 정수 0 이 NULL 형이 되어 `null` 로 출력되고, sql hash text 가 진짜 NULL 식(`c0 <= NULL`)과 같아져 XASL 캐시를 공유한다.
   - **`pt_fold_union ()` 의 FOLD_AS_NULL 값에는 `is_false_where` 가 없다** → EXISTS 가 참으로 계산(`pt_evaluate_db_value_expr ()` PT_EXISTS 는 is_false_where 일 때만 거짓), NOT IN 은 NULL(PT_IS_NOT_IN 은 is_false_where 일 때만 참). 실측: 두 갈래가 모두 거짓인 UNION ALL 위 `WHERE NOT EXISTS`·`NOT IN` 이 3행 대신 0행.
-  - 수정 PR#8429 `6a9ed94cc`(미머지): EXISTS 형 LOGICAL(피연산자가 is_false_where 일 때), NULL 로 접힌 집합 연산에 is_false_where. — 정소희(.52) 2026-11-09
+  - **수정됨 — PR#8429(머지됨 `867265344`)**: EXISTS 형 LOGICAL(피연산자가 is_false_where 일 때), NULL 로 접힌 집합 연산에 is_false_where. — 정소희(.52) 2026-11-09, 머지 표기 11-10
 - **[미수정 — CBRD-27961, 수정 PR#8428 `35b022896` 미머지] 집합 연산 접기가 문장 텍스트를 옮기지 않아 바인드 재컴파일이 실패한다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`):
   - **문장 텍스트 길이는 맨 위 노드에만 있다**: `parser_new_node ()`(parse_tree_cl.c:2501)는 모든 노드에 `g_query_string` 과 그때의 `g_query_string_len`(직전 문장 길이)을 넣고, 문장 끝 액션(csql_grammar.y:1921)이 맨 위 노드에만 진짜 길이를 넣는다. `parser_reinit_node ()` 는 텍스트를 지킨다.
   - **`pt_fold_union ()`(semantic_check.c:19106)은 접은 노드에 줄·칸·alias_print·next 만 옮겼다** → 문장이던 UNION 을 남은 갈래로 바꾸면 길이 0 인 문장이 된다. 그 결과(-452)는 src-compat §2 「db_recompile_for_bind_signature」.
