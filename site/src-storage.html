@@ -19,9 +19,9 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html" class="cur"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
+<li><a href="src-storage.html" class="cur"><span>src/storage</span><span class="bd"><span class="cnt">39</span><span class="iss">⚠42</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠35</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠44</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠41</span></span></a></li>
 <li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
@@ -364,6 +364,13 @@ pgbuf_timed_sleep → pgbuf_block_bcb (:7054) → pgbuf_latch_bcb_upon_fix (:649
 <ul>
 <li>현행 <code>src/storage/bestspace.{cpp,hpp}</code> 의 구조(shard·L1/L2/L3 탐색·registry·온디스크·30초 sync·재시작 rebuild·파라미터·복구)는 <code>imports/vimkim/storage/CBRD-26176-bestspace-02-tobe-architecture.md</code>, 그 이전 <code>heap_Bestspace</code>(HEAP_HDR_STATS 온디스크 + 인메모리 캐시, 고동시성 INSERT 병목 원인)는 <code>-01-asis-legacy.md</code>, gdb/printf 실측 콜플로우와 <strong>실측으로 드러난 미해결 이슈(§10)</strong> 는 <code>-03-callflows.md</code>. bestspace 관련 리뷰·이슈는 여기부터. — vimkim(원문 imports/vimkim/storage/) 2026-09-30</li>
 <li><code>bestspace::shard::L1_fix()</code> 는 <code>LK_FORCE_ZERO_WAIT</code> 뒤 <code>pgbuf_ordered_fix()</code> 를 부르고 busy 면 <code>status::CONTENDED</code> 로 건너뛴다 — <strong>busy 를 정상 결과로 쓰는 호출자</strong>의 대표 (위 "스레드 스코프 wait override" 항목과 같은 축). 반대로 <code>file_temp_alloc</code>·<code>disk_reserve_sectors</code>·<code>disk_volume_expand</code>·복구 경로 6곳은 UNCONDITIONAL fix 실패를 <code>assert_release</code> 로 취급한다 — 호출부 표는 <code>imports/vimkim/storage/survey-unconditional-page-latch-assumptions_d9ceb53.md</code>. — vimkim(원문 imports/vimkim/storage/survey-unconditional-page-latch-assumptions_d9ceb53.md) 2026-09-30</li>
+</ul>
+<h4>cubstorage::bestspace::find — 들어올 때 오류 등급 오류가 있으면 그 오류로 바로 돌아간다 (bestspace.cpp:1533)</h4>
+<ul>
+<li><strong>같은 요청에서 앞서 남은 오류가 있으면, 힙에 행을 넣는 문장이 그 오류로 실패한다</strong> (.51, develop <code>a7f220d5d</code> gdb, 2026-11-12 — CBRD-28049): bestspace.cpp:1533 "early return or clear stale error". 경로는 <code>heap_find_bestpage ()</code> ← <code>heap_get_insert_location_with_lock ()</code> ← <code>heap_insert_logical ()</code>. CBRD-28049 의 release 증상: <code>INSERT … SELECT … WHERE EXISTS (…)</code> 가 앞 단계(page batch fallback)가 남긴 -427 로 실패(SA·CS), <code>CREATE TABLE … AS SELECT</code> 는 SA 에서만 실패(CS 는 성공 — 요청이 나뉘는 것으로 보임, 미확인), 같은 꼴의 UPDATE 는 성공.</li>
+<ul>
+<li class="ck"><span class="cklab">리뷰 체크포인트</span>오류를 남긴 채 성공하는 실행 단계는 debug assert 만이 아니라 뒤따르는 힙 삽입의 실패로도 드러난다 — 남은 오류의 영향을 볼 때 INSERT…SELECT 를 넣는다(src-query §3 CBRD-28049). — 정소희(.51) 2026-11-12</li>
+</ul>
 </ul>
 <h4>볼륨 온디스크 포맷 · backupdb — 조사 문서 포인터</h4>
 <ul>

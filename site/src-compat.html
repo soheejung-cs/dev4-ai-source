@@ -19,9 +19,9 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">39</span><span class="iss">⚠42</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠35</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠44</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠41</span></span></a></li>
 <li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
@@ -129,7 +129,7 @@
 <li><strong><code>db_recompile_for_bind_signature ()</code>(db_vdb.c:3069)는 텍스트가 없으면 ER_QPROC_INVALID_XASLNODE(-452)</strong> (.51, develop <code>953e83256</code>, 2026-11-06 — 동적 확인 <code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>): CBRD-27583 이후 CAS 는 바인드 타입 서명마다 문장 텍스트로 다시 컴파일한다. csql PREPARE/EXECUTE 는 이 경로가 아니다.</li>
 <ul>
 <li>실측(CTP JDBC 바인드): develop release 에서 접히는 갈래·남는 갈래 모두 -452. ORDER BY·LIMIT 으로 파생 테이블이 되는 꼴은 develop 도 정상. 두 갈래 모두 거짓(NULL 로 접힘)은 수정 전후 같은 오류(-21109).</li>
-<li>텍스트를 잃는 원인(집합 연산 접기)과 수정 PR#8428(미머지)은 src-parser §3(CBRD-27961). — 정소희(.52) 2026-11-09</li>
+<li>텍스트를 잃는 원인(집합 연산 접기)과 수정 PR#8428(머지 <code>6a54287e7</code>, 2026-11-12)은 src-parser §3(CBRD-27961). — 정소희(.52) 2026-11-09</li>
 </ul>
 </ul>
 <h3>3. 예비 이슈 사항</h3>

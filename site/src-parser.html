@@ -19,9 +19,9 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠42</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">39</span><span class="iss">⚠42</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠35</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠44</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠41</span></span></a></li>
 <li><a href="src-parser.html" class="cur"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
@@ -159,11 +159,11 @@
 <li><strong><code>pt_fold_union ()</code> 의 FOLD_AS_NULL 값에는 <code>is_false_where</code> 가 없다</strong> → EXISTS 가 참으로 계산(<code>pt_evaluate_db_value_expr ()</code> PT_EXISTS 는 is_false_where 일 때만 거짓), NOT IN 은 NULL(PT_IS_NOT_IN 은 is_false_where 일 때만 참). 실측: 두 갈래가 모두 거짓인 UNION ALL 위 <code>WHERE NOT EXISTS</code>·<code>NOT IN</code> 이 3행 대신 0행.</li>
 <li><strong>수정됨 — PR#8429(머지됨 <code>867265344</code>)</strong>: EXISTS 형 LOGICAL(피연산자가 is_false_where 일 때), NULL 로 접힌 집합 연산에 is_false_where. — 정소희(.52) 2026-11-09, 머지 표기 11-10</li>
 </ul>
-<li><strong>[미수정 — CBRD-27961, 수정 PR#8428 <code>35b022896</code> 미머지] 집합 연산 접기가 문장 텍스트를 옮기지 않아 바인드 재컴파일이 실패한다</strong> (.51, develop <code>953e83256</code>, 2026-11-06 — 동적 확인 <code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>):</li>
+<li><strong>[해소됨 — CBRD-27961, PR#8428 머지 <code>6a54287e7</code>(2026-11-12)] 집합 연산 접기가 문장 텍스트를 옮기지 않아 바인드 재컴파일이 실패한다</strong> (.51, develop <code>953e83256</code>, 2026-11-06 — 동적 확인 <code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>):</li>
 <ul>
 <li><strong>문장 텍스트 길이는 맨 위 노드에만 있다</strong>: <code>parser_new_node ()</code>(parse_tree_cl.c:2501)는 모든 노드에 <code>g_query_string</code> 과 그때의 <code>g_query_string_len</code>(직전 문장 길이)을 넣고, 문장 끝 액션(csql_grammar.y:1921)이 맨 위 노드에만 진짜 길이를 넣는다. <code>parser_reinit_node ()</code> 는 텍스트를 지킨다.</li>
 <li><strong><code>pt_fold_union ()</code>(semantic_check.c:19106)은 접은 노드에 줄·칸·alias_print·next 만 옮겼다</strong> → 문장이던 UNION 을 남은 갈래로 바꾸면 길이 0 인 문장이 된다. 그 결과(-452)는 src-compat §2 「db_recompile_for_bind_signature」.</li>
-<li>수정 PR#8428 <code>35b022896</code>(미머지): 접은 노드에 sql_user_text·len 도 옮김. — 정소희(.52) 2026-11-09</li>
+<li>수정 PR#8428 <code>35b022896</code>(머지 <code>6a54287e7</code>, 2026-11-12): 접은 노드에 sql_user_text·len 도 옮김. — 정소희(.52) 2026-11-09</li>
 </ul>
 <li><strong>[미수정 — CBRD-27962, 수정 PR#8435 <code>73ae5c347</code>·<code>cfdef8ea8</code> 미머지] <code>COALESCE (정수, NULL)</code> 은 VARCHAR, <code>COALESCE (NULL, 정수)</code> 는 INTEGER</strong> (.51, develop <code>953e83256</code>, 2026-11-06 — 동적 확인 <code>MALLOC_CHECK_=3 MALLOC_PERTURB_=165</code>): 오버로드 <code>(number, ANY) → VARCHAR</code> 에서 ANY 가 NULL 과도 '같은 형'(<code>pt_are_equivalent_types ()</code> func_type.cpp:1344)이라 <code>(number, number)</code> 보다 많이 맞는다. NVL·IFNULL 도 같다. 파생 테이블 열 형은 접기 전에 정해지므로(§2 「pt_bind_names / pt_get_attr_list_of_derived_table」) 접기가 바꾼 항목 형과 어긋난다.</li>
 <ul>

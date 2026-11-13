@@ -157,10 +157,10 @@ SQL 텍스트 → `csql_lexer.l` → `csql_grammar.y`(646KB bison) → PT_NODE �
   - **`pt_fold_const_expr ()` 끝(type_checking.c:~19460)은 접은 값이 NULL·NA 가 아니면 형을 식 형으로 덮는다** → 정수 0 이 NULL 형이 되어 `null` 로 출력되고, sql hash text 가 진짜 NULL 식(`c0 <= NULL`)과 같아져 XASL 캐시를 공유한다.
   - **`pt_fold_union ()` 의 FOLD_AS_NULL 값에는 `is_false_where` 가 없다** → EXISTS 가 참으로 계산(`pt_evaluate_db_value_expr ()` PT_EXISTS 는 is_false_where 일 때만 거짓), NOT IN 은 NULL(PT_IS_NOT_IN 은 is_false_where 일 때만 참). 실측: 두 갈래가 모두 거짓인 UNION ALL 위 `WHERE NOT EXISTS`·`NOT IN` 이 3행 대신 0행.
   - **수정됨 — PR#8429(머지됨 `867265344`)**: EXISTS 형 LOGICAL(피연산자가 is_false_where 일 때), NULL 로 접힌 집합 연산에 is_false_where. — 정소희(.52) 2026-11-09, 머지 표기 11-10
-- **[미수정 — CBRD-27961, 수정 PR#8428 `35b022896` 미머지] 집합 연산 접기가 문장 텍스트를 옮기지 않아 바인드 재컴파일이 실패한다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`):
+- **[해소됨 — CBRD-27961, PR#8428 머지 `6a54287e7`(2026-11-12)] 집합 연산 접기가 문장 텍스트를 옮기지 않아 바인드 재컴파일이 실패한다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`):
   - **문장 텍스트 길이는 맨 위 노드에만 있다**: `parser_new_node ()`(parse_tree_cl.c:2501)는 모든 노드에 `g_query_string` 과 그때의 `g_query_string_len`(직전 문장 길이)을 넣고, 문장 끝 액션(csql_grammar.y:1921)이 맨 위 노드에만 진짜 길이를 넣는다. `parser_reinit_node ()` 는 텍스트를 지킨다.
   - **`pt_fold_union ()`(semantic_check.c:19106)은 접은 노드에 줄·칸·alias_print·next 만 옮겼다** → 문장이던 UNION 을 남은 갈래로 바꾸면 길이 0 인 문장이 된다. 그 결과(-452)는 src-compat §2 「db_recompile_for_bind_signature」.
-  - 수정 PR#8428 `35b022896`(미머지): 접은 노드에 sql_user_text·len 도 옮김. — 정소희(.52) 2026-11-09
+  - 수정 PR#8428 `35b022896`(머지 `6a54287e7`, 2026-11-12): 접은 노드에 sql_user_text·len 도 옮김. — 정소희(.52) 2026-11-09
 - **[미수정 — CBRD-27962, 수정 PR#8435 `73ae5c347`·`cfdef8ea8` 미머지] `COALESCE (정수, NULL)` 은 VARCHAR, `COALESCE (NULL, 정수)` 는 INTEGER** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`): 오버로드 `(number, ANY) → VARCHAR` 에서 ANY 가 NULL 과도 '같은 형'(`pt_are_equivalent_types ()` func_type.cpp:1344)이라 `(number, number)` 보다 많이 맞는다. NVL·IFNULL 도 같다. 파생 테이블 열 형은 접기 전에 정해지므로(§2 「pt_bind_names / pt_get_attr_list_of_derived_table」) 접기가 바꾼 항목 형과 어긋난다.
   - 실측(JDBC): develop 의 파생 열이 825373492(문자열 '1234' 바이트), `a + 1` 1100836660, UNION ALL 파생은 형 통합이 DOUBLE 이 되어 1072693248·8.
   - 수정 PR#8435 `73ae5c347`·`cfdef8ea8`(미머지): 바깥 SELECT 형 검사 끝에서 형 열거값이 바뀐 파생 열 항목에 열 형 CAST(항목과 열은 숨은 항목 포함 위치로 짝 — §2). 오버로드 규칙은 그대로(바꾸면 비파생 SELECT·CTAS 형까지 바뀜). — 정소희(.52) 2026-11-09

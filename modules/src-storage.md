@@ -579,6 +579,11 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
   (위 "스레드 스코프 wait override" 항목과 같은 축). 반대로 `file_temp_alloc`·`disk_reserve_sectors`·`disk_volume_expand`·복구 경로 6곳은 UNCONDITIONAL fix 실패를 `assert_release` 로 취급한다 —
   호출부 표는 `imports/vimkim/storage/survey-unconditional-page-latch-assumptions_d9ceb53.md`. — vimkim(원문 imports/vimkim/storage/survey-unconditional-page-latch-assumptions_d9ceb53.md) 2026-09-30
 
+### cubstorage::bestspace::find — 들어올 때 오류 등급 오류가 있으면 그 오류로 바로 돌아간다 (bestspace.cpp:1533)
+
+- **같은 요청에서 앞서 남은 오류가 있으면, 힙에 행을 넣는 문장이 그 오류로 실패한다** (.51, develop `a7f220d5d` gdb, 2026-11-12 — CBRD-28049): bestspace.cpp:1533 "early return or clear stale error". 경로는 `heap_find_bestpage ()` ← `heap_get_insert_location_with_lock ()` ← `heap_insert_logical ()`. CBRD-28049 의 release 증상: `INSERT … SELECT … WHERE EXISTS (…)` 가 앞 단계(page batch fallback)가 남긴 -427 로 실패(SA·CS), `CREATE TABLE … AS SELECT` 는 SA 에서만 실패(CS 는 성공 — 요청이 나뉘는 것으로 보임, 미확인), 같은 꼴의 UPDATE 는 성공.
+  - ✅ **리뷰 체크포인트**: 오류를 남긴 채 성공하는 실행 단계는 debug assert 만이 아니라 뒤따르는 힙 삽입의 실패로도 드러난다 — 남은 오류의 영향을 볼 때 INSERT…SELECT 를 넣는다(src-query §3 CBRD-28049). — 정소희(.51) 2026-11-12
+
 ### 볼륨 온디스크 포맷 · backupdb — 조사 문서 포인터
 
 - 데이터 볼륨은 고정 크기 물리 페이지 배열(`byte_offset = N * volume_io_page_size`), 볼륨 헤더·섹터 테이블·file 소유 재구성·TDE 가시 범위·LSA 워터마크(체크섬 아님)를

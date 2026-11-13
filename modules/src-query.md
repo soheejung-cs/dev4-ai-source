@@ -135,6 +135,7 @@
   buckets)") · query_hash_scan.c:297(`qdata_hash_scan_key`) · partition.c:1254·:1305는 실제 버킷
   수. (원 메모의 subquery_cache.c:227 · query_aggregate.cpp:2306은 행 번호 확인 필요 — 현재
   소스와 불일치)
+- **출력을 바꾸면 기존 HASH 파티션 테이블의 행 배치가 바뀐다** (.51, develop `569f3cad6`, 2026-11-12 — CBRD-27798): partition.c 가 이 함수로 HASH 파티션 번호를 정한다(위 호출부 :1254·:1305, `mht_get_hash_number (hash_size, key)`). 이 함수나 그 정규화(`float_numeric_normalize_for_hash ()`)의 출력을 바꾸면 이미 저장된 행이 다른 파티션을 가리키게 된다. ✅ 리뷰: 해시 결함은 이 함수 밖(해시를 쓰는 자리)에서 고친다 — PR#8414 가 공용 정규화를 두고 해시 리스트 스캔·해시 조인 쪽에서 고친 이유. — 정소희(.51) 2026-11-12
 
 ### resolve_domains_on_list_scan (scan_manager.c:8216)
 
@@ -383,6 +384,12 @@ CCI 인터페이스는 JSON trace 를 쓰므로 `.answer_cci` 에는 EXPR_COMPIL
   42자리 리터럴 두 개의 뺄셈 → (1, p1, s−2), float NUMERIC 열 캐스트가 유지. 같은 값에 `(1,p1,s−2)`·`(100,p3,s0)` 두 표현이 공존하므로
   해시·같음 키는 `float_numeric_normalize_for_hash ()`(:4117)의 정규화 이미지로 만들어야 한다 — 그 함수는 음수 scale 을 계수에
   10^MIN(−s, 40−p) 를 곱해 없앤다(:4175-4190, 남는 scale = s + MIN(−s, 40−p)). — 정소희(.50) 2026-10-28
+
+### float_numeric_db_value_div — 나눌 수 0 을 검사하지 않는다 (numeric_opfunc.c:3940)
+
+- **피제수 0 만 보고, 나눌 수 0 은 호출자가 막는다고 가정한다** (.51, develop `e30370dc0`, 2026-11-10 — 0 나눗셈 스윕): 주석 "already handled in parsing". 호출자 6곳 중 파서 상수 접기·`qdata_number_numeric` 2곳·expr_compile NUMERIC 나눗셈 커널·WIDTH_BUCKET 첫 나눗셈(버킷 수 ≥ 1)이 막고, WIDTH_BUCKET 두 번째 나눗셈만 막지 않는다(§3 CBRD-28024). 0 이 들어오면 `float_numeric_div_fast ()`(:2037)의 128비트 나눗셈이 SIGFPE 다. ✅ 리뷰: 새 호출자는 나눌 수 0 을 먼저 막는다. — 정소희(.51) 2026-11-10
+- **WIDTH_BUCKET 은 인자가 모두 상수여도 서버가 계산한다** (.51, CBRD-28020 브랜치 `fc05df9ff`, CS core 로 확인): 표 없는 `SELECT WIDTH_BUCKET (…)` 의 core 스택이 `fetch_op_width_bucket ()` ← `expr_k_generic ()` — 파서 상수 접기로 클라이언트에서 끝나지 않는다. — 정소희(.51) 2026-11-10
+- **정수 나눗셈의 0·MIN/−1 은 §3 의 자리 말고는 막혀 있다** (.51, `e30370dc0`, 스윕): src/query·base·parser·optimizer·storage·transaction 의 정수 나눗셈·나머지 약 1,400 토큰 중 나눌 수가 변수인 약 230곳을 읽었다 — 0 검사·상수·구조상 0 불가. MIN/−1 은 MOD·`/`·DIV·컴파일된 식·집계식 융합·파서 상수 접기 모두 검사한다(CBRD-27229·27255). 시리얼 증분 0 은 카탈로그가 갱신 불가라 닿지 않는다(`db_serial` 은 갱신 불가 뷰, `_db_serial` 은 DBA 도 UPDATE 권한 없음). FP 예외를 켜는 코드가 없어 실수 0 나눗셈은 트랩이 아니다. 요약·재현 claude-workspace `projects/CBRD-28024/스윕/`. — 정소희(.51) 2026-11-10
 
 ### do_update_stats / update_or_drop_histogram_helper (execute_statement.c:4815 / execute_schema.c:4399)
 
@@ -793,13 +800,16 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 - ✅ **리뷰 체크포인트**: 공유 셀의 유효성은 "통과 행은 AND/NOT 경로 리프를 전부 평가했다"에만 기댄다 — 필터를 우회해 행이 소비자에
   도달하는 경로(예: where_pred가 key filter로 옮겨진 커버링 인덱스)가 생기면 `qexec_set_expr_share_spec` 조건을 다시 봐야 한다.
   검증: 이전 head와 54문장 결과·에러 위치 동일, TPC-H q1/q6/q14/q19 동일(상수는 자동 파라미터화돼 필터 프로그램은 비어 있음).
-- **공유 적중은 칸 하나와 `n_shared` 하나를 짝으로 만들고, 되감기는 그 짝을 모른다** (.51, develop `37182deba`, 2026-11-10 — CBRD-27994):
+- **공유 적중은 칸 하나와 `n_shared` 하나를 짝으로 만든다 — `37182deba` 까지 되감기는 그 짝을 몰랐고, PR#8469(develop `52adc0eca`, 2026-11-12)부터 함께 되돌린다** (.51, develop `37182deba`, 2026-11-10 — CBRD-27994):
   - `expr_compile_node_arith ()`(expr_compile.c:5325-5339)가 필터 등록부에서 같은 식을 찾으면 `expr_new_cell (…, EXPR_CSRC_SHARE, …)` 로 필터 결과 슬롯에 이은 칸 1개를 만들고 `cell_shared[cell] = true`·`bctx->n_shared++` 한다. `EXPR_CSRC_SHARE` 칸을 만드는 자리는 여기 하나다(grep). `expr_prog_finish ()`(:6482)가 `prog->n_shared = bctx->n_shared` 로 옮긴다(:6495).
   - `expr_build_mark ()`·`expr_build_rewind ()`(:2043-2083)는 steps·cells·cse·slots·guards·node_cells·cur_guard·in_branch 만 기록·복원한다. `n_cells` 가 줄어드는 자리는 되감기 하나이고, 호출자는 루트 거절(`expr_prog_compile_roots_impl ()` :6679)·하위 트리(`expr_compile_node ()` :4751)·필터 쪽(`expr_scan_side_compile ()` :2830 — 공유 칸이 생기지 않음) 셋.
   - 그래서 공유 적중 뒤 그 식이 거절되면 `n_shared` 가 남고(칸 수보다 클 수 있다), 같은 번호로 다시 만든 칸이 낡은 `cell_shared` 표시를 물려받는다 — `only_compute_roots` 가 fetch·VALUE 만 하는 루트를 계산으로 본다(:6660).
   - 이미지 리더 `expr_image_get_prog ()`(:8642)는 `n_shared` 를 `[0, n_cells]` 로 읽어(:8665) 어긋남을 거절한다. 투영 목록 이미지(`expr_valptr_prog_image_at_generation ()`)와 집계 피연산자 이미지(`expr_agg_prog_image_at_generation ()`)가 같은 빌드 코드를 쓰므로 둘 다 해당 — debug 는 서버 대조 assert(`expr_valptr_prog_settle ()` :9156, `expr_agg_prog_settle ()`), release 는 그 목록을 해석 실행으로 둔다(결과는 같다).
   - 식 컴파일 절은 csql `;plan detail` 세션의 CS 트레이스에만 찍힌다(`qdump_print_expr_compile_text ()` — `trace_plan_detail`), SA 의 SHOW TRACE 는 NULL.
-  - ✅ **리뷰 체크포인트**: 빌드 문맥(`EXPR_BUILD_CTX`)에 카운터·표시를 더하는 변경은 `expr_build_mark ()`/`expr_build_rewind ()` 가 그것도 되감는지 본다 — 결함은 §3(CBRD-27994). — 정소희(.52) 2026-11-10
+  - ✅ **리뷰 체크포인트**: 빌드 문맥(`EXPR_BUILD_CTX`)에 카운터·표시를 더하는 변경은 `expr_build_mark ()`/`expr_build_rewind ()` 가 그것도 되감는지 본다 — 결함은 §3(CBRD-27994, 해소됨). — 정소희(.52) 2026-11-10
+- **필터의 공유 목록(`EXPR_PRED.share[]`)은 공유 가능한 노드마다 한 줄이라, 줄 수가 프로그램 칸 수를 넘을 수 있다** (.51, develop `a7f220d5d` debug SA gdb, 2026-11-12 — CBRD-28049):
+  - `expr_scan_pred_share_build ()` 는 `node_cells[]` 의 shareable·슬롯 소유 노드를 모두 등록한다. CSE 가 같은 식의 두 노드에 한 칸을 주면(`CASE x WHEN x` 의 x — `expr_cse_find ()`, 교환 짝 `a+b`/`b+a` — `expr_cse_find_commuted ()`) 두 줄이 같은 칸·슬롯을 가리킨다. 예: x = `CAST(CAST(t0.c0 AS BIGINT) AS DOUBLE)` 이면 node_cells 5(칸 1,2,1,2,3), 프로그램 칸 4.
+  - ✅ **리뷰 체크포인트**: 이미지 리더의 공유 목록 상한은 칸 수가 아니라 쓰는 쪽 `node_cells[]` 크기(`EXPR_MAX_STEPS`)다 — 칸 수로 읽던 결함은 §3(CBRD-28049). — 정소희(.51) 2026-11-12
 
 ### 조건부 평가 — 지연 영역에서 점프 스텝으로 (.52, 2026-09-08, `afeda4806`; 09-03 절의 "지연 영역" 서술을 대체)
 
@@ -868,6 +878,14 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 
 - **배치 NUMERIC 산술은 표현 변환과 행마다 호출이 비용이다** — Q1(직렬 18.4초): 벡터는 부호 있는 `__int128`, `numeric_agg_expr_add/mul ()` 은 부호·크기 구조체라 행마다 `eb_num_get ()`·`eb_num_put ()` 변환(`expr_batch_run` 21.4% 안의 최대 줄 `out->coefficient = (uint128_t) ((c < 0) ? -c : c)` 20.9%) + out-of-line 호출 `numeric_agg_expr_add` 9.7%·`mul` 2.5%. 같은 질의 GROUP BY 키 경로 합 약 14%(`qexec_batch_gby_consume_chunk` 7.9%·`expr_batch_key_bytes` 3.6%·`qexec_batch_gby_flush` 2.7%), NUMERIC 디코드 `eb_extract` 13.6%. — 정소희(.50) 2026-11-03
 - **배치 비교 리프의 NUMERIC 경로는 스택 구조체 왕복에서 멈춘다** — F01 의 `eb_raw_kid ()` 29.3% 중 15.9% 가 `eb_cell_num ()` 이 `NUMERIC_AGG_EXPR_VAL` 에 쓴 직후 `an = nv.is_negative ? … : nv.coefficient` 의 16바이트 load(`movdqa -0x50(%rbp)`)에 몰린다(store-to-load forwarding 실패로 보임), `batch->sel[n++] = r` 의 `batch->sel` 재로드 7.7%. 레코드 바이트 load(NUMERIC 첫 바이트·오프셋 테이블) 약 10%p. — 정소희(.50) 2026-11-03
+
+### 해시 조인 런타임 필터·해시 선계산과 병렬 부질의 실행기 — `!xasl->px_executor` (query_executor.c:22289, parallel/px_query_execute/px_query_executor.cpp:343)
+
+- **런타임 필터(`hjoin_rtf_*`, PR#8196 `309265e6d`)·해시 선계산·빈 입력 지름길은 병렬 부질의 실행기가 붙은 블록에서 돌지 않는다** (.51, develop `a7f220d5d` 소스 읽기, 2026-11-13; 10-22 CS trace 실측 — `/*+ parallel(0) */`·`NO_PARALLEL_SUBQUERY` 에서만 `RUNTIME FILTER` 줄):
+  - `qexec_execute_mainblock_internal ()` 의 `if (xptr->type == HASHJOIN_PROC && !xasl->px_executor)`(query_executor.c:22289) 안에 `hjoin_prehash_arm ()`·`hjoin_rtf_first_input ()`·`hjoin_rtf_build ()` 가 다 있고, 아래 aptr 루프의 "한쪽 입력이 비면 다른 쪽 aptr 생략" 도 같은 조건이다(`merge_infop && !xasl->px_executor`, :22326).
+  - 병렬 부질의 실행기는 BUILDLIST·BUILDVALUE·UNION·INTERSECTION·DIFFERENCE·HASHJOIN·MERGELIST 블록에서 `XASL_LINK_TO_REGU_VARIABLE`·`XASL_NO_PARALLEL_SUBQUERY` 가 아닌 aptr 가 둘 이상이면 붙는다(px_query_executor.cpp:343~371). 해시 조인의 두 입력이 그 aptr 둘이라, 병렬이 켜진 서버에서는 해시 조인 블록에 늘 붙고 두 입력이 job 으로 동시에 돌아 필터를 만들어 줄 "먼저 끝난 입력" 이 없다.
+  - 질의 단위로는 `NO_PARALLEL_SUBQUERY` 힌트(xasl_generation.c:21152 → 블록 플래그)로 돌아온다. 병렬 힙 스캔 워커는 리더가 만든 필터를 읽게 돼 있다(px_scan_task.cpp:121 주석 — 실행 확인 안 함).
+  - ✅ **리뷰 체크포인트**: 해시 조인 최적화의 이득을 잴 때 병렬 기본 설정이면 이 경로가 꺼져 있다 — 측정 조건에 `parallelism`·힌트를 적는다. 병렬 경로를 다룬 시도(입력 직렬화 JOB +2.8%, 늦게 도착하는 필터 JOB −0.5%·TPC-H q18 −6.4%·q21 −16%)는 Bloom 시제품 CBRD-27659(PR#8192, 미머지) 기록. — 정소희(.51) 2026-11-13
 
 ### UPDATE·INSERT…SELECT 의 대입 값 — qexec_execute_update / fetch_peek_dbval_pos (query_executor.c, fetch.c)
 
@@ -970,18 +988,40 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 - **[해소됨(정적) — CBRD-27926 / PR#8398 머지 `2ce17bfe8`(2026-11-09)] develop 의 GROUP_CONCAT 잠재 메모리 오류 두 가지** (.52, develop `0661d2c12` 정적만 — PR#8398 이 없앤다, 2026-11-06):
   - spare_bytes 경로가 결과를 정확한 크기 블록 위에 size+spare 로 다시 만들어 뒤이은 clone 이 블록 밖을 읽는다(base query_opfunc.c:2781, query_aggregate.cpp:4241).
   - 덜 채운 CHAR 값이 오면 `qstr_concatenate ()` 가 패딩 문자를 결과 블록 밖에 쓴다. 둘 다 재현하지 않았다. 머지본은 누산기를 자기 버퍼에 이어 붙여(`qdata_append_chars_to_dbval ()`·`db_string_append ()` — §2 「db_string_concatenate / GROUP_CONCAT」) 두 경로가 없다. — 정소희(.52) 2026-11-09, 머지 반영 2026-11-10
-- **[미수정 — CBRD-27959, 수정 PR#8436 `482608da0` 미머지] 행마다 리스트 정리가 다음 집합 연산 갈래까지 지워 병렬 실행에서 이중 해제가 난다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`):
+- **[해소됨 — CBRD-27959, PR#8436 머지 `bb3ccce3f`(2026-11-12)] 행마다 리스트 정리가 다음 집합 연산 갈래까지 지워 병렬 실행에서 이중 해제가 난다** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`):
   - **`qexec_clear_all_lists ()`(query_executor.c:3755)는 넘겨받은 블록부터 `xasl->next` 를 따라 형제까지 정리했다**: 부르는 곳은 `qexec_intprt_fnc ()` 의 행마다 정리(:15051) 하나. 집합 연산 갈래는 부모 aptr 목록에서 형제라, 첫 갈래의 행마다 다음 갈래의 dptr(상관 부질의) 리스트를 지웠다. 직렬에서는 다음 갈래가 시작 전이라 무해.
   - **병렬 부질의 실행은 UNION 의 aptr 갈래를 작업으로 동시에 돌린다**(px_query_executor.cpp executor_iter, 루트 스레드도 작업을 실행). 갈래별 XASL·list_id 는 따로지만 질의 항목의 임시 파일 목록(tran_entry mutex)과 전역 반납 목록을 함께 쓴다 → 다른 스레드가 쓰는 리스트의 임시 파일이 반납되어 다른 리스트가 같은 구조체를 받는다(계측: 같은 tf 두 번 해제, found=0).
   - 증상 자리들: `qmgr_free_list_temp_file ()` 의 잠금 없는 `if (query_p->temp_vfid)` 뒤 NULL->next(:3479), `qmgr_get_page_type ()` assert, `qfile_initialize_sort_key_info ()`·`qdata_generate_tuple_desc_for_valptr_list ()` assert. 잠금 없는 확인은 질의 목록에 없는 임시 파일을 해제할 때만 NULL 을 읽으므로 증상이다.
   - 조건: 두 갈래 모두에 상관 IN 부질의(한 갈래만이면 안 죽음, 부질의가 달라도 죽음), NO_PARALLEL_SUBQUERY 면 안 죽음.
   - `qexec_clear_xasl_for_parallel_aptr ()` 는 next 를 훑지 않는다("aptr next node will be cleared by other threads").
-  - 수정 PR#8436 `482608da0`(미머지): 넘겨받은 블록만 정리(bptr·fptr 원소마다, dptr·scan 은 같음). 계측 기록 `claude-workspace/projects/CBRD-27959/repro/`. — 정소희(.52) 2026-11-09
-- **[미수정 — CBRD-27994, 수정 PR#8469 `212a3fb51`(head `1de189701`) 미머지] 식 컴파일의 되감기가 공유 짝을 남겨 투영·집계 이미지의 `n_shared` 가 칸 수를 넘는다** (.51, develop `37182deba` 정적·`36c7433d8` debug 동적, 2026-11-10 — §2 「스캔 필터 확장」 공유 절):
+  - 수정 PR#8436 `482608da0`(머지 `bb3ccce3f`, 2026-11-12): 넘겨받은 블록만 정리(bptr·fptr 원소마다, dptr·scan 은 같음). 계측 기록 `claude-workspace/projects/CBRD-27959/repro/`. — 정소희(.52) 2026-11-09
+- **[해소됨 — CBRD-27994, PR#8469 머지 `52adc0eca`(2026-11-12)] 식 컴파일의 되감기가 공유 짝을 남겨 투영·집계 이미지의 `n_shared` 가 칸 수를 넘는다** (.51, develop `37182deba` 정적·`36c7433d8` debug 동적, 2026-11-10 — §2 「스캔 필터 확장」 공유 절):
   - 재현(빈 표에서도, debug SA·CS): `CREATE TABLE t (c0 DOUBLE, c1 INT, c2 BIGINT); SELECT c1, COUNT(LEAST(CAST(c1 AS DOUBLE), CASE c1 WHEN c2 THEN c0 ELSE c0 END)), MIN(CAST(c1 AS DOUBLE)) FROM t WHERE CAST(c1 AS DOUBLE) > 0 GROUP BY c1;` — LEAST 루트가 열끼리 단순 CASE 로 거절되며 공유 칸을 되감고, MIN 의 CAST 가 같은 번호로 다시 공유해 `n_shared` 2·칸 1 → debug assert.
   - 반대 꼴: 거절된 루트 바로 뒤에 열만 오는 목록(`SELECT LEAST(…), c1 … WHERE CAST(c1 AS DOUBLE) > 0`)은 낡은 표시로 열 하나만 읽는 프로그램이 켜진다 — `;plan detail` 트레이스 `output list: active, columns covered 1/2 … steps: 0 … cells: 1 … shared from data filter: 1`(공유 칸 0), 이미지는 받아들여진다(1 ≤ 1).
-  - 수정(PR#8469): `expr_build_rewind ()` 가 되감는 칸의 공유 표시를 지우고 `n_shared` 에서 빼며, `expr_prog_finish ()` 가 debug 에서 `n_shared == EXPR_CSRC_SHARE 칸 수` 를 assert 한다. 머지되면 이 항목을 "해소됨" 으로, §2 공유 절에 "되감기는 공유 짝을 함께 되돌린다" 를 더한다. 단위 suite dev4-review-workspace `unit/query/expr_compile.share_rewind`, 재현 claude-workspace `projects/CBRD-27994/repro/`.
-  - 스캔 필터 쪽 짝 assert(`expr_scan_pred_settle ()`, SQLancer 캠페인 3건)는 재현이 없고 이 결함과 원인이 다르다고 본다(필터는 공유를 주는 쪽이라 `n_shared` 0) — 미확인. **미수정**. — 정소희(.52) 2026-11-10
+  - 수정(PR#8469): `expr_build_rewind ()` 가 되감는 칸의 공유 표시를 지우고 `n_shared` 에서 빼며, `expr_prog_finish ()` 가 debug 에서 `n_shared == EXPR_CSRC_SHARE 칸 수` 를 assert 한다. (머지 반영: §2 공유 절, 2026-11-13.) 단위 suite dev4-review-workspace `unit/query/expr_compile.share_rewind`, 재현 claude-workspace `projects/CBRD-27994/repro/`.
+  - 스캔 필터 쪽 짝 assert(`expr_scan_pred_settle ()`, SQLancer 캠페인 3건)는 원인이 다르다 — 필터 공유 목록의 줄 수가 칸 수를 넘는 것으로 확인됐다(아래 CBRD-28049 항목, 2026-11-12). — 정소희(.52) 2026-11-10 · 갱신 정소희(.51) 2026-11-13
+- **[미수정 — CBRD-28049, 수정 PR#8515 `9e6256e00` 미머지] page batch 가 청크를 행 경로로 넘길 때(`EXPR_BATCH_FALLBACK`) 청크가 세운 오류를 지우지 않는다** (.51, develop `a7f220d5d` debug·release, 2026-11-12 — gdb·SA·CS 실측):
+  - 넘기기 전에 오류를 세우는 자리는 셋 — `eb_filter ()` 의 행 오류(행마다 평가하는 항의 `V_ERROR`, expr_batch.c:4963), IN 리프·문자열 리프의 압축 해제 실패(:1878·:1988, `lz4_decompress ()` 가 ER_GENERIC_ERROR). 나머지 fallback 자리(약 45곳)는 오류를 세우지 않는다.
+  - FALLBACK 을 받는 곳은 `scan_batch_iter_next ()`(scan_manager.c)와 qexec 의 `expr_chunk_push ()` 루프 둘이고, 둘 다 청크의 첫 슬롯부터 행 경로로 다시 걷는다. 행 경로가 LIMIT·EXISTS 로 그 행 전에 멈추면 질의는 성공하고 오류가 남는다 → debug 는 병렬 정렬 병합의 `qfile_connect_list ()` assert, release 는 뒤따르는 힙 삽입이 그 오류로 실패(src-storage §2 「bestspace::find」).
+  - 같은 계열의 거절 자리 `scan_batch_open_internal ()`·`expr_batch_plan_learn_repr ()` 도 앞 상태를 `er_errid ()` 로 재서 앞서 남은 경고 뒤의 오류를 지우지 못한다.
+  - 수정 PR#8515: `expr_batch_run ()` 한 곳에서 청크 전에 오류 등급 오류가 없었으면 지우고 ER_INTERRUPTED 는 올린다. 앞뒤는 `er_errid_if_has_error ()` 로 잰다(NUMERIC 산술이 -427 을 경고로 세운다). 재현·TC 는 claude-workspace `projects/CBRD-28049/`, cubrid-testcases#4175. — 정소희(.51) 2026-11-12
+- **[미수정 — CBRD-28049, 수정 PR#8515 미머지] 필터 이미지 리더가 공유 목록 줄 수를 프로그램 칸 수로 막아, CSE 중복 줄이 있는 이미지를 거절한다** (.51, develop `a7f220d5d` debug SA gdb, 2026-11-12):
+  - `expr_scan_pred_image_unpack ()` 가 줄 수를 `[0, n_cells]` 로 읽는다 — 줄 수는 칸 수를 넘을 수 있다(§2 「스캔 필터 확장」 공유 목록). debug 는 `expr_scan_pred_settle ()` assert(expr_compile.c:9125), release 는 필터를 해석 실행으로 둔다.
+  - 재현 꼴: 바깥 VARCHAR 열의 `CASE x WHEN x …` 를 LEFT OUTER JOIN 의 ON 절에 둔 것(안쪽 스캔의 필터, 바깥 열은 값). WHERE 에 두면 필터가 컴파일되지 않고, INT 열이면 CASE 노드가 슬롯이 없어 줄 4 ≤ 칸 4 로 통과, 상관 부질의 꼴도 통과. 최소 재현 claude-workspace `projects/CBRD-28049/repro/filter-image-share-count-min.sql`.
+  - 수정 PR#8515: 리더 상한을 `EXPR_MAX_STEPS`(쓰는 쪽 `node_cells[]` 크기)로, 줄마다 칸 범위 검사는 그대로. 위 CBRD-27994 항목의 "스캔 필터 쪽 짝 assert" 원인이 이것이다. — 정소희(.51) 2026-11-12
+- **[미수정 — CBRD-27798, 수정 PR#8414 미머지] 부동 NUMERIC 의 해시 정규화는 음수 scale 에서 값의 precision 을 자릿수로 믿는다** (.51, `38c931e7d`·`569f3cad6`, 2026-11-12, SA 실측):
+  - `mht_get_hash_number ()`(memory_hash.c)는 부동 NUMERIC 을 `float_numeric_normalize_for_hash ()`(numeric_opfunc.c, §2 「float_numeric_db_value_sub / float_numeric_normalize_for_hash」)로 정규화하는데, scale < 0 이면 `10^min(-scale, 40 - precision)` 을 곱하고 precision 40·scale < 0 이면 정규화를 건너뛴다.
+  - 고정 NUMERIC(예: `NUMERIC(38,-5)`)의 precision 은 열의 것(38)이고, 고정→부동 변환(numeric_opfunc.c 의 NUMERIC 변환기)은 `DB_HJOIN_NUMERIC_PRECISION_DEFERRED` 표시가 없으면 그 precision 을 그대로 header 에 옮긴다. 그래서 `NUMERIC(38,-5)` 의 1500000(계수 15, scale −5)이 1500 으로 정규화돼 같은 값의 NUMERIC(20,0) 1500000 과 해시가 갈린다.
+  - develop 해시 조인: `CAST (n38m5 AS NUMERIC)` 부동 키 대 NUMERIC(20,0) 5행 중 1행(USE_NL 5행). 해시 조인이 변환하는 키는 DEFERRED 로 `numeric_get_precision_digits ()` 를 세서 맞다.
+  - 수정 PR#8414: 해시 리스트 스캔 부동 키·해시 조인의 변환 없는 부동 키가 해시 전에 자릿수를 센다 — 공용 정규화는 그대로(파티션 해시, §2 「mht_get_hash_number」). — 정소희(.51) 2026-11-12
+- **[미수정 — CBRD-28024, 수정 PR#8478 미머지] WIDTH_BUCKET 의 NUMERIC 범위가 아주 작으면 서버 SIGFPE** (.51, `e30370dc0`, 2026-11-10):
+  - `db_width_bucket_calculate_numeric ()`(arithmetic.c:4533)의 가운데 몫 `(v3 - v2) / v4` 가 scale 252 아래면 `float_numeric_db_value_div ()` 가 오류 없이 0 으로 반올림하고, 두 번째 나눗셈(오름차순 :4600, 내림차순 :4666)이 `float_numeric_div_fast ()`(numeric_opfunc.c:2037)의 128비트 나눗셈에서 트랩한다(§2 「float_numeric_db_value_div」).
+  - 재현 `SELECT WIDTH_BUCKET (CAST (0 AS BIGINT), CAST (-1e-252 AS NUMERIC), CAST (1e-252 AS NUMERIC), 5);` — CS 서버 core, SA 멈춤(release·debug). CBRD-26006(de7bc5ec2)부터.
+  - 수정 PR#8478(2026-11-11): 범위 안 비율을 먼저 `floor ((v1-v2)/(v3-v2)*v4) + 1` — 나눌 수가 범위 폭(갈래 조건상 0 아님). — 정소희(.51) 2026-11-10
+- **[미수정 — CBRD-28024, 수정 PR#8478 둘째 커밋 미머지] WIDTH_BUCKET 내림차순의 범위 끝 판정이 두 경계끼리 비교한다** (.51, `e30370dc0`, 2026-11-11, SA·단위): 내림차순 갈래가 v1 <= v3 를 볼 자리에서 `numeric_db_value_compare (value2, value3)`(arithmetic.c:4634, 이 갈래에선 늘 1)라, BIGINT·NUMERIC 피연산자가 범위 아래면 공식으로 간다 — `WIDTH_BUCKET (CAST (-3 AS BIGINT), 6, 0, 9)` = 14(정답·DOUBLE 10), 아주 먼 `(CAST (-1e20 AS NUMERIC), 5, 0, 10)` 은 `ER_QPROC_OVERFLOW_ADDITION`. 2014(6522201da)부터, release/11.4 도 같다(:4555). — 정소희(.51) 2026-11-11
+- **[미수정·미발번] MD5·SHA2 가 문자 수만큼의 바이트만 해시한다** (.51, `e30370dc0`, en_US.utf8 SA, 2026-11-10): `db_string_md5 ()`(string_opfunc.c:3130)·`db_string_sha_two ()`(:2912)가 길이로 `db_get_string_length ()`(문자 수)를 넘긴다. `MD5 ('한글abc')` = 앞 5바이트의 MD5. SHA1(`db_string_sha_one ()`)은 바이트 수라 맞다. release/11.4 도 같다. 경미해 발번하지 않음(2026-11-10) — 재현 SQL claude-workspace `projects/CBRD-28024/스윕/미발번/md5_sha2_multibyte.sql`. — 정소희(.51) 2026-11-10
+- **[미수정·미발번] MONETARY 를 음수로 나누면 "Attempt to divide by zero"** (.51, `e30370dc0`, SA, 2026-11-10): `qdata_is_divided_zero ()`(query_opfunc.c:4313)의 MONETARY 갈래가 `amount <= DBL_EPSILON` 이라 `fabs` 가 없다(FLOAT·DOUBLE 갈래와 파서 상수 접기는 `fabs`). `x / -2`·`10 / CAST (-2 AS MONETARY)` 도 오류. 2018(192e75397)부터, 11.4 도 같다. 경미해 발번하지 않음 — 재현 SQL claude-workspace `projects/CBRD-28024/스윕/미발번/monetary_negative_divisor.sql`. — 정소희(.51) 2026-11-10
+- **[미수정·미발번] `numeric_coerce_num_to_double ()` 는 높은 scale 의 정수를 1 ulp 어긋나게 낸다** (.51, `b01cc2876`·`fc05df9ff`, 2026-11-11, SA): 계수를 double 로 바꾼 뒤 `numeric_Pow_of_10_dbl[scale]` 로 나눠 두 번 반올림한다(numeric_opfunc.c:5612). `CAST (CAST (5012 AS NUMERIC (38, 34)) AS DOUBLE)` = 5.012000000000001e+03(`= 5012` 거짓). WIDTH_BUCKET 은 그 값에 floor 를 걸어 정확한 경계 값이 개수가 크면 한 칸 낮다 — `(CAST (0.50 AS NUMERIC (5, 2)), 0, 1, 2000)` = 1000(정답·DOUBLE 1001). CBRD-27178(7749f4ff8) 전의 `atof (계수) / pow (10, scale)` 도 같은 두 번 반올림. 사용자 결정(2026-11-11 "PR 밖, 기록만") — 재현 SQL claude-workspace `projects/CBRD-28024/스윕/미발번/width_bucket_boundary_floor.sql`. — 정소희(.51) 2026-11-11
 
 ## 4. 진행중인 작업
 
@@ -992,6 +1032,7 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 
 ### .51
 - PR#7622 검증에서 query 실행 경로 회귀 분류 완료(재블레스 8/보류 19), 후속은 optimizer 쪽 수정 대기.
+- **PR#8414(CBRD-27798, 미머지) 판 해시 리스트 스캔의 키 쌍 도메인** (xasl_generation.c `pt_hash_key_domain ()`): 공통 도메인은 해시 조인과 같은 `domain_resolve_hash_key ()` 결과, 공통이 부동인 NUMERIC×NUMERIC 쌍은 변환 없이 정규화 해시(`qdata_hash_scan_key_float_numeric ()` — 고정 값은 `FIXED_TO_FLOAT_NUMERIC` 사본, 음수 scale 은 자릿수를 셈). 부동 키가 있는지는 스캔 open 때 regu 도메인으로 한 번(`HASH_LIST_SCAN.float_numeric_key`). CONNECT BY PRIOR 키는 도메인이 부동이지만 값은 피연산자 표현(고정)을 가진다. 머지되면 §2 로 옮긴다. — 정소희(.51) 2026-11-12
 
 ### .52
 - **CBRD-27215 / PR#7658** 식 컴파일 리뷰 대응(.50 → .52 인계): 1차 5건 `0acc72bfb`(09-04), 2차 12건 `be75c0b3a`(09-08) + TC 12건(tc/pr-7658 `a887e6c3e`). 미결: **T6 지연 캐리 NUMERIC SUM 유지 여부 리뷰어 결정** → 확정 후 T7 px BUILDVALUE_OPT sum_state 통일 후속, CI 재실행. 확정 코드 사실은 §2 "식 컴파일 리뷰 2차" 참조. 세션 01ACsuD7 종료.

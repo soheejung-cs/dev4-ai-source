@@ -131,7 +131,7 @@
 
 - **`db_recompile_for_bind_signature ()`(db_vdb.c:3069)는 텍스트가 없으면 ER_QPROC_INVALID_XASLNODE(-452)** (.51, develop `953e83256`, 2026-11-06 — 동적 확인 `MALLOC_CHECK_=3 MALLOC_PERTURB_=165`): CBRD-27583 이후 CAS 는 바인드 타입 서명마다 문장 텍스트로 다시 컴파일한다. csql PREPARE/EXECUTE 는 이 경로가 아니다.
   - 실측(CTP JDBC 바인드): develop release 에서 접히는 갈래·남는 갈래 모두 -452. ORDER BY·LIMIT 으로 파생 테이블이 되는 꼴은 develop 도 정상. 두 갈래 모두 거짓(NULL 로 접힘)은 수정 전후 같은 오류(-21109).
-  - 텍스트를 잃는 원인(집합 연산 접기)과 수정 PR#8428(미머지)은 src-parser §3(CBRD-27961). — 정소희(.52) 2026-11-09
+  - 텍스트를 잃는 원인(집합 연산 접기)과 수정 PR#8428(머지 `6a54287e7`, 2026-11-12)은 src-parser §3(CBRD-27961). — 정소희(.52) 2026-11-09
 
 ## 3. 예비 이슈 사항
 
