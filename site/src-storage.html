@@ -19,12 +19,12 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html" class="cur"><span>src/storage</span><span class="bd"><span class="cnt">39</span><span class="iss">⚠42</span></span></a></li>
-<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠44</span></span></a></li>
-<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠41</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
+<li><a href="src-storage.html" class="cur"><span>src/storage</span><span class="bd"><span class="cnt">40</span><span class="iss">⚠45</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">22</span><span class="iss">⚠10</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">39</span><span class="iss">⚠51</span></span></a></li>
+<li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠46</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">14</span><span class="iss">⚠19</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/storage</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 42건</p>
+<h1>src/storage</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 45건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>버퍼풀, 힙 파일, B-tree, 디스크/파일 관리, 서버측 통계. 대부분 SERVER/SA 전용이며 소수 파일 (<code>byte_order.c</code>, <code>es.c</code>, <code>file_io.c</code>, <code>oid.c</code>, <code>statistics_cl.c</code>, <code>storage_common.c</code>, <code>tde.c</code> 등)만 <code>cubridcs</code>에도 컴파일된다. 핵심 파일: <code>page_buffer.c</code>(pgbuf_fix/unfix/dirty), <code>heap_file.c</code>(MVCC 버전·스캔), <code>btree.c</code>(검색·범위스캔·MVCC 인덱스), <code>disk_manager.c</code>/<code>file_manager.c</code>, <code>slotted_page.c</code>, <code>statistics_sr.c</code>/<code>statistics_ndv.c</code>, <code>system_catalog.c</code>. 상세는 <code>docs/</code> 하위 참조 문서 7종.</p>
@@ -389,6 +389,11 @@ pgbuf_timed_sleep → pgbuf_block_bcb (:7054) → pgbuf_latch_bcb_upon_fix (:649
 <li>✅ 리뷰 체크포인트: 재시작 요청을 내리는 자리는 <strong>다음 위치 잡기의 입구</strong>다. 요청을 낸 함수 안(재시작 가지)에서 내리고 돌아가면 루프가 재시작을 모르고 <code>C_page == NULL</code> 로 키 루프에 떨어진다(assert 29914 — PR#8363 단위 변이 <code>mut_alt_B</code> 로 확인). 시작·재개를 부르는 쪽은 돌아온 뒤 플래그를 봐야 한다 — <code>btree_get_next_key_info ()</code> 는 보지 않는다(§3 CBRD-27871). — 정소희(.52) 2026-11-03</li>
 </ul>
 </ul>
+<h4>환류 2026-11-18 — 대기소(staging)에서 옮긴 사실</h4>
+<ul>
+<li><strong>[src-storage §2 / src-query §3] 사용자 취소는 확인하는 쪽이 지우는 한 번짜리 신호다 — 그 뒤의 <code>er_clear ()</code> 는 취소를 영구히 잃는다</strong> (.51, 4255a337d, 2026-11-13): <code>pgbuf_fix</code> 경로(page_buffer.c:2354-2356)와 <code>db_sleep ()</code>(arithmetic.c:5121-5125)은 <code>logtb_is_interrupted (thread_p, true, …)</code> 로 확인하면서 <code>logtb_is_interrupted_tdes ()</code> 가 <code>tdes-&gt;interrupt = false</code>(log_tran_table.c:3094)로 플래그를 끄고 <code>ER_INTERRUPTED</code> 를 세운다. 그래서 그 오류를 <code>er_clear ()</code> 로 지우고 같은 자리를 다시 평가해도 취소는 다시 나오지 않는다(0 나누기 같은 결정적 오류와 다름). 미리 평가·재시도·투기 실행이 오류를 지우는 코드는 <code>ER_INTERRUPTED</code> 를 갈라야 한다. PR#8490 의 병렬 인덱스 스캔 워커 미리 평가가 이 꼴로 취소를 잃는다 — 단위 suite dev4 <code>unit/query/px_scan_index_leaf_slot_walker.ahead_interrupt</code>(head 35a151f37: 확인점 66 중 45 유실, base 0). <strong>PR 에서 고쳐 머지</strong>(.51 갱신 2026-11-17) — 작성자가 서버에서 재현하고 <code>1a0875eba</code> 에서 <code>stop_at_error ()</code> 가 미리 평가에서 <code>ER_INTERRUPTED</code> 만 남기고 <code>m_ahead_interrupted</code> 를 세워 <code>process_oid ()</code> 가 <code>S_ERROR</code> 로 돌아가게 고쳤다, merge <code>6a1bb273f</code>. 규칙 dev4 자가진화 #123. — 정소희(.52 환류) 2026-11-18</li>
+<li><strong>[src-storage §2] 철회 중인 트랜잭션의 래치 대기는 타임아웃이 없다</strong> (.51, ef12ae8ce, 2026-11-17): <code>pgbuf_timed_sleep ()</code> 은 대기가 타임아웃 나도 <code>logtb_is_current_active () == false</code> 면 <code>try_again</code> 으로 다시 기다린다(page_buffer.c:8015). 그래서 철회 경로가 다른 스레드가 쥔 페이지를 다시 고정해야 하면, 그 스레드가 놓을 때까지 끝나지 않는다(아래 재현에서 90초 동안 두 번째 -836 이 없었다). — 정소희(.52 환류) 2026-11-18</li>
+</ul>
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
 <ul>
@@ -447,6 +452,11 @@ pgbuf_timed_sleep → pgbuf_block_bcb (:7054) → pgbuf_latch_bcb_upon_fix (:649
 <li>수정: <code>common_prefix = 0</code>. <strong>수정 전에 만든 인덱스는 루트 리프가 분할되거나 다시 만들 때까지 값이 남는다.</strong> — 정소희(.52) 2026-11-09</li>
 </ul>
 <li><strong>[미수정 — 문서 정정 후보] 매뉴얼(<code>information_fn.rst</code> INDEX_CARDINALITY)은 key_pos 가 부분 키의 고유값 수를 준다고 적지만, <code>catalog_get_cardinality ()</code> 는 key_pos 와 무관하게 전체 키 수를 준다</strong> (.51, 69ffb9aaf, 2026-11-05): §2 「catalog_get_cardinality」. — 정소희(.52) 2026-11-09</li>
+</ul>
+<ul>
+<li><strong>[src-storage §3] <code>index_scan_oid_buffer_size</code> 를 작게(1k = OID 128개) 두면 OID 가 많은 키(5,000개)의 범위 스캔이 OID 버퍼 용량을 넘겨 쓴다</strong> (.52, 98b892cf4, 2026-11-16): soft 한도 <code>max_oid_cnt</code> = <code>ISCAN_OID_BUFFER_COUNT</code>(파라미터 그대로), hard 한도 <code>capacity</code> = <code>ISCAN_OID_BUFFER_CAPACITY</code> = MAX (2 * <code>DB_PAGESIZE</code>, 파라미터) — 1k 면 128 대 4,096. debug 는 <code>btree_select_visible_object_for_range_scan ()</code> 의 <code>BTS_SAVE_OID_IN_BUFFER</code> assert(<code>n_oids_read_last_iteration &lt;= capacity</code>, btree.c:31713)로 죽고 release 는 그 assert 가 없다. 원인 경로 미확정(hard 한도를 보지 않는 OID 담기 경로 — OID 순 overflow 체인부터). 기본값(64k)·16k 에서는 키당 3만 OID 에도 안 난다. <strong>미수정</strong> — CBRD-28137. — 정소희(.52 환류) 2026-11-18</li>
+<li><strong>[src-storage §3] <code>pgbuf_ordered_fix ()</code> 는 요청 페이지가 거절·재고정 사이에 해제되면, 풀었던 다른 쥔 페이지를 다시 잡지 않은 채 ER_PB_BAD_PAGEID 를 돌려준다</strong> (.51, 99279799f, 2026-11-16): 다른 페이지를 순서 고정으로 쥔 스레드의 요청은 조건부 래치로 시작하고, 거절되면 순서가 뒤인 쥔 페이지를 푼 뒤(page_buffer.c:13435) 요청 페이지부터 순서대로 다시 잡는 루프(:13570)에서 요청 페이지가 OLD_PAGE_MAYBE_DEALLOCATED 로 해제됐거나(:13601-13626) 파일 테이블 페이지로 재사용됐으면(:13632-13633) <code>goto exit</code> 한다 — 남은 쥔 페이지의 watcher 는 pgptr NULL·page_was_unfixed 로 남는다. 호출자는 BAD_PAGEID 만으로 다른 watcher 가 풀렸는지 알 수 없으므로, 이 반환을 "해제된 페이지 — 건너뜀" 으로 다루는 호출자(PR#8497 의 <code>heap_page_list_fix_next ()</code>)는 풀린 페이지의 PEEK 레코드를 래치 없이 계속 쓰게 된다. 단위 suite dev4 <code>unit/storage/page_buffer.ordered_fix_gone_page</code>(O2·O3 base 재현 — 끼어듦은 대본). develop 에서 같은 조합에 닿는 호출자는 UPDATE/DELETE relocation 의 bestspace 경로(heap_insert_newhome → bestspace::find → allocate_verify_actual_space, heap_file.c:23555·23923 — 정적으로 본 것). 수정 방향: 재고정 루프에서 요청 페이지만 건너뛰고 나머지를 다시 잡은 뒤 BAD_PAGEID(단위 변이 <code>fix.diff</code> 로 닫힘 확인). <strong>미수정</strong>(PR#8497 리뷰 코멘트 11-16). — 정소희(.52 환류) 2026-11-18</li>
+<li><strong>[src-storage §3] 래치 대기가 타임아웃 나도 BCB 의 <code>waiter_exists</code> 는 지워지지 않는다 — 그 뒤로는 READ 로만 잡힌 페이지의 READ 요청도 막힌다</strong> (.51, ef12ae8ce, 2026-11-17): <code>pgbuf_latch_bcb_upon_fix ()</code> 는 READ 로 잡힌 페이지에 대한 READ 요청을 <code>waiter_exists</code> 가 서 있으면 막는다(page_buffer.c:7043). 대기가 타임아웃 나면 <code>pgbuf_timed_sleep ()</code> 이 <code>pgbuf_timed_sleep_error_handling ()</code>(:7859)으로 그 스레드를 대기열에서 빼고 남은 READ 대기자에게 래치를 줄 뿐, 대기열이 비어도 표시를 지우지 않는다(쥔 쪽이 래치를 놓을 때의 깨우기 처리에서야 지워진다). 재현: 100행 힙 페이지를 <code>sleep (1)</code> 스캔이 쥔 동안 같은 페이지의 UPDATE 가 30초 래치 타임아웃(-836·-72)하면, 뒤이은 <code>select count (*)</code> 가 30.9초 기다린 뒤 -836·-72 로 철회된다(UPDATE 없이는 0.1초). CBRD-26425(<code>58cef8e01</code>, 원자 래치) 전에는 <code>pgbuf_is_exist_blocked_reader_writer ()</code> 로 대기열을 직접 훑었다. CBRD-27084(<code>e8b961468</code>)는 flush 깨우기·인터럽트 경로만 맞췄다. CBRD-27739(같은 함수의 fcnt 누수)의 gdb 관찰 waiter=1·대기열 빔도 이 표시다. <strong>미수정</strong>(develop) — CBRD-28163 / PR#8587 draft(<code>cae32d077</code>, 미머지: 포기 경로의 세 출구에서 막힌 reader·writer 가 없으면 표시를 지움). 같은 표시의 다른 원천 — 조건부 래치 거절(:7092-7095·:7108-7112 가 CAS 로 세우고 :7227-7259 에서 줄 서지 않고 돌아감)은 PR 범위 밖으로 남겼다(사용자 결정 11-17). 맨 앞이 포기할 때 flush 대기자 뒤의 READ 대기자는 승계받지 못한다(case 3 루프가 flush 대기자에서 멈춤, develop 동일 — 독립 리뷰 indep-3). 재현 claude-workspace <code>projects/CBRD-28031/repro/W1-waiter-exists-timeout/</code>, 단위 dev4 <code>unit/storage/page_buffer.timed_sleep_error_handling</code>, 모델 dev4 <code>tla/storage/latch_waiter_flag</code>. — 정소희(.52 환류) 2026-11-18</li>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>

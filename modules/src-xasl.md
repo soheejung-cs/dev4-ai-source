@@ -53,6 +53,9 @@ query 모듈에 있지만 이 모듈의 타입·스트림 유틸이 그 경계�
   규약을 따른다 — 술어 타입(`xasl_predicate.hpp`) 변경 시 함께 볼 것.
 - ✅ **리뷰 체크포인트**: 필드 추가/변경이 xasl_generation·xasl_to_stream·stream_to_xasl 3곳에 모두 반영됐는가?
 
+### 환류 2026-11-18 — 대기소(staging)에서 옮긴 사실
+- **[src-xasl §2] `HASHJOIN_PROC_NODE`(728B)는 `XASL_NODE.proc` union 의 가장 큰 멤버다 — 그 안에 필드를 붙이면 해시 조인과 무관한 모든 XASL 노드(1,712B)가 커지고, XASL 캐시의 클론 메모리도 노드 수 × 증가분만큼 는다** (.52, debug `d2f562e58` gdb `ptype /o`, 2026-11-18): PR#8414(CBRD-27798)가 `HASHJOIN_INPUT_DOMAIN_INFO`(32B, 포인터 4개 — 구멍 없음)에 bool 하나를 더해 40B, outer·inner 두 벌이라 `HASHJOIN_PROC_NODE` 744B → `XASL_NODE` 1,728B(+16B). shell TC `cbrd_20149_filter` 는 memory 줄의 숫자를 0 으로 바꿔 자릿수만 비교해 INSERT 항목의 `Clone Memory Usage` 가 9xxx → 1xxxx 로 넘어가며 실패했다(gha-ci 런 44037636106). 쓸 수 있는 구멍: `HASHJOIN_PROC_NODE` 의 `has_ineligible`(offset 96) 뒤 7B, `HASHJOIN_FETCH_INFO`(360B) 의 `is_ready`(offset 344) 뒤 7B — 두 플래그를 옮기면 1,712B·728B·360B 그대로였다(debug `db625fac5`, PR 은 이관으로 닫힘, patch claude-workspace `projects/CBRD-27798/0001-*.patch`). `struct hash_list_scan`(64B)은 `SCAN_ID` 의 union 에서 가장 크지 않아 끝에 붙여도 SCAN_ID 는 그대로다. 규칙 dev4 자가진화 #143. — 정소희(.52 환류) 2026-11-18
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.

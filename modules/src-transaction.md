@@ -215,6 +215,9 @@ MVCC, WAL, 락, 리커버리, 부트를 담당하는 서버 측 최대 모듈. �
   - 상태(정소희(.50) 2026-10-28): master 재승격 뒤 CDC 세션·로그 위치 복원 경로라는 원인 후보는 여전히 **미확인(재확인 못 함)** — 재현 로그가 없다. 그 사이 develop 에
     CDC 가 넘겨받은 아카이브를 재시작 뒤에도 지키는 CBRD-27179 `69c3094f1` 이 들어왔다(위 「로그 매니저 전체」 §12 대조) — 원인 후보와의 관계는 미대조.
 
+### 환류 2026-11-18 — 대기소(staging)에서 옮긴 사실
+- **[src-transaction §2 / src-storage §3] 고유 인덱스에 쓰다가 철회되면, 철회가 고유 통계를 되돌리려고 그 B-tree 의 루트를 READ 로 고정한다** (.51, ef12ae8ce, 2026-11-17, gdb): `return_error_to_client → xtran_server_abort → log_abort → log_abort_local → log_update_global_btid_online_index_stats → … logtb_tran_update_stats_online_index_rb → btree_get_class_oid_of_unique_btid → btree_fix_root_with_info (READ)`. 같은 트랜잭션의 바깥 커버링 스캔이 그 루트(키가 적으면 리프와 같다)를 쥔 채 저장 함수를 부른 상황 — CBRD-27591 의 커버링 꼴, CBRD-28031 머지 이후 — 에서는 위 두 사실과 겹쳐 문장이 영구히 멈춘다(클라이언트가 끊겨 바깥 스레드가 -186 으로 빠질 때까지). 비고유 인덱스는 이 재고정이 없어 래치 타임아웃 뒤 오류로 끝난다. 재현 claude-workspace `projects/CBRD-28031/repro/G4-R2-01-develop-hang/`, CBRD-27591 코멘트 4778614. — 정소희(.52 환류) 2026-11-18
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.

@@ -19,12 +19,12 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">39</span><span class="iss">⚠42</span></span></a></li>
-<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">21</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">38</span><span class="iss">⚠44</span></span></a></li>
-<li><a href="src-xasl.html" class="cur"><span>src/xasl</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠41</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠12</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">40</span><span class="iss">⚠45</span></span></a></li>
+<li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">22</span><span class="iss">⚠10</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">39</span><span class="iss">⚠51</span></span></a></li>
+<li><a href="src-xasl.html" class="cur"><span>src/xasl</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠4</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠46</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">14</span><span class="iss">⚠19</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
@@ -77,6 +77,10 @@
 <li>구조체는 클라이언트(직렬화기)와 서버(역직렬화기) 간 일치 필수. <strong>XASL 구조체에 필드를 추가하면 직렬화 그리고 역직렬화 양쪽을 갱신해야 한다 — 불일치는 크래시</strong>(스트림 오프셋이 밀려 이후 필드 전체가 오염된다). 버전 불일치도 같은 이유로 크래시.</li>
 <li>필터 술어 경로(<code>xts_map_filter_pred_to_stream</code> / <code>stx_map_stream_to_filter_pred</code>)도 같은 대칭 규약을 따른다 — 술어 타입(<code>xasl_predicate.hpp</code>) 변경 시 함께 볼 것.</li>
 <li class="ck"><span class="cklab">리뷰 체크포인트</span>필드 추가/변경이 xasl_generation·xasl_to_stream·stream_to_xasl 3곳에 모두 반영됐는가?</li>
+</ul>
+<h4>환류 2026-11-18 — 대기소(staging)에서 옮긴 사실</h4>
+<ul>
+<li><strong>[src-xasl §2] <code>HASHJOIN_PROC_NODE</code>(728B)는 <code>XASL_NODE.proc</code> union 의 가장 큰 멤버다 — 그 안에 필드를 붙이면 해시 조인과 무관한 모든 XASL 노드(1,712B)가 커지고, XASL 캐시의 클론 메모리도 노드 수 × 증가분만큼 는다</strong> (.52, debug <code>d2f562e58</code> gdb <code>ptype /o</code>, 2026-11-18): PR#8414(CBRD-27798)가 <code>HASHJOIN_INPUT_DOMAIN_INFO</code>(32B, 포인터 4개 — 구멍 없음)에 bool 하나를 더해 40B, outer·inner 두 벌이라 <code>HASHJOIN_PROC_NODE</code> 744B → <code>XASL_NODE</code> 1,728B(+16B). shell TC <code>cbrd_20149_filter</code> 는 memory 줄의 숫자를 0 으로 바꿔 자릿수만 비교해 INSERT 항목의 <code>Clone Memory Usage</code> 가 9xxx → 1xxxx 로 넘어가며 실패했다(gha-ci 런 44037636106). 쓸 수 있는 구멍: <code>HASHJOIN_PROC_NODE</code> 의 <code>has_ineligible</code>(offset 96) 뒤 7B, <code>HASHJOIN_FETCH_INFO</code>(360B) 의 <code>is_ready</code>(offset 344) 뒤 7B — 두 플래그를 옮기면 1,712B·728B·360B 그대로였다(debug <code>db625fac5</code>, PR 은 이관으로 닫힘, patch claude-workspace <code>projects/CBRD-27798/0001-*.patch</code>). <code>struct hash_list_scan</code>(64B)은 <code>SCAN_ID</code> 의 union 에서 가장 크지 않아 끝에 붙여도 SCAN_ID 는 그대로다. 규칙 dev4 자가진화 #143. — 정소희(.52 환류) 2026-11-18</li>
 </ul>
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
