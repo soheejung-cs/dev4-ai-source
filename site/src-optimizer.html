@@ -19,12 +19,12 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">40</span><span class="iss">⚠45</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">41</span><span class="iss">⚠45</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">22</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">39</span><span class="iss">⚠51</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">40</span><span class="iss">⚠53</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-optimizer.html" class="cur"><span>src/optimizer</span><span class="bd"><span class="cnt">35</span><span class="iss">⚠46</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">14</span><span class="iss">⚠19</span></span></a></li>
+<li><a href="src-optimizer.html" class="cur"><span>src/optimizer</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠47</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠20</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/optimizer</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 46건</p>
+<h1>src/optimizer</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 47건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>비용 기반 쿼리 플래닝, 클라이언트 측(<code>#if !defined(SERVER_MODE)</code>). <code>query_graph.c</code>(노드=테이블, 엣지=조인, 서버 통계 로드), <code>query_planner.c</code>(QO_ENV→QO_PLAN, 조인 순서 DP·비용 함수·선택도), <code>plan_generation.c</code>(QO_PLAN→XASL 술어 변환), <code>query_bitset.c</code>, <code>histogram/</code>(HST2 히스토그램 리더·선택도), <code>rewriter/</code>(최적화 전 쿼리 재작성). 파이프라인 위치: parser(PT_NODE) → optimizer(QO_PLAN) → parser/xasl_generation.c(XASL_NODE).</p>
@@ -511,6 +511,10 @@
 <li><strong>프로브 적중률은 인덱스 종류로 갈린다 — PK 룩업은 478/478 이 100%</strong> (.52, <code>07480dfd1</code>, 2026-09-18): <code>pk_*</code> 룩업 478개 전부 100%(참조 무결성이 부모 존재를 보장). FK 인덱스 룩업 373개는 100% 211 / 90%+ 53 / 50~90% 75 / 50% 미만 34. 최저 <code>15d</code> <code>movie_id_aka_title</code> 4.1%(10,679 찾아 439), <code>16a</code> <code>movie_id_movie_companies</code> 22.6%. "자식→부모" 는 항상 맞고 "부모→자식" 은 데이터 나름이다. — 정소희(.50) 2026-10-28</li>
 <li><strong>스텝 CARD오차를 볼 때 구동(맨 앞) 스캔을 빼면 그 오차가 k 로 새어 든다</strong> (.52, <code>07480dfd1</code>, 2026-09-18): 스텝오차는 "실제 배율 ÷ 추정 배율" 인데 구동 리프는 앞 스텝이 없어 배율을 못 만든다고 보고 <code>null</code> 로 뒀었다. 구동 리프는 물려받은 오차도 없으므로 배율이 곧 <code>실제/추정</code> 이다. JOB 113질의 중 구동 스캔에서 ×2 이상 틀리는 질의가 16개, 최대 <code>9a</code>·<code>19a</code> 의 est 96 → act 6,768(×70.5). ✅ 분해 지표를 만들 때 <strong>첫 스텝을 빼면 그 스텝의 오차가 사라지는 게 아니라 다음 지표로 옮겨간다</strong>. (같은 날 구동 스캔의 실제 행수를 다음 스캔의 <code>readkeys</code> 로 읽던 지표도 고쳤다 — NULL 키 프로브 건너뛰기 때문에 <code>10c</code> 가 "구동 스캔 ÷95,363" 으로 잘못 보였고, 고친 뒤 구동 ×1.003 / 조인 ÷46,393 으로 제자리를 찾았다.) — 정소희(.50) 2026-10-28</li>
 </ul>
+<h4>환류 2026-11-20 — 대기소(staging)에서 옮긴 사실</h4>
+<ul>
+<li><strong>[src-optimizer §2] <code>qo_null_eval_expr ()</code>(query_rewrite_term.c, PR#8609 신설) 의 default 갈래는 첫 피연산자만 본다</strong> (.50, PR#8609 <code>8729be550</code>, 2026-11-18): fail-open, develop <code>qo_check_nullable_op ()</code> 와 같은 성질. 실행기가 모든 피연산자를 NULL 검사하는 연산: <code>fetch_op_datediff</code>·<code>timediff</code>·<code>strcmp</code>·<code>atan2</code>·<code>position</code>·<code>findinset</code>·<code>locate</code>(셋째 포함), <code>db_power_dbval ()</code> — LEAST/GREATEST 는 <code>db_least_or_greatest_by ()</code> 의 비교 결과 경로라 미확인. 단위 suite dev4 <code>unit/optimizer/query_rewrite_term.null_eval/</code>. — 정소희(.51 환류) 2026-11-20</li>
+</ul>
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
 <ul>
@@ -561,6 +565,7 @@
 <li><strong>[src-optimizer §3] <code>qo_classify_outerjoin_terms ()</code> 는 SEMI/ANTI ON 항을 건너뛴다</strong> (.50, develop <code>3421d763b</code>): ANTI 는 <code>qo_classify_antijoin_terms ()</code> 가 DURING_JOIN 으로 돌리지만, SEMI ON 의 바깥 전용 항이 앞선 LEFT JOIN 의 NULL 채움 쪽을 읽으면 그 스캔의 sarg 로 내려가 채우기 전 행을 걸러 오답. <strong>미수정</strong> — PR#8609(CBRD-28029) 미머지. — 정소희(.52 환류) 2026-11-18</li>
 <li><strong>[src-optimizer §3] <code>qo_rewrite_one_like_term ()</code> 은 와일드카드 없는 패턴을 <code>=</code> 로 바꾸지만 LIKE 는 모든 경로에서 패턴 뒤 대상의 끝 공백을 무시한다(<code>qstr_eval_like ()</code>, lockstep 경로도)</strong> (.50, develop <code>3421d763b</code>): CBRD-23731 뒤 <code>=</code> 는 CHAR 끼리만 끝 공백을 무시해 VARCHAR 의 리터럴 LIKE 와 바인드·식 LIKE 의 답이 다르고, CHAR 열 LIKE VARCHAR 상수(<code>c LIKE 'a' || 'b'</code>)는 0행. 같은 함수가 "공백으로 끝나는 패턴 + ESCAPE" 에서 escape 를 해제한 뒤 호출자가 그 노드를 읽어 일반 재작성이 조용히 빠진다. <strong>미수정</strong> — PR#8609(CBRD-28029) 미머지. — 정소희(.52 환류) 2026-11-18</li>
 <li><strong>[optimizer §3] 재작성 도중 부질의를 타입 검사하면 ON 조건이 WHERE 항으로 읽힌다</strong> (.52, c8e8d4f7f, 2026-11-17): <code>qo_rewrite_queries ()</code> 의 <code>qo_reduce_equality_terms_post ()</code> 후위 걸음(query_rewrite.c:446)은 부질의를 바깥 질의보다 먼저 방문하고, <code>qo_move_on_of_explicit_join_to_where ()</code>(query_rewrite_term.c:1458)가 부질의의 ON 을 그 WHERE 끝에 붙여 둔다 — 제자리로 돌아가는 것은 바깥 질의 재작성이 끝난 뒤 <code>qo_rewrite_queries_post ()</code>(query_rewrite.c:597)다. 그 사이 <code>pt_semantic_type*</code>/<code>pt_eval_type ()</code> 이 부질의에 닿으면 <code>pt_where_type ()</code>(type_checking.c:8306)이 상수 거짓으로 접힌 ON(<code>LEFT JOIN j ON 1 = 0</code>, <code>ON j.y = NULL</code>)을 WHERE 의 거짓 항으로 보고 WHERE 를 거짓 하나로 자르며, <code>pt_false_where ()</code> 면 부질의가 거짓 부질의가 된다(8315). EXISTS·IN 은 행 손실, 스칼라 부질의는 상관 조건 소실로 행 추가. PR#8517 의 <code>qo_fold_or_factors ()</code>(query_rewrite_term.c:1360, <code>pt_semantic_type_in_place ()</code>)가 이 경로를 연다 — develop 에는 재작성 도중 제자리 재타입이 없다(406·2861 의 <code>pt_semantic_type ()</code> 은 사본·LIKE 조각). 재현 claude-workspace <code>projects/CBRD-28076/repro/r7_subq_on.sql</code>. <strong>PR#8517 c8e8d4f7f 미수정.</strong> — 정소희(.52 환류) 2026-11-18</li>
+<li><strong>[src-optimizer §3] <code>qo_rewrite_one_like_term ()</code> 의 와일드카드 없는 LIKE → <code>=</code> 재작성은 binary CHAR 에서 틀린다</strong> (.50, develop <code>25b933925</code>, 2026-11-18): 채움이 0 바이트라 <code>qstr_eval_like ()</code>(끝 공백만 건너뜀)와 <code>=</code>(채움 무시)가 갈린다. [develop <strong>미수정</strong>, PR#8609 <code>7ed5a6748</code>] — 정소희(.51 환류) 2026-11-20</li>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
