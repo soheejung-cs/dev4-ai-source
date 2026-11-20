@@ -1059,7 +1059,7 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 - **[src-query §3] GROUP BY 없는 집계에 `ORDER BY … FOR orderby_num () = 0` 을 붙이면 거름이 무시되어 1행이 나온다** (.50, develop `25b933925` debug SA 실측, 2026-11-18): 상수가 아닌 START WITH 판도 같다. **미수정**, 원인 미확인 — 별도 후보. — 정소희(.51 환류) 2026-11-20
 - **[src-query §3] SMALLINT·INTEGER·BIGINT 최솟값의 ABS 는 오류 없이 음수 최솟값을 돌려준다** (.51, develop `5f5a345cf`, 2026-11-19, SA + 단위): `db_abs_dbval ()`(arithmetic.c) — SMALLINT 는 `abs ()` 의 int 결과를 short 로 좁혀 -32768, INTEGER·BIGINT 는 `abs ()`·`llabs ()` 를 최솟값에 불러(정의되지 않은 동작, x86-64 에서 최솟값) NO_ERROR. 인터프리터(`fetch_op_abs ()`)·컴파일된 generic step·상수 접기(`pt_evaluate_db_value_expr ()`)가 모두 이 함수다. **미수정** — 수정 PR#8656(CBRD-28015, 머지 전): 최솟값이면 `ER_IT_DATA_OVERFLOW`, `return_null_on_function_errors=yes` 면 NULL. 단위 suite dev4 `unit/query/arithmetic.abs_minimum`. — 정소희(.51 환류) 2026-11-20
 
-- **[미수정] `TO_NUMBER (s, fmt)` 의 fmt 가 NULL 인 열 값이면 `db_to_number ()` 가 NULL 문자열에 strlen — 서버(SA 는 csql) SIGSEGV** (.50, develop de4bb116e, 2026-11-20): string_opfunc.c:16600 의 `db_to_number`, 형식 포인터를 NULL 검사 없이 `strlen` (16712 부근). 리터럴 NULL 형식은 문법에서 걸러지고 열 값만 닿는다. 재현 `CREATE TABLE n (v VARCHAR(10)); INSERT INTO n VALUES (NULL); SELECT TO_NUMBER ('12', v) FROM n;`. 발번 안 함(사용자 결정 11-20, 초안 claude-workspace projects/발번후보-20261120/a_to_number_null_format.json).
+- **[미수정] `TO_NUMBER (s, fmt)` 의 fmt 가 NULL 인 열 값이면 `db_to_number ()` 가 NULL 문자열에 strlen — 서버(SA 는 csql) SIGSEGV** (.50, develop de4bb116e, 2026-11-20): string_opfunc.c:16600 의 `db_to_number`, 형식 포인터를 NULL 검사 없이 `strlen` (16712 부근). 리터럴 NULL 형식은 문법에서 걸러지고 열 값만 닿는다. 재현 `CREATE TABLE n (v VARCHAR(10)); INSERT INTO n VALUES (NULL); SELECT TO_NUMBER ('12', v) FROM n;`. CBRD-28298 (2026-11-20 발번).
 
 ## 4. 진행중인 작업
 
