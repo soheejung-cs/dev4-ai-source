@@ -919,6 +919,15 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 - **[src-query §2] 스캔 필터 잎의 `EXPR_PRED.compare` 는 서버에서 `expr_pred_bind ()` 가 비교 잎마다 넣는다 — 고정된 리터럴 잎도 비교를 갖는다** (.51, develop `e17ceed8b`, 2026-11-20, 정적): expr_compile.c:6204, 고정 리터럴의 비교 `expr_pred_compare ()` 가 `pred->compare->target[1]` 을 쓴다(:995). develop 의 구조체 주석(:135-137, '…and for a pinned literal')은 반대다 — **미수정**(주석만, PR#8661 `6c6521e74` 가 고침). — 정소희(.51 환류) 2026-11-20
 - **[src-query §2] `db_get_like_optimization_bounds ()`(string_opfunc.c) 의 빈 하한을 `db_make_varchar ("", 0)` 으로 만들면 `oracle_style_empty_string=yes` 에서 NULL 이 된다** (.50, develop `25b933925` / PR#8609 `8729be550`, 2026-11-18): `db_make_db_char ()`(dbtype_function.i)가 빈 문자열을 NULL 로 만들어 키 범위가 NA_NA(scan_manager.c)로 0행. 그 모드에서는 domain min 이 맞다 [PR#8609 `45835124d`]. — 정소희(.51 환류) 2026-11-20
 
+### eb_filter / expr_pred_term_string_info — 페이지 배치가 필터 항을 받는 조건과 순서 (expr_batch.c:4971, expr_compile.c:4218·3938)
+- 배치는 AND 사슬의 항을 **순서대로** 돈다: leaf 는 벡터로, leaf 가 아닌 항(row kid)이 이어진 구간은 살아남은 행마다 컴파일된 필터로(expr_batch.c:4971~). 그래서 row kid 가 선택적인 leaf **앞에** 있으면 모든 행에서 돈다 — `col LIKE ?` 는 재작성이 붙인 범위 두 항이 앞에 와서 kid 순서가 [범위, 범위, LIKE] 다(gdb n_raw_kids 1 / n_row_kids 2). (.50, develop de4bb116e, 2026-11-20)
+- 문자열 leaf 는 `=`·`<>`·LIKE 만 받는다(expr_compile.c:4218 `R_EQ`/`R_NE` 만) — `col >= 'x'` 는 상수가 리터럴이어도 행 경로다. 컴파일된 cell 상수는 prologue·exec-prologue 가 행 전에 계산하는 것만 받는다(expr_compile.c:3938) — 행 루프 안의 once-per-execution generic step(LIKE 경계, PR#8623)은 못 받는다. 미수정(PR#8660 CBRD-28249 가 두 갈래를 연다). (.50, develop de4bb116e, 2026-11-20)
+- 배치 상수는 행이 있는 첫 묶음에서 `expr_scan_pred_prepare ()` 다음에 싣고(`eb_load_leaf_constants ()`), 실을 수 없으면 `eb_fallback` 으로 그 스캔을 행 경로에 넘긴다 — 빈 표에서는 싣지 않는다. 그래서 '배치가 미리 계산하고 실패하면 행 경로' 는 인터프리터의 오류 시점을 지킨다. (.50, develop de4bb116e, 2026-11-20)
+- ✅ 리뷰: 배치 leaf 를 넓히는 PR 은 row kid 순서(선택적 leaf 뒤에 오는가)와 첫 묶음 적재의 오류 처리(er_stack 으로 버리고 fallback)를 본다.
+
+### eb_filter 잔여 항의 실패 — 행 경로 재평가 (expr_batch.c:4997)
+- **페이지 배치 필터의 잔여 항이 실패하면 그 페이지를 행 경로가 처음부터 다시 돈다** (.51, b02c917b5, 2026-11-20): `eb_filter` 의 잔여 항 루프가 `V_ERROR` 에 `eb_fallback ()` 으로 청크를 돌려주고(expr_batch.c:4997~5000), `expr_batch_run ()` 이 그 청크가 세운 오류를 지운 뒤(expr_batch.c:5553~5565, 인터럽트는 제외) 행 경로가 같은 페이지를 다시 평가해 오류가 나면 그 행에서 낸다. 그래서 일시적 실패(예: 할당 한 번)는 결과가 맞고, 행 경로에서도 실패해야 질의 오류가 된다(PR#8623 리뷰 gdb 주입: 한 번 실패 → 20 행, 두 번 → `ER_OUT_OF_VIRTUAL_MEMORY`).
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
@@ -1049,6 +1058,8 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 - **[query §3] PR#8517 의 DNF 형 한도(갈래 16·갈래당 잎 32, xasl_generation.c:2316-2317·2411)와 페이지 경로 한도(잎 합계 32 — expr_compile.c:4349 `n + nt > cap`, expr_batch.c:2106-2109 `sub[32]`/`len[16]`)가 다르다** (.52, c8e8d4f7f, 2026-11-17): 잎 합계 33 이상인 인수는 형으로 바뀌고도 페이지 경로를 못 타 행 단위로 평가되고, 공통 conjunct 를 갈래마다 다시 평가해 써 둔 꼴보다 잎 평가가 늘어난다(예: 행당 2 → 9). 페이지 배치는 힙 스캔에만 서므로 인덱스 스캔 데이터 필터·리스트 스캔 필터도 행 단위. **미측정.** — 정소희(.52 환류) 2026-11-18
 - **[src-query §3] GROUP BY 없는 집계에 `ORDER BY … FOR orderby_num () = 0` 을 붙이면 거름이 무시되어 1행이 나온다** (.50, develop `25b933925` debug SA 실측, 2026-11-18): 상수가 아닌 START WITH 판도 같다. **미수정**, 원인 미확인 — 별도 후보. — 정소희(.51 환류) 2026-11-20
 - **[src-query §3] SMALLINT·INTEGER·BIGINT 최솟값의 ABS 는 오류 없이 음수 최솟값을 돌려준다** (.51, develop `5f5a345cf`, 2026-11-19, SA + 단위): `db_abs_dbval ()`(arithmetic.c) — SMALLINT 는 `abs ()` 의 int 결과를 short 로 좁혀 -32768, INTEGER·BIGINT 는 `abs ()`·`llabs ()` 를 최솟값에 불러(정의되지 않은 동작, x86-64 에서 최솟값) NO_ERROR. 인터프리터(`fetch_op_abs ()`)·컴파일된 generic step·상수 접기(`pt_evaluate_db_value_expr ()`)가 모두 이 함수다. **미수정** — 수정 PR#8656(CBRD-28015, 머지 전): 최솟값이면 `ER_IT_DATA_OVERFLOW`, `return_null_on_function_errors=yes` 면 NULL. 단위 suite dev4 `unit/query/arithmetic.abs_minimum`. — 정소희(.51 환류) 2026-11-20
+
+- **[미수정] `TO_NUMBER (s, fmt)` 의 fmt 가 NULL 인 열 값이면 `db_to_number ()` 가 NULL 문자열에 strlen — 서버(SA 는 csql) SIGSEGV** (.50, develop de4bb116e, 2026-11-20): string_opfunc.c:16600 의 `db_to_number`, 형식 포인터를 NULL 검사 없이 `strlen` (16712 부근). 리터럴 NULL 형식은 문법에서 걸러지고 열 값만 닿는다. 재현 `CREATE TABLE n (v VARCHAR(10)); INSERT INTO n VALUES (NULL); SELECT TO_NUMBER ('12', v) FROM n;`. 발번 안 함(사용자 결정 11-20, 초안 claude-workspace projects/발번후보-20261120/a_to_number_null_format.json).
 
 ## 4. 진행중인 작업
 

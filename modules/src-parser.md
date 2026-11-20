@@ -135,6 +135,11 @@ SQL 텍스트 → `csql_lexer.l` → `csql_grammar.y`(646KB bison) → PT_NODE �
 ### 환류 2026-11-20 — 대기소(staging)에서 옮긴 사실
 - **[src-parser §2] `mq_rewrite_query_as_derived ()`(view_transform.c) 는 넘긴 질의를 `parser_copy_tree ()` 로 복사해 파생 표에 넣고 원본은 건드리지 않는다(id 만 옮김) — 원본 해제는 호출자 몫** (.50, PR#8489 `0416d6596`, 2026-11-18): `copy_node_in_tree_pre ()` 가 PT_VALUE 의 DB_VALUE·XASL_ID 를 깊게 복제하므로 원본 해제가 복사본을 망가뜨리지 않는다 [PR#8489 `23fb540d8` 에서 `pt_fold_union_as_derived ()` 가 원본 해제]. — 정소희(.51 환류) 2026-11-20
 
+### pt_coerce_expr_arguments — 집합 피연산자의 원소 타입을 식 노드에 올린다 (type_checking.c:5907)
+- 두 피연산자의 공통 타입이 집합이면 `pt_propagate_types ()` 로 원소 `data_type` 들을 식 노드의 `data_type` 으로 올린다 — 결과가 논리값인 비교(`{…} = {…}`)에도. 집합 아닌 노드에 `data_type` 이 있으면 `pt_node_to_db_domain ()` 은 `type_enum`(LOGICAL)이 아니라 그 `data_type` 으로 도메인을 만든다(parse_dbi.c:2324) — 결과 열의 질의 타입이 INTEGER 인데 도메인은 원소의 CHAR 가 된다. 원소 콜레이션이 바인드가 정하는 ENFORCE 면 `db_cp_query_type_helper ()` 의 assert(db_query.c:1483)로 debug 클라이언트가 멈춘다(`{1, NVL (?, 'x')} = {1, 'zz'}`). develop release 는 CBRD-28066(-1383)이 먼저. 미수정(PR#8625 5d4d00006 이 논리값 결과면 올리지 않게). (.50, develop de4bb116e, 2026-11-20)
+- 타입 검사는 MAYBE 원소(`?`, `- ?`)를 집합의 원소 도메인 목록에서 빼지만 그 값은 집합에 넣는다 — 원소 도메인이 하나 남으면 값이 도메인 표시 없이 저장돼 다른 타입으로 읽힌다(`SET{?, 1}` 에 2.5 → `{1, 67240217}`, `SET (SELECT c0, (- ?))` 크래시). 미수정(PR#8625 594d76feb: MAYBE 피연산자면 원소 도메인을 두지 않음). (.50, develop de4bb116e, 2026-11-20)
+- ✅ 리뷰: 집합 도메인을 다루는 PR 은 MAYBE 원소·부질의 집합(F_TABLE_*, 피연산자가 부질의 하나)·결과가 논리값인 집합 비교를 따로 본다.
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
@@ -182,6 +187,8 @@ SQL 텍스트 → `csql_lexer.l` → `csql_grammar.y`(646KB bison) → PT_NODE �
 - **[parser §3] `pt_cnf_where ()` 는 c8e8d4f7f 부터 피연산자에 통째 트리가 있는 OR 도 통째로 두지만, `(+)` 술어가 든 OR 은 예외로 분배해(cnf.c:957 `!outer_mark`) 1032-1043 특수 경우가 다른 갈래를 통째 트리의 or_next 에 매단다** (.52, c8e8d4f7f, 2026-11-17): 바로 위 사실과 겹쳐 Oracle 식 외부 조인에서 행이 빠진다 — `o.id = i.id(+) AND (((CAST(5 AS VARCHAR) <> '6') AND (CAST(5 AS VARCHAR) = '6')) OR (CAST(7 AS VARCHAR) IS NULL) OR (i.c(+) > 0))` 이 0행(9f9f9d715 는 1행). 단위 suite dev4-review-workspace `unit/parser/cnf.or_tree_chain`(F1a~F1d), 재현 `repro/r6_plus.sql`. **PR#8517 c8e8d4f7f 미수정.** — 정소희(.52 환류) 2026-11-18
 - **[parser §3] PR#8517 의 `pt_to_pred_expr_factor_dnf ()`(xasl_generation.c:2620, 호출 `pt_to_pred_expr_with_arg ()` 2246)는 통째로 둔 OR-of-AND 인수를 실행용 술어에서 DNF 로 펴는데, 안전 검사 `pt_factor_dnf_is_unsafe ()`(2333-2378)는 부질의·난수·두 spec 만 거절하고 실패할 수 있는 잎(나눗셈·CAST)은 보지 않는다** (.52, c8e8d4f7f, 2026-11-17): `((b = 0 or 10 / b > 1) and a = 1) or a = 3` 이 `(b = 0 and a = 1) or (10 / b > 1 and a = 1) or a = 3` 이 되어 써 둔 갈래 순서가 막던 `10 / b` 를 평가 — `Attempt to divide by zero.`(41ca53ce7·9f9f9d715 는 0행). 게이트가 PT_OR(or_next 없음)만 보므로 WHERE·ON·EXISTS·CASE·IF·SELECT 목록·UPDATE SET 조건 모두 해당. 재현 claude-workspace `projects/CBRD-28076/repro/g5/e6.sql`, 단위 suite `unit/parser/xasl_generation.factor_dnf`. **PR#8517 c8e8d4f7f 미수정.** — 정소희(.52 환류) 2026-11-18
 - **[src-parser §3] `pt_false_where ()`(type_checking.c) 는 맨 바깥 SELECT 에도 불리고, START WITH·after_cb_filter 의 상수 거짓을 `pt_is_single_tuple ()` 보다 먼저 본다** (.50, develop `25b933925`, 2026-11-18): `do_select_internal ()`·`do_prepare_select ()` 가 참이면 실행 없이 빈 결과를 내서 `SELECT COUNT (*) … START WITH 1 = 0` 이 0행(정답 1행 0). [CS·SA, develop **미수정**, PR#8609 `3a69da257` 에서 순서 바꿈] — 정소희(.51 환류) 2026-11-20
+
+- **[미수정] 집합 생성자·IN 목록 안에서 문자열이 아닌 값에 붙인 COLLATE 가 오류로 걸러지지 않고 클라이언트가 SIGSEGV** (.50, develop de4bb116e, 2026-11-20) — CBRD-28295: `SELECT {CAST ((c1 COLLATE utf8_bin) AS CHAR(3))} FROM t1`(c1 INT)은 `pt_check_cast_op ()` 가 cast_type 이 NULL 인 안쪽 CAST 를 읽고(semantic_check.c:1177), `SELECT {'x', 'x' + (COALESCE (1, ?) COLLATE utf8_bin)}` 는 `pt_coerce_node_collation ()` 이 data_type 없는 MAYBE 식에 쓴다. 집합 밖이면 같은 식이 Semantic 오류다. release·debug 모두.
 
 ## 4. 진행중인 작업
 

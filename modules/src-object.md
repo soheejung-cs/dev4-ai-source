@@ -272,6 +272,8 @@ primitive 타입 연산, 디스크↔메모리 변환. 접두사: `sm_`(schema),
   - 테이블 단위(`do_update_stats ()`, execute_statement.c)는 사용자 플래그를 넘기고, 헬퍼 한 번으로 끝낸다(헬퍼가 `ER_OBJ_INVALID_ARGUMENTS` 면 `sm_update_statistics ()` 로 대체).
   - **수정됨 — PR#8413(머지됨 `262a23219`)**: ALL CLASSES 를 클래스당 한 번, 요청한 방식으로 처리한다. 통계 전용 단계는 `WITH NO HISTOGRAM` 일 때만 돈다(§2). 클래스당 이중 수집을 먼저 적은 항목은 src-storage §3. — 정소희(.52) 2026-11-09
 
+- **[미수정] `pr_clone_value ()` 는 실패를 돌려주지 않는다 — `!= NO_ERROR` 검사는 죽은 코드다** (.51, b02c917b5, 2026-11-20): `type->setval (dest, src, true)` 의 반환을 버리고 늘 `NO_ERROR` 를 돌려준다(object_primitive.c:2120·2133). 문자열 복사본의 할당이 실패하면 `mr_setval_string ()` 은 dest 를 NULL 로 두고 `er_errid ()` 를 돌려주는데(object_primitive.c:10604~10609, 오류는 `hl_lea_alloc ()` 이 `ER_OUT_OF_VIRTUAL_MEMORY` 로 세운다 — lea_heap.c:346), 그 코드가 사라져 호출자는 오류가 세워진 채 NULL 을 값으로 쓴다. `pr_copy_value ()` 의 실패 분기(object_primitive.c:2150)도 같은 이유로 닿지 않는다. 실패를 알아야 하는 자리는 타입의 `setval` 을 직접 부르거나 `qdata_copy_db_value ()`(true/false, query_opfunc.c:311)를 쓴다. 실제 사례: 식 컴파일의 실행당 한 번 generic step 이 이 호출로 슬롯에 복제해, 할당 실패 시 `col LIKE ?` 의 경계가 그 실행 내내 NULL 이 되어 오류 없이 0 행(PR#8623 리뷰, gdb 주입으로 재현) — `expr_slot_clone ()`(expr_compile.c) 으로 고침. 같은 파일의 `expr_k_relabel ()` 도 같은 꼴이었다(develop 선재, 같은 커밋에서 고침).
+
 ## 4. 진행중인 작업
 
 > 각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.

@@ -21,12 +21,12 @@
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">41</span><span class="iss">⚠45</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">22</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">40</span><span class="iss">⚠53</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">42</span><span class="iss">⚠54</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠47</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠20</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">16</span><span class="iss">⚠21</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
-<li><a href="src-object.html" class="cur"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠10</span></span></a></li>
+<li><a href="src-object.html" class="cur"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠11</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-loaddb.html"><span>src/loaddb</span><span class="bd"><span class="cnt">7</span><span class="iss">⚠5</span></span></a></li>
 <li><a href="src-method.html"><span>src/method</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/object</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 10건</p>
+<h1>src/object</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 11건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>스키마 관리, 시스템 카탈로그, 권한, 트리거, information_schema, 클라이언트 객체 캐시(workspace), primitive 타입 연산, 디스크↔메모리 변환. 접두사: <code>sm_</code>(schema), <code>au_</code>(auth), <code>tr_</code>(trigger), <code>ws_</code>(workspace), <code>pr_</code>/<code>mr_</code>(primitive), <code>tp_</code>(type/domain), <code>tf_</code>(transform), <code>classobj_</code>.</p>
@@ -184,6 +184,9 @@
 <li>테이블 단위(<code>do_update_stats ()</code>, execute_statement.c)는 사용자 플래그를 넘기고, 헬퍼 한 번으로 끝낸다(헬퍼가 <code>ER_OBJ_INVALID_ARGUMENTS</code> 면 <code>sm_update_statistics ()</code> 로 대체).</li>
 <li><strong>수정됨 — PR#8413(머지됨 <code>262a23219</code>)</strong>: ALL CLASSES 를 클래스당 한 번, 요청한 방식으로 처리한다. 통계 전용 단계는 <code>WITH NO HISTOGRAM</code> 일 때만 돈다(§2). 클래스당 이중 수집을 먼저 적은 항목은 src-storage §3. — 정소희(.52) 2026-11-09</li>
 </ul>
+</ul>
+<ul>
+<li><strong>[미수정] <code>pr_clone_value ()</code> 는 실패를 돌려주지 않는다 — <code>!= NO_ERROR</code> 검사는 죽은 코드다</strong> (.51, b02c917b5, 2026-11-20): <code>type-&gt;setval (dest, src, true)</code> 의 반환을 버리고 늘 <code>NO_ERROR</code> 를 돌려준다(object_primitive.c:2120·2133). 문자열 복사본의 할당이 실패하면 <code>mr_setval_string ()</code> 은 dest 를 NULL 로 두고 <code>er_errid ()</code> 를 돌려주는데(object_primitive.c:10604~10609, 오류는 <code>hl_lea_alloc ()</code> 이 <code>ER_OUT_OF_VIRTUAL_MEMORY</code> 로 세운다 — lea_heap.c:346), 그 코드가 사라져 호출자는 오류가 세워진 채 NULL 을 값으로 쓴다. <code>pr_copy_value ()</code> 의 실패 분기(object_primitive.c:2150)도 같은 이유로 닿지 않는다. 실패를 알아야 하는 자리는 타입의 <code>setval</code> 을 직접 부르거나 <code>qdata_copy_db_value ()</code>(true/false, query_opfunc.c:311)를 쓴다. 실제 사례: 식 컴파일의 실행당 한 번 generic step 이 이 호출로 슬롯에 복제해, 할당 실패 시 <code>col LIKE ?</code> 의 경계가 그 실행 내내 NULL 이 되어 오류 없이 0 행(PR#8623 리뷰, gdb 주입으로 재현) — <code>expr_slot_clone ()</code>(expr_compile.c) 으로 고침. 같은 파일의 <code>expr_k_relabel ()</code> 도 같은 꼴이었다(develop 선재, 같은 커밋에서 고침).</li>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
