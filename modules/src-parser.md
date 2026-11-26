@@ -190,6 +190,8 @@ SQL 텍스트 → `csql_lexer.l` → `csql_grammar.y`(646KB bison) → PT_NODE �
 
 - **[미수정] 집합 생성자·IN 목록 안에서 문자열이 아닌 값에 붙인 COLLATE 가 오류로 걸러지지 않고 클라이언트가 SIGSEGV** (.50, develop de4bb116e, 2026-11-20) — CBRD-28295: `SELECT {CAST ((c1 COLLATE utf8_bin) AS CHAR(3))} FROM t1`(c1 INT)은 `pt_check_cast_op ()` 가 cast_type 이 NULL 인 안쪽 CAST 를 읽고(semantic_check.c:1177), `SELECT {'x', 'x' + (COALESCE (1, ?) COLLATE utf8_bin)}` 는 `pt_coerce_node_collation ()` 이 data_type 없는 MAYBE 식에 쓴다. 집합 밖이면 같은 식이 Semantic 오류다. release·debug 모두.
 
+- **[parser/semantic_check §3] `pt_check_data_default ()` 는 `default_value` 를 `pt_semantic_type ()` 전에 읽어 두고 그 뒤의 검사 세 개(`pt_find_default_expression ()`·`pt_find_aggregate_function ()`·`pt_find_method_call ()` 걷기)에 그대로 쓴다 — 상수 식 기본값(`DEFAULT exp (3)`)은 `pt_semantic_type ()` 이 상수로 접으며 원래 노드를 해제해(`node_type = PT_LAST_NODE_NUMBER`, `next` = 해제 목록), 검사가 해제된 노드를 걷는다** (.52, develop cbed1d570, 2026-11-26): src/parser/semantic_check.c `pt_check_data_default ()`, CS·SA(파서). develop 에서는 `pt_find_default_expression ()` 이 EXPR 아닌 노드에서 STOP 해 첫 노드에서 끝나 드러나지 않았다(gdb: 걷는 노드 node_type=128). PR#8750 5c38c8884 가 `pt_semantic_type ()` 성공 뒤 다시 읽게 고침 — **develop 미수정**(PR 미머지). — 정소희(.52 환류) 2026-11-26
+
 ## 4. 진행중인 작업
 
 > 각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.

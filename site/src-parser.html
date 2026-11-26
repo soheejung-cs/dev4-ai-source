@@ -19,12 +19,12 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">41</span><span class="iss">⚠45</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">43</span><span class="iss">⚠46</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">22</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">42</span><span class="iss">⚠54</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">43</span><span class="iss">⚠56</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠47</span></span></a></li>
-<li><a href="src-parser.html" class="cur"><span>src/parser</span><span class="bd"><span class="cnt">16</span><span class="iss">⚠21</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠48</span></span></a></li>
+<li><a href="src-parser.html" class="cur"><span>src/parser</span><span class="bd"><span class="cnt">16</span><span class="iss">⚠22</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠11</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
@@ -40,7 +40,7 @@
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/parser</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 21건</p>
+<h1>src/parser</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 22건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>SQL 파싱·분석, 클라이언트 전용(<code>#if !defined(SERVER_MODE)</code>). 파이프라인: SQL 텍스트 → <code>csql_lexer.l</code> → <code>csql_grammar.y</code>(646KB bison) → PT_NODE 트리 → <code>name_resolution.c</code> → <code>semantic_check.c</code> → <code>type_checking.c</code> → <code>xasl_generation.c</code> → XASL_NODE.</p>
@@ -200,6 +200,9 @@
 </ul>
 <ul>
 <li><strong>[미수정] 집합 생성자·IN 목록 안에서 문자열이 아닌 값에 붙인 COLLATE 가 오류로 걸러지지 않고 클라이언트가 SIGSEGV</strong> (.50, develop de4bb116e, 2026-11-20) — CBRD-28295: <code>SELECT {CAST ((c1 COLLATE utf8_bin) AS CHAR(3))} FROM t1</code>(c1 INT)은 <code>pt_check_cast_op ()</code> 가 cast_type 이 NULL 인 안쪽 CAST 를 읽고(semantic_check.c:1177), <code>SELECT {'x', 'x' + (COALESCE (1, ?) COLLATE utf8_bin)}</code> 는 <code>pt_coerce_node_collation ()</code> 이 data_type 없는 MAYBE 식에 쓴다. 집합 밖이면 같은 식이 Semantic 오류다. release·debug 모두.</li>
+</ul>
+<ul>
+<li><strong>[parser/semantic_check §3] <code>pt_check_data_default ()</code> 는 <code>default_value</code> 를 <code>pt_semantic_type ()</code> 전에 읽어 두고 그 뒤의 검사 세 개(<code>pt_find_default_expression ()</code>·<code>pt_find_aggregate_function ()</code>·<code>pt_find_method_call ()</code> 걷기)에 그대로 쓴다 — 상수 식 기본값(<code>DEFAULT exp (3)</code>)은 <code>pt_semantic_type ()</code> 이 상수로 접으며 원래 노드를 해제해(<code>node_type = PT_LAST_NODE_NUMBER</code>, <code>next</code> = 해제 목록), 검사가 해제된 노드를 걷는다</strong> (.52, develop cbed1d570, 2026-11-26): src/parser/semantic_check.c <code>pt_check_data_default ()</code>, CS·SA(파서). develop 에서는 <code>pt_find_default_expression ()</code> 이 EXPR 아닌 노드에서 STOP 해 첫 노드에서 끝나 드러나지 않았다(gdb: 걷는 노드 node_type=128). PR#8750 5c38c8884 가 <code>pt_semantic_type ()</code> 성공 뒤 다시 읽게 고침 — <strong>develop 미수정</strong>(PR 미머지). — 정소희(.52 환류) 2026-11-26</li>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>

@@ -928,6 +928,9 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 ### eb_filter 잔여 항의 실패 — 행 경로 재평가 (expr_batch.c:4997)
 - **페이지 배치 필터의 잔여 항이 실패하면 그 페이지를 행 경로가 처음부터 다시 돈다** (.51, b02c917b5, 2026-11-20): `eb_filter` 의 잔여 항 루프가 `V_ERROR` 에 `eb_fallback ()` 으로 청크를 돌려주고(expr_batch.c:4997~5000), `expr_batch_run ()` 이 그 청크가 세운 오류를 지운 뒤(expr_batch.c:5553~5565, 인터럽트는 제외) 행 경로가 같은 페이지를 다시 평가해 오류가 나면 그 행에서 낸다. 그래서 일시적 실패(예: 할당 한 번)는 결과가 맞고, 행 경로에서도 실패해야 질의 오류가 된다(PR#8623 리뷰 gdb 주입: 한 번 실패 → 20 행, 두 번 → `ER_OUT_OF_VIRTUAL_MEMORY`).
 
+### fetch (환류 2026-11-26)
+- **[query/fetch §2] 인자 없는 `UNIX_TIMESTAMP ()` 는 평가하는 순간의 벽시계를, `SYS_TIMESTAMP` 는 실행 시작 때 정한 `vd->sys_datetime` 을 쓴다 — 한 질의 안에서도 둘의 초가 다를 수 있다** (.51, develop 051a19c35, 2026-11-24): src/query/fetch_arith_ops.c `fetch_op_unix_timestamp ()`(rightptr 가 없으면 `util_get_second_and_ms_since_epoch ()`), fetch.c 의 `T_SYS_TIMESTAMP`(값을 따로 읽지 않음), SERVER·SA. 클라이언트 상수 접기는 `parser->sys_datetime` 을 쓴다(parse_evaluate.c `PT_UNIX_TIMESTAMP` 인자 없음). 결함은 아니고, 둘을 등호로 비교하는 TC(`bug_bts_16493`)가 드물게 nok 를 낸다(CI 577런 중 1). — 정소희(.52 환류) 2026-11-26
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
@@ -1060,6 +1063,9 @@ active|interpreted"`(`:3793`), 프로젝션은 `"EXPR_COMPILE (%s): active, colu
 - **[해소됨 — CBRD-28015, PR#8656 develop `29729f450` 2026-11-20] SMALLINT·INTEGER·BIGINT 최솟값의 ABS 는 오류 없이 음수 최솟값을 돌려준다** (.51, develop `5f5a345cf`, 2026-11-19, SA + 단위): `db_abs_dbval ()`(arithmetic.c) — SMALLINT 는 `abs ()` 의 int 결과를 short 로 좁혀 -32768, INTEGER·BIGINT 는 `abs ()`·`llabs ()` 를 최솟값에 불러(정의되지 않은 동작, x86-64 에서 최솟값) NO_ERROR. 인터프리터(`fetch_op_abs ()`)·컴파일된 generic step·상수 접기(`pt_evaluate_db_value_expr ()`)가 모두 이 함수다. 수정 PR#8656(CBRD-28015) 머지 — develop `29729f450`: 최솟값이면 `ER_IT_DATA_OVERFLOW`, `return_null_on_function_errors=yes` 면 NULL. 단위 suite dev4 `unit/query/arithmetic.abs_minimum`. — 정소희(.51 환류) 2026-11-20
 
 - **[미수정] `TO_NUMBER (s, fmt)` 의 fmt 가 NULL 인 열 값이면 `db_to_number ()` 가 NULL 문자열에 strlen — 서버(SA 는 csql) SIGSEGV** (.50, develop de4bb116e, 2026-11-20): string_opfunc.c:16600 의 `db_to_number`, 형식 포인터를 NULL 검사 없이 `strlen` (16712 부근). 리터럴 NULL 형식은 문법에서 걸러지고 열 값만 닿는다. 재현 `CREATE TABLE n (v VARCHAR(10)); INSERT INTO n VALUES (NULL); SELECT TO_NUMBER ('12', v) FROM n;`. CBRD-28298 (2026-11-20 발번).
+
+- **[query/expr_compile §3] 스캔 필터 잎의 호스트 변수 고정은 판정과 쓰는 비교가 다른 곳에서 정해진다 — 고정 판정은 빌드(`expr_scan_pred_build ()`, 빌드 env 의 `expr_term_compare ()` 가 오른쪽 변환기 `conv[1]` 을 가질 때), 실행 때 변환에 쓰는 `compare` 는 `expr_pred_bind ()` 가 unpack 한 항의 `et_comp.compare`** (.51, PR#8661 fb3c5ba85, 2026-11-24): src/query/expr_compile.c `expr_scan_pred_build ()`·`expr_pred_bind ()`·`expr_pred_pin_hostvar ()`, SERVER·SA. 둘의 일치는 debug 의 `expr_image_same_pred ()` 만 대조한다. fb3c5ba85 가 불일치 때 `ER_GENERIC_ERROR` 로 실패(전에는 release 에서 NULL 역참조) — PR#8661 은 develop 에 머지됨(c59a6e30a, 2026-11-24). — 정소희(.52 환류) 2026-11-26
+- **[query/expr_batch §3] 페이지 배치의 문자열 셀 읽기 `eb_cell_str ()` 는 길이 0 문자열을 그대로 돌려줘, `oracle_style_empty_string=yes` 에서 행 경로(`db_make_db_char ()` 가 크기 0 을 NULL 로 — dbtype_function.i:1111)와 갈린다** (.52, develop 3f4816831, 2026-11-26): src/query/expr_batch.c `eb_cell_str ()`, 호출자 `eb_raw_kid_str ()`·`eb_raw_kid_in ()`, SERVER·SA. develop 에서 `v <> 'a'`·`v not like 'a%'` 가 그 행을 셈(행 경로 1, 배치 2). 그런 값은 파라미터를 켜기 전에 저장한 데이터에만 있다. PR#8660 4f24be8a3 가 길이 0 + 파라미터면 NULL(0) — **develop 미수정**(PR 미머지). — 정소희(.52 환류) 2026-11-26
 
 ## 4. 진행중인 작업
 
