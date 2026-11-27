@@ -617,6 +617,10 @@ CBRD-27355 의 CI abort 는 ①이 유력했고(선행 케이스 에러 폭풍 �
 ### page_buffer (환류 2026-11-26)
 - **[storage/page_buffer §2] `pgbuf_timed_sleep ()` 의 `ER_CSS_PTHREAD_COND_TIMEDOUT` 갈래는 엔트리 락을 다시 잡은 뒤 `resume_status` 를 확인하고 `PGBUF_NO_LATCH` 를 쓴다** (.51, develop 051a19c35, 2026-11-24): 같은 함수 — `thread_suspend_timeout_wakeup_and_unlock_entry ()` 가 타임아웃이면 락을 풀고 돌아오기 때문. develop 79eab331e 부터(해소). — 정소희(.52 환류) 2026-11-26
 
+### 환류 2026-11-27 — 대기소(staging)에서 옮긴 사실
+- **[src-storage §2] B-tree 래치 순서는 구조(부모→자식, 왼쪽→오른쪽)로 정하고 역방향 이동은 조건부 래치로 한다** (.50, develop `3f4816831`, 2026-11-26, SQLancer 크래시 분류): 내림차순 스캔의 이전 리프는 `PGBUF_CONDITIONAL_LATCH` 뒤 실패하면 ER_DESC_ISCAN_ABORTED(btree.c:21575·31111). 리프 분할은 P·Q·R 를 W 로 쥔 채 오른쪽 이웃을 무조건 W(`btree_get_next_page`, btree.c:18874), 병합(12889)·vacuum 병합(37105)도 오른쪽으로 무조건. `pgbuf_ordered_fix` 는 btree.c 에서 0회(heap·scan_manager 의 heap 경로 전용). SERVER. — 정소희(.50 작성, .51 환류) 2026-11-27
+- **[src-storage §2] 래치 대기 시간은 숨은 서버 파라미터 `page_latch_timeout_in_msecs`(기본 300000)이고, 타임아웃이면 ER_PAGE_LATCH_TIMEDOUT 를 세우며 debug 는 `assert (0)` 로 멈춘다** (.50, develop `3f4816831`, 2026-11-26): page_buffer.c:108·1722(기본값), :8074(assert, 주석 "FIXME temporarily added"). SERVER. — 정소희(.50 작성, .51 환류) 2026-11-27
+
 ## 3. 예비 이슈 사항
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.

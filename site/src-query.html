@@ -19,12 +19,12 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">43</span><span class="iss">⚠46</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">44</span><span class="iss">⚠46</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">22</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html" class="cur"><span>src/query</span><span class="bd"><span class="cnt">43</span><span class="iss">⚠56</span></span></a></li>
+<li><a href="src-query.html" class="cur"><span>src/query</span><span class="bd"><span class="cnt">43</span><span class="iss">⚠63</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠48</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">16</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠50</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">16</span><span class="iss">⚠23</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠11</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
@@ -34,13 +34,13 @@
 <li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/query</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 56건</p>
+<h1>src/query</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 63건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>서버 측. 역직렬화된 XASL 플랜 실행. 핵심: <code>query_executor.c</code>(~27K, XASL 트리 워커), <code>scan_manager.c</code>(힙·인덱스·리스트·셋·메서드 스캔), <code>fetch.c</code>(REGU_VARIABLE 평가), <code>string_opfunc.c</code>(~28K)·<code>arithmetic.c</code>·<code>query_opfunc.c</code>(함수·집계 구현), <code>xasl_to_stream.c</code>(클라: 직렬화)/<code>stream_to_xasl.c</code>(서버: 역직렬화), <code>list_file.c</code>(중간 결과 임시 파일), <code>xasl_cache.c</code>(XASL 캐시), <code>vacuum.c</code>(MVCC GC). <code>parallel/</code> 하위에 병렬 실행(px 스캔·해시조인·쿼리실행·정렬, 코어는 <code>px_parallel.hpp</code>·<code>px_worker_manager.hpp</code>).</p>
@@ -669,6 +669,15 @@ else
 <ul>
 <li><strong>[query/expr_compile §3] 스캔 필터 잎의 호스트 변수 고정은 판정과 쓰는 비교가 다른 곳에서 정해진다 — 고정 판정은 빌드(<code>expr_scan_pred_build ()</code>, 빌드 env 의 <code>expr_term_compare ()</code> 가 오른쪽 변환기 <code>conv[1]</code> 을 가질 때), 실행 때 변환에 쓰는 <code>compare</code> 는 <code>expr_pred_bind ()</code> 가 unpack 한 항의 <code>et_comp.compare</code></strong> (.51, PR#8661 fb3c5ba85, 2026-11-24): src/query/expr_compile.c <code>expr_scan_pred_build ()</code>·<code>expr_pred_bind ()</code>·<code>expr_pred_pin_hostvar ()</code>, SERVER·SA. 둘의 일치는 debug 의 <code>expr_image_same_pred ()</code> 만 대조한다. fb3c5ba85 가 불일치 때 <code>ER_GENERIC_ERROR</code> 로 실패(전에는 release 에서 NULL 역참조) — PR#8661 은 develop 에 머지됨(c59a6e30a, 2026-11-24). — 정소희(.52 환류) 2026-11-26</li>
 <li><strong>[query/expr_batch §3] 페이지 배치의 문자열 셀 읽기 <code>eb_cell_str ()</code> 는 길이 0 문자열을 그대로 돌려줘, <code>oracle_style_empty_string=yes</code> 에서 행 경로(<code>db_make_db_char ()</code> 가 크기 0 을 NULL 로 — dbtype_function.i:1111)와 갈린다</strong> (.52, develop 3f4816831, 2026-11-26): src/query/expr_batch.c <code>eb_cell_str ()</code>, 호출자 <code>eb_raw_kid_str ()</code>·<code>eb_raw_kid_in ()</code>, SERVER·SA. develop 에서 <code>v &lt;&gt; 'a'</code>·<code>v not like 'a%'</code> 가 그 행을 셈(행 경로 1, 배치 2). 그런 값은 파라미터를 켜기 전에 저장한 데이터에만 있다. PR#8660 4f24be8a3 가 길이 0 + 파라미터면 NULL(0) — <strong>develop 미수정</strong>(PR 미머지). — 정소희(.52 환류) 2026-11-26</li>
+</ul>
+<ul>
+<li><strong>[src-query §3] 병렬 작업의 워커 오류는 맨 위 메인 스레드의 오류 문맥으로 옮겨져, 병렬 부질의 워커 안에서 돈 병렬 해시 조인은 자기 문맥에서 er_errid 0 을 보고 assert 에 걸린다</strong> (.50, develop <code>3f4816831</code>, 2026-11-26, SQLancer 크래시 분류): <code>task_manager::handle_error ()</code> 가 <code>thread_get_main_thread ()</code> 로 옮기는데, UNION ALL 갈래의 병렬 부질의 워커에서 <code>probe_execute ()</code> 를 돈 스레드는 main_thread_p 가 아니라 px_hash_join.cpp:602 assert. 같은 꼴: 같은 파일 63·183줄, px_merge_join.cpp:220, px_scan*. SERVER. <strong>미수정</strong>(CBRD-28412). — 정소희(.50 작성, .51 환류) 2026-11-27</li>
+<li><strong>[src-query §3] regu 에 연결된 부질의(ALL/SOME 등)는 처음 평가될 때 실행되어, key filter 안이면 비상관 부질의도 바깥 인덱스 스캔의 리프 래치를 쥔 채 처음 돈다</strong> (.50, develop <code>3f4816831</code>, 2026-11-26): <code>EXECUTE_REGU_VARIABLE_XASL</code>(query_evaluator.c:2816 <code>eval_pred_alsm5</code>), key filter 는 btree.c:21991 <code>eval_key_filter</code>. SERVER. <strong>미수정</strong>(CBRD-28421). — 정소희(.50 작성, .51 환류) 2026-11-27</li>
+<li><strong>[src-query §3] 병렬 UNION ALL 갈래 하나가 오류로 끝난 경로에서 질의 끝 <code>qexec_execute_query ()</code> 의 <code>m_qlist_count == qlist_enter_count</code> assert 가 1 남는 경우가 있다</strong> (.50, develop <code>3f4816831</code>, 2026-11-26): query_executor.c:24342, 재현율 약 1/30. SERVER. <strong>미수정</strong>(CBRD-28416). — 정소희(.50 작성, .51 환류) 2026-11-27</li>
+<li><strong>[src-query §3] 병렬 스캔 워커의 <code>m_scan_func_ptr</code> 는 조인 단계가 둘 이상이면 결과 형식과 상관없이 할당되지만 MERGEABLE_LIST·BUILDVALUE_OPT 일 때만 풀린다 — row-by-row(XASL_SNAPSHOT) 병렬 스캔에 조인 안쪽 블록이 있으면 워커 private heap 에 패스마다 새고, 할당 실패도 검사하지 않는다</strong> (.51, develop <code>714ae28b7</code> 정적, 2026-11-25, PR#8440 리뷰 C-02): px_scan_task.cpp <code>task::initialize</code> 의 할당 :462(바로 다음 줄부터 씀), <code>task::finalize</code> 의 해제 :588-598(줄은 <code>7ac243883</code>). SERVER. <strong>미수정</strong> — PR#8440 에 별도 이슈 후보로 게시. — 정소희(.51) 2026-11-27</li>
+<li><strong>[src-query §3] XASL 캐시 id 가 없는 실행(비클론 경로)에서 워커의 <code>task::clone_xasl</code> 이 실패하면 <code>task::finalize</code> 가 <code>m_xasl == nullptr</code> 인 채 <code>qexec_clear_xasl ()</code>·<code>XASL_SET_FLAG (m_xasl, XASL_DECACHE_CLONE)</code> 로 NULL 을 역참조한다</strong> (.51, develop <code>714ae28b7</code> 정적, 2026-11-25, PR#8440 리뷰 C-03): px_scan_task.cpp :679-690(줄은 <code>7ac243883</code>) — 바로 앞의 <code>hjoin_rtf_unbind_clone ()</code> 만 <code>m_xasl != nullptr</code> 로 가드돼 있다. SERVER. <strong>미수정</strong>. — 정소희(.51) 2026-11-27</li>
+<li><strong>[src-query §3] TIMESTAMP 키 HASH·RANGE 파티션에서 DATETIME 호스트 변수 <code>k IN (?, ?)</code> 는 DST 로 겹치는 현지 시각의 두 순간 중 한 순간의 파티션만 골라 행이 빠진다</strong> (.51, develop <code>4ebd7020f</code> SA 동적, 2026-11-26, PR#8525 리뷰 R5-01): 세션 <code>SET TIMEZONE 'America/New_York'</code> 에서 05:30Z·06:30Z 두 행(둘 다 현지 01:30)을 HASH 7 파티션 표에 넣고 <code>select count (*) from p where k in (?, ?)</code> 를 <code>datetime'2024-11-03 01:30:00'</code> 두 개로 실행하면 1, 파티션 없는 같은 표는 2. 계획의 항은 <code>k range (?:0 = or ?:1 =)</code> 로, 바인드가 키 타입으로 맞춰지며 한 순간만 남는다. 리터럴·CAST 꼴은 키가 <code>cast(k as datetime)</code> 로 감싸여 prune 하지 않아 정답이고, 단일 비교 <code>k = ?</code> 는 파티션 없는 표도 1 이라 파티션 탓이 아니다. 재현 .51 harness-out/8525/24facb184/repro/R-set/result.md §2. <strong>미수정</strong>. — 정소희(.51) 2026-11-27</li>
+<li><strong>[src-query §3] 종류가 다른 컬렉션 키(<code>SET (NUMERIC (10, 2))</code> 대 <code>SEQUENCE (INT)</code>)의 해시 조인은 좁히는 변환으로 NL 과 다른 행을 내고(1행 / NL 0행), 넘치는 원소면 오류가 난다</strong> (.51, develop <code>4ebd7020f</code> SA 동적, 2026-11-26, PR#8525 리뷰 R4-01): o.cb <code>{1.50}</code>, i.cb <code>{2}</code> 에서 <code>select /*+ ordered use_hash */ count (*) from o, i where o.cb = i.cb</code> 는 1, use_nl 은 0. <code>SET (INT) {123456789}</code> 대 <code>SEQUENCE (NUMERIC (10, 2))</code> 는 오류(NL 0). 변환이 일어나는 코드 자리는 확인하지 않았다(동적만). 재현 같은 result.md §1. <strong>미수정</strong>. — 정소희(.51) 2026-11-27</li>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>

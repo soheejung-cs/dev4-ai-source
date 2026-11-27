@@ -54,7 +54,7 @@
 
 > 미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.
 
-- (현재 등록된 예비 이슈 없음)
+- **[src-communication §3] `update_histogram_for_all_classes ()` 는 클래스 목록을 락 없이 만든 뒤 클래스마다 이름으로 다시 찾아, 그 사이 DROP 된 클래스 하나에 문장 전체가 -204 로 멈춘다** (.50, develop `3f4816831`, 2026-11-26, SQLancer 크래시 분류): 목록은 `locator_get_all_class_mops`, 다시 찾기는 `db_find_class (sm_get_ch_name (class_mop))` — DROP 된 클래스는 `sm_get_ch_name` 이 -48 을 세우고 MOP 에 deleted 를 남긴 채 NULL 을 돌려주고 `db_find_class (NULL)` 이 -204. 이름으로 찾은 뒤에는 DROP 이 기다린다. network_interface_cl.c:6548, CS·SA. **미수정**(CBRD-28234, 로컬 커밋 fc450a9be 만). — 정소희(.50 작성, .51 환류) 2026-11-27
 
 ## 4. 진행중인 작업
 

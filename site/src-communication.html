@@ -19,12 +19,12 @@
 <li><a href="measurement.html">측정 방법론</a></li>
 <li class="grp">모듈</li>
 <li><a href="src-base.html"><span>src/base</span><span class="bd"><span class="cnt">12</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">43</span><span class="iss">⚠46</span></span></a></li>
+<li><a href="src-storage.html"><span>src/storage</span><span class="bd"><span class="cnt">44</span><span class="iss">⚠46</span></span></a></li>
 <li><a href="src-transaction.html"><span>src/transaction</span><span class="bd"><span class="cnt">22</span><span class="iss">⚠10</span></span></a></li>
-<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">43</span><span class="iss">⚠56</span></span></a></li>
+<li><a href="src-query.html"><span>src/query</span><span class="bd"><span class="cnt">43</span><span class="iss">⚠63</span></span></a></li>
 <li><a href="src-xasl.html"><span>src/xasl</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠4</span></span></a></li>
-<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠48</span></span></a></li>
-<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">16</span><span class="iss">⚠22</span></span></a></li>
+<li><a href="src-optimizer.html"><span>src/optimizer</span><span class="bd"><span class="cnt">36</span><span class="iss">⚠50</span></span></a></li>
+<li><a href="src-parser.html"><span>src/parser</span><span class="bd"><span class="cnt">16</span><span class="iss">⚠23</span></span></a></li>
 <li><a href="src-compat.html"><span>src/compat</span><span class="bd"><span class="cnt">13</span><span class="iss">⚠7</span></span></a></li>
 <li><a href="src-object.html"><span>src/object</span><span class="bd"><span class="cnt">15</span><span class="iss">⚠11</span></span></a></li>
 <li><a href="src-executables.html"><span>src/executables</span><span class="bd"><span class="cnt">6</span><span class="iss">⚠3</span></span></a></li>
@@ -34,13 +34,13 @@
 <li><a href="pl_engine.html"><span>pl_engine</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-broker.html"><span>src/broker</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-connection.html"><span>src/connection</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
-<li><a href="src-communication.html" class="cur"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
+<li><a href="src-communication.html" class="cur"><span>src/communication</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠4</span></span></a></li>
 <li><a href="src-thread.html"><span>src/thread</span><span class="bd"><span class="cnt">4</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="src-monitor.html"><span>src/monitor</span><span class="bd"><span class="cnt">3</span><span class="iss">⚠3</span></span></a></li>
 <li><a href="unit_tests.html"><span>unit_tests</span><span class="bd"><span class="cnt">2</span><span class="iss">⚠3</span></span></a></li></ul>
 </nav>
 <main>
-<h1>src/communication</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 3건</p>
+<h1>src/communication</h1><p class="lede">§1 목적·사용처(함수별) · §2 분석(함수별·통합) · §3 예비 이슈 · §4 진행중인 작업 · ⚠ 이슈 4건</p>
 <blockquote>기준: upstream/develop 95b79e7ed (2026-08-27)</blockquote>
 <h3>1. 소스 목적 및 사용처 (함수별)</h3>
 <p>네트워크 인터페이스 층: 요청 패킹/언패킹, 서버 디스패치 테이블, method/xs 콜백 글루, 클라이언트 히스토그램. <code>network.h</code>(<code>NET_SERVER_REQUEST_LIST</code>·요청 상수), <code>network_sr.c</code>(<code>net_server_init()</code>, <code>net_Requests[]</code> 디스패치 테이블), <code>network_interface_sr.cpp</code>(서버 핸들러; develop 기준 .cpp), <code>network_interface_cl.c</code>(클라이언트 인터페이스), <code>network_callback_cl.cpp</code>/<code>network_callback_sr.cpp</code>.</p>
@@ -81,7 +81,7 @@
 <h3>3. 예비 이슈 사항</h3>
 <blockquote>미수정 버그·의심·문서 정정 후보·구조적 한계. 해소되면 삭제가 아니라 "해소됨(커밋/PR)"로 갱신.</blockquote>
 <ul>
-<li>(현재 등록된 예비 이슈 없음)</li>
+<li><strong>[src-communication §3] <code>update_histogram_for_all_classes ()</code> 는 클래스 목록을 락 없이 만든 뒤 클래스마다 이름으로 다시 찾아, 그 사이 DROP 된 클래스 하나에 문장 전체가 -204 로 멈춘다</strong> (.50, develop <code>3f4816831</code>, 2026-11-26, SQLancer 크래시 분류): 목록은 <code>locator_get_all_class_mops</code>, 다시 찾기는 <code>db_find_class (sm_get_ch_name (class_mop))</code> — DROP 된 클래스는 <code>sm_get_ch_name</code> 이 -48 을 세우고 MOP 에 deleted 를 남긴 채 NULL 을 돌려주고 <code>db_find_class (NULL)</code> 이 -204. 이름으로 찾은 뒤에는 DROP 이 기다린다. network_interface_cl.c:6548, CS·SA. <strong>미수정</strong>(CBRD-28234, 로컬 커밋 fc450a9be 만). — 정소희(.50 작성, .51 환류) 2026-11-27</li>
 </ul>
 <h3>4. 진행중인 작업</h3>
 <blockquote>각 컨테이너가 자기 소절을 직접 관리한다. 완료되면 지우지 말고 "완료(PR/커밋)"로 갱신.</blockquote>
